@@ -373,11 +373,13 @@ export function createOutfit(
       .returning({ id: outfit.id });
     const refused = await insertSlots(tx, created.id, ownerId, input.slots);
     const schedule = input.scheduleDate
-      ? await insertEntry(tx, {
-          ownerId,
-          outfitId: created.id,
-          day: input.scheduleDate,
-        })
+      ? (
+          await insertEntry(tx, {
+            ownerId,
+            outfitId: created.id,
+            day: input.scheduleDate,
+          })
+        ).outcome
       : undefined;
     return { id: created.id, slots: input.slots.length, refused, schedule };
   });
@@ -414,11 +416,13 @@ export function updateOutfit(
     await tx.delete(outfitSlot).where(eq(outfitSlot.outfitId, id));
     const refused = await insertSlots(tx, id, ownerId, input.slots);
     const schedule = input.scheduleDate
-      ? await insertEntry(tx, {
-          ownerId,
-          outfitId: id,
-          day: input.scheduleDate,
-        })
+      ? (
+          await insertEntry(tx, {
+            ownerId,
+            outfitId: id,
+            day: input.scheduleDate,
+          })
+        ).outcome
       : undefined;
     return { id, slots: input.slots.length, refused, schedule };
   });

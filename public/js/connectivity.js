@@ -41,6 +41,9 @@ function setState(next) {
   if (next === state) return;
   const previous = state;
   state = next;
+  // On <html>, which boosted navigations never replace: main.css disables
+  // the writes marked data-needs-network while offline (the banner says why).
+  document.documentElement.dataset.connectivity = state;
   console.info(`[connectivity] ${previous} -> ${next}`);
   document.dispatchEvent(
     new CustomEvent('connectivity:change', { detail: { state, previous } }),
