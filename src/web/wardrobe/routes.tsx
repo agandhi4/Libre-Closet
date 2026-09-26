@@ -863,8 +863,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         'own',
       );
       const { id } = request.params;
-      if (!(await removeGarment(deps, id, access.ownerId)))
-        throw notFound();
+      if (!(await removeGarment(deps, id, access.ownerId))) throw notFound();
       logger.info(`Garment ${id} deleted by user ${access.ownerId}`);
       return navigateTo(reply, '/wardrobe');
     },
