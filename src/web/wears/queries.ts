@@ -265,6 +265,54 @@ export function setEntryWorn(
 }
 
 /**
+ * Keeps the wears of an outfit's calendar entries when the outfit is about
+ * to be deleted (its entries cascade with it, and their wears would with
+ * them): each becomes a day-level wear, the shape "Wore today" writes
+ * (outfit_calendar_id null, the garment, owner, day and created_at kept).
+ * Where the garment already has a day-level wear that day, that one stays
+ * and the entry's row goes with the entry (distinct days count once
+ * anyway). Run inside the deleting transaction, before the delete; the
+ * entries are locked first, so a worn pill tapped meanwhile waits and then
+ * finds its entry gone. Returns the wears kept.
+ *
+ * Used by deleteOutfit (src/web/outfits/queries.ts) only. Deleting one
+ * calendar entry (deleteEntry) still removes its wears: that is the user
+ * saying the entry was wrong, and the issue's rule. Deleting the outfit is
+ * tidying the outfit list; the days it was worn stay history.
+ */
+export async function detachOutfitWears(
+  tx: Queryable,
+  outfitId: number,
+  ownerId: number,
+): Promise<number> {
+  const entries = await tx
+    .select({ id: outfitCalendar.id })
+    .from(outfitCalendar)
+    .where(
+      and(
+        eq(outfitCalendar.outfitId, outfitId),
+        eq(outfitCalendar.ownerId, ownerId),
+      ),
+    )
+    .for('update');
+  if (entries.length === 0) return 0;
+  const entryIds = entries.map((entry) => entry.id);
+  // ON CONFLICT DO NOTHING: the partial unique index on (garment_id, day)
+  // for day-level wears keeps an existing one. An outfit has one entry a
+  // day at most, so the select itself holds no two rows for one key.
+  const kept = await tx.execute(sql`
+    insert into ${garmentWear} (garment_id, owner_id, day, outfit_calendar_id, created_at)
+    select ${garmentWear.garmentId}, ${garmentWear.ownerId}, ${garmentWear.day}, null, ${garmentWear.createdAt}
+    from ${garmentWear}
+    where ${inArray(garmentWear.outfitCalendarId, entryIds)}
+    on conflict do nothing`);
+  await tx
+    .delete(garmentWear)
+    .where(inArray(garmentWear.outfitCalendarId, entryIds));
+  return kept.rowCount ?? 0;
+}
+
+/**
  * "Wore today" on the garment page: one wear of the garment alone on `day`,
  * at most one a day (garment_wear_garment_id_day_single_unique), or its
  * undo, which removes only that row (a worn calendar entry's stay).

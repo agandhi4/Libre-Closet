@@ -249,6 +249,88 @@ describe('wears and washes', () => {
     });
   });
 
+  describe('deleting an outfit', () => {
+    const deleteOutfit = async (outfitId: number) => {
+      const res = await t.inject({
+        method: 'DELETE',
+        url: `/outfits/${outfitId}`,
+        headers: { 'hx-request': 'true' },
+      });
+      expect(res.statusCode).toBe(200);
+    };
+
+    it('keeps the days it was worn as day-level wears, with the counts and last worn', async () => {
+      const tee = await newGarment('Deleted-outfit tee', 'tops');
+      const outfit = await newOutfit('Short-lived', [tee]);
+      await markWorn(await schedule(outfit, daysAgo(9)));
+      await markWorn(await schedule(outfit, daysAgo(4)));
+      const before = unescapeHtml((await garmentPage(tee)).body);
+      expect(hasText(before, 'Worn 2 times')).toBe(true);
+      expect(hasText(before, 'last worn 4 days ago')).toBe(true);
+
+      await deleteOutfit(outfit);
+
+      expect(await wearsOf(tee)).toEqual([
+        { day: daysAgo(9), entry: null },
+        { day: daysAgo(4), entry: null },
+      ]);
+      const after = unescapeHtml((await garmentPage(tee)).body);
+      expect(hasText(after, 'Worn 2 times')).toBe(true);
+      expect(hasText(after, 'last worn 4 days ago')).toBe(true);
+      expect(t.logs.messages('info', 'Web')).toContainEqual(
+        expect.stringMatching(
+          new RegExp(
+            `^Outfit ${outfit} deleted by user \\d+ \\(2 wears kept as day-level wears\\)$`,
+          ),
+        ),
+      );
+    });
+
+    it('keeps one wear where the garment was also logged alone that day', async () => {
+      const tee = await newGarment('Both today tee', 'tops');
+      await post(`/wardrobe/${tee}/wear`, { worn: '1' });
+      const outfit = await newOutfit('Today too', [tee]);
+      await markWorn(await schedule(outfit, today()));
+      expect(await wearsOf(tee)).toHaveLength(2);
+
+      await deleteOutfit(outfit);
+
+      expect(await wearsOf(tee)).toEqual([{ day: today(), entry: null }]);
+    });
+
+    it('keeps the wears of a garment taken out of the outfit before it was deleted', async () => {
+      const shirt = await newGarment('Removed-then-deleted shirt', 'tops');
+      const other = await newGarment('Stayed tee', 'tops');
+      const outfit = await newOutfit('Edited, then deleted', [shirt, other]);
+      await markWorn(await schedule(outfit, daysAgo(3)));
+      await editOutfit(outfit, [other]);
+
+      await deleteOutfit(outfit);
+
+      expect(await wearsOf(shirt)).toEqual([{ day: daysAgo(3), entry: null }]);
+      expect(await wearsOf(other)).toEqual([{ day: daysAgo(3), entry: null }]);
+    });
+
+    it('leaves an unworn outfit’s deletion as it was: no wears appear', async () => {
+      const tee = await newGarment('Never worn tee', 'tops');
+      const outfit = await newOutfit('Planned only', [tee]);
+      await schedule(outfit, daysAgo(2));
+      await deleteOutfit(outfit);
+      expect(await wearsOf(tee)).toEqual([]);
+    });
+
+    it('never lets "Wore today"’s undo take a kept wear from another day', async () => {
+      const tee = await newGarment('Kept history tee', 'tops');
+      const outfit = await newOutfit('Gone', [tee]);
+      await markWorn(await schedule(outfit, daysAgo(2)));
+      await deleteOutfit(outfit);
+
+      // The undo only ever deletes today's day-level wear.
+      await post(`/wardrobe/${tee}/wear`, { worn: '0' });
+      expect(await wearsOf(tee)).toEqual([{ day: daysAgo(2), entry: null }]);
+    });
+  });
+
   describe('Wore today', () => {
     it('logs one wear today, once however often it is tapped, and undoes it the same day', async () => {
       const tee = await newGarment('Today tee', 'tops');
