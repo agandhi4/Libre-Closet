@@ -5,8 +5,14 @@ import {
 } from '../../cutout/state';
 import type { Db, Queryable } from '../../db/client';
 import { HttpError } from '../errors';
+import { parseStoredName } from '../files/image-variant';
 import type { Photos } from '../files/photos';
-import { insertPhotoRow, type NewPhotoRow } from '../files/queries';
+import {
+  insertPhotoRow,
+  lockPhotoName,
+  type NewPhotoRow,
+  photoRowExists,
+} from '../files/queries';
 import type { Logger } from '../../logger';
 import {
   deleteGarment,
@@ -61,6 +67,72 @@ export function createGarment(
   fields: GarmentFields,
 ): Promise<number> {
   return insertGarment(db, ownerId, fields, null);
+}
+
+/**
+ * A new garment whose photo came from a link (link import, #6). The photo's
+ * bytes were stored when the link was fetched, without a row: a pending
+ * photo, named by the form's hidden `linkPhoto`. Its row is inserted here,
+ * queued for its cutout, in the transaction that inserts the garment, so
+ * nothing is written to either table until the form is saved; a pending
+ * photo never saved is removed by reconciliation after a day, like bytes
+ * whose upload transaction never committed.
+ *
+ * Undefined when the name cannot be claimed: not a stored original, its
+ * bytes gone (reconciled, or discarded by picking another photo), or
+ * already a row (a saved photo, anyone's). Nothing is written then, and no
+ * bytes are ever deleted here: the name came from the client, so bytes this
+ * request cannot prove are its own are left alone.
+ */
+export async function createGarmentWithLinkPhoto(
+  { db, photos, logger, cutouts }: WardrobeDeps,
+  ownerId: number,
+  fields: GarmentFields,
+  fileName: string,
+): Promise<number | undefined> {
+  const id = await db.transaction(async (tx) => {
+    await lockPhotoName(tx, fileName);
+    if (await photoRowExists(tx, fileName)) return undefined;
+    // The wardrobe's owner owns the row, whoever saves (as replacePhoto).
+    const photo = await photos.pendingPhotoRow(fileName, ownerId);
+    if (!photo) return undefined;
+    const photoId = await insertPhotoRow(tx, {
+      ...photo,
+      ...initialCutoutState('pending'),
+    });
+    return insertGarment(tx, ownerId, fields, photoId);
+  });
+  if (id === undefined) {
+    logger.warn(`Link photo ${fileName} could not be claimed`);
+    return undefined;
+  }
+  logger.info(
+    `Garment ${id} photo ${fileName} (from a link) queued for background removal`,
+  );
+  cutouts.wake();
+  return id;
+}
+
+/**
+ * Deletes a pending link photo the form no longer shows (another photo was
+ * picked, or none). False, deleting nothing, when the name is not a stored
+ * original or has a row: only a photo no garment was ever saved with goes.
+ * Under the name's lock, so a save claiming it at the same moment either
+ * wins (the row exists, nothing is deleted) or finds it gone.
+ */
+export async function discardLinkPhoto(
+  { db, photos, logger }: WardrobeDeps,
+  fileName: string,
+): Promise<boolean> {
+  if (parseStoredName(fileName)?.variant !== 'original') return false;
+  const discarded = await db.transaction(async (tx) => {
+    await lockPhotoName(tx, fileName);
+    if (await photoRowExists(tx, fileName)) return false;
+    await photos.deleteVariants(fileName);
+    return true;
+  });
+  if (discarded) logger.info(`Discarded link photo ${fileName}`);
+  return discarded;
 }
 
 /**
