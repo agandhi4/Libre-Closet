@@ -194,7 +194,8 @@
     "PRICE_INVALID": "Enter a price such as 49.90, or leave it empty",
     "FABRIC_WEIGHT_NUMBER": "Enter the weight as a number, or leave it empty",
     "FABRIC_WEIGHT_RANGE": "Enter a weight between {min} and {max} {unit}",
-    "CAPSULE_NAME_REQUIRED": "Give the capsule a name"
+    "CAPSULE_NAME_REQUIRED": "Give the capsule a name",
+    "CAPSULE_NAME_TAKEN": "You already have a capsule with this name"
   },
   "WARDROBE_SHARING": "Wardrobe Sharing",
   "SHARE_WARDROBE": "Share Your Wardrobe",

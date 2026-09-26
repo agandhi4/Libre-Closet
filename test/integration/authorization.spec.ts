@@ -488,7 +488,8 @@ const ROUTES: Route[] = [
     request: (f, q) => ({
       method: 'POST',
       url: `/capsules/${f.capsuleId}${q}`,
-      payload: { name: 'Renamed capsule' },
+      // A name of its own: an owner's capsule names are unique.
+      payload: { name: `Renamed ${f.capsuleName}` },
     }),
     expect: {
       owner: 'ok',

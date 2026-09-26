@@ -102,11 +102,11 @@ describe('capsules', () => {
       expectFullPage(form);
       expect(form.body).toMatch(/<form method="post" action="\/capsules"/);
 
-      const id = await createCapsule('  Office  ', '  Tue to Thu  ');
+      const id = await createCapsule('  Studio  ', '  Tue to Thu  ');
       const [row] = await t.db.select().from(capsule).where(eq(capsule.id, id));
       expect(row).toMatchObject({
         ownerId,
-        name: 'Office',
+        name: 'Studio',
         notes: 'Tue to Thu',
       });
       const page = await get(`/capsules/${id}?created=1`);
@@ -145,6 +145,48 @@ describe('capsules', () => {
       const blank = await post(`/capsules/${id}`, { name: '' });
       expect(blank.statusCode).toBe(400);
       expect(blank.body).toContain('Give the capsule a name');
+    });
+
+    it('refuses a name the owner already uses, in any case, and keeps what was typed', async () => {
+      await createCapsule('Gym');
+      const before = await t.db.$count(capsule);
+      for (const name of ['Gym', '  gYM  ']) {
+        const res = await post('/capsules', { name, notes: 'Saturdays' });
+        expect({ name, status: res.statusCode }).toEqual({ name, status: 400 });
+        expectFullPage(res);
+        expect(res.body).toContain('You already have a capsule with this name');
+        expect(res.body).toContain('Saturdays');
+      }
+      expect(await t.db.$count(capsule)).toBe(before);
+      expect(t.logs.messages('warn', 'Web')).toContainEqual(
+        'Capsule form refused (new): You already have a capsule with this name',
+      );
+    });
+
+    it('refuses renaming to another capsule’s name, in any case, but not to its own', async () => {
+      const beach = await createCapsule('Beach');
+      await createCapsule('Lake');
+      for (const name of ['Lake', 'LAKE']) {
+        const res = await post(`/capsules/${beach}`, { name });
+        expect({ name, status: res.statusCode }).toEqual({ name, status: 400 });
+        expect(res.body).toContain('You already have a capsule with this name');
+        expect(res.body).toContain(`action="/capsules/${beach}"`);
+      }
+      // A change of case to its own name is a rename, not a clash.
+      const recased = await post(`/capsules/${beach}`, { name: 'BEACH' });
+      expect(recased.statusCode).toBe(303);
+      const [row] = await t.db
+        .select()
+        .from(capsule)
+        .where(eq(capsule.id, beach));
+      expect(row.name).toBe('BEACH');
+    });
+
+    it('lets another owner use the same name', async () => {
+      await createCapsule('Ski');
+      const theirs = await post('/capsules', { name: 'Ski' }, stranger);
+      expect(theirs.statusCode).toBe(303);
+      expect(await t.db.$count(capsule, eq(capsule.name, 'Ski'))).toBe(2);
     });
 
     it('deletes it with its membership, never its garments', async () => {

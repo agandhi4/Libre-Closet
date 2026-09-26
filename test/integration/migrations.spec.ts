@@ -52,7 +52,8 @@ describe('migrations', () => {
         'wardrobe_share_grantor_id_index',
         'wardrobe_share_grantee_id_index',
         'wardrobe_share_invite_token_unique',
-        'capsule_owner_id_index',
+        // One name per owner, any case; also the owner_id foreign key's.
+        'capsule_owner_id_lower_name_unique',
         // Also the index of capsule_garment.capsule_id.
         'capsule_garment_pkey',
         'capsule_garment_garment_id_index',

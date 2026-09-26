@@ -33,9 +33,11 @@ import {
   CapsuleBody,
   capsuleNotFound,
   CapsulePageQuery,
+  type CapsuleForm,
   CapsuleParams,
   GarmentCapsulesBody,
   MembersBody,
+  nameTaken,
   readCapsuleForm,
   unchecked,
 } from './validation';
@@ -92,6 +94,32 @@ export const capsuleRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     );
   }
 
+  /**
+   * The form again with what is wrong (a blank name, one the owner already
+   * uses): a 400 re-render, which is why the form is a native post.
+   */
+  function refuseForm(
+    reply: FastifyReply,
+    refused: CapsuleForm & { ok: false },
+    capsuleId?: number,
+  ): Promise<FastifyReply> {
+    logger.warn(
+      `Capsule form refused (${capsuleId === undefined ? 'new' : `capsule ${capsuleId}`}): ${refused.errors.name?.join(' ')}`,
+    );
+    return renderForm(
+      reply,
+      {
+        capsuleId,
+        values: {
+          name: refused.values.name,
+          notes: refused.values.notes ?? '',
+        },
+        errors: refused.errors,
+      },
+      400,
+    );
+  }
+
   app.get(
     '/capsules',
     { schema: { querystring: OwnerQuery } },
@@ -130,18 +158,11 @@ export const capsuleRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const { access } = await resolve(request, request.query.ownerId, 'own');
       const form = readCapsuleForm(request.body);
-      if (!form.ok) {
-        logger.warn(`Capsule form refused (new): name`);
-        return renderForm(
-          reply,
-          {
-            values: { name: form.values.name, notes: form.values.notes ?? '' },
-            errors: form.errors,
-          },
-          400,
-        );
-      }
+      if (!form.ok) return refuseForm(reply, form);
       const id = await createCapsule(db, access.ownerId, form.fields);
+      if (id === 'name-taken') {
+        return refuseForm(reply, nameTaken(request.body));
+      }
       logger.info(`Capsule ${id} created by user ${access.ownerId}`);
       return reply.redirect(capsuleUrl(id, undefined, '', { created: 1 }), 303);
     },
@@ -213,20 +234,11 @@ export const capsuleRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const { id } = request.params;
       await requireCapsule(id, access.ownerId);
       const form = readCapsuleForm(request.body);
-      if (!form.ok) {
-        logger.warn(`Capsule form refused (capsule ${id}): name`);
-        return renderForm(
-          reply,
-          {
-            capsuleId: id,
-            values: { name: form.values.name, notes: form.values.notes ?? '' },
-            errors: form.errors,
-          },
-          400,
-        );
-      }
-      if (!(await updateCapsule(db, id, access.ownerId, form.fields))) {
-        throw capsuleNotFound();
+      if (!form.ok) return refuseForm(reply, form, id);
+      const saved = await updateCapsule(db, id, access.ownerId, form.fields);
+      if (saved === 'not-found') throw capsuleNotFound();
+      if (saved === 'name-taken') {
+        return refuseForm(reply, nameTaken(request.body), id);
       }
       logger.info(`Capsule ${id} updated by user ${access.ownerId}`);
       return reply.redirect(capsuleUrl(id, undefined), 303);

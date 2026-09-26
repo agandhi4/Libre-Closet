@@ -1,5 +1,5 @@
 {
-  "id": "133d4b79-0ee7-40d7-a0f9-bc9b0174e383",
+  "id": "90f015f5-f36c-44ec-bda4-1f895de60f81",
   "prevId": "f7ede478-1533-4500-811e-c3b0d98e89ba",
   "version": "7",
   "dialect": "postgresql",
@@ -41,17 +41,23 @@
         }
       },
       "indexes": {
-        "capsule_owner_id_index": {
-          "name": "capsule_owner_id_index",
+        "capsule_owner_id_lower_name_unique": {
+          "name": "capsule_owner_id_lower_name_unique",
           "columns": [
             {
-              "expression": "owner_id",
-              "isExpression": false,
+              "expression": "\"owner_id\"",
               "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "lower(\"name\")",
+              "asc": true,
+              "isExpression": true,
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, lte, type SQL, sql } from 'drizzle-orm';
 import type { Db, Queryable } from '../../db/client';
 import { capsule, capsuleGarment, file, garment } from '../../db/schema';
+import { isUniqueViolation } from '../auth/queries';
 import type { ImageRef } from '../files/image-url';
 
 /**
@@ -224,32 +225,55 @@ export function capsulesOfGarment(
     .orderBy(...byName);
 }
 
-/** Creates a capsule in `ownerId`'s wardrobe (the form, the seed); returns its id. */
+/**
+ * The owner already has a capsule by this name, whatever its case
+ * (capsule_owner_id_lower_name_unique). The index is the rule, so a
+ * concurrent save cannot slip past a check made first.
+ */
+export type NameTaken = 'name-taken';
+
+/**
+ * Creates a capsule in `ownerId`'s wardrobe (the form, the seed): its id,
+ * or 'name-taken'. In a savepoint, so a caller's transaction (the seed's)
+ * survives the refusal.
+ */
 export async function createCapsule(
   db: Queryable,
   ownerId: number,
   fields: CapsuleFields,
-): Promise<number> {
-  const [row] = await db
-    .insert(capsule)
-    .values({ ownerId, ...fields })
-    .returning({ id: capsule.id });
-  return row.id;
+): Promise<number | NameTaken> {
+  try {
+    return await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(capsule)
+        .values({ ownerId, ...fields })
+        .returning({ id: capsule.id });
+      return row.id;
+    });
+  } catch (error) {
+    if (isUniqueViolation(error)) return 'name-taken';
+    throw error;
+  }
 }
 
-/** Renames it; false when the capsule is not in `ownerId`'s wardrobe. */
+/** Renames it: 'not-found' outside `ownerId`'s wardrobe, 'name-taken' for another capsule's name. */
 export async function updateCapsule(
   db: Db,
   id: number,
   ownerId: number,
   fields: CapsuleFields,
-): Promise<boolean> {
-  const updated = await db
-    .update(capsule)
-    .set(fields)
-    .where(and(eq(capsule.id, id), eq(capsule.ownerId, ownerId)))
-    .returning({ id: capsule.id });
-  return updated.length > 0;
+): Promise<'updated' | 'not-found' | NameTaken> {
+  try {
+    const updated = await db
+      .update(capsule)
+      .set(fields)
+      .where(and(eq(capsule.id, id), eq(capsule.ownerId, ownerId)))
+      .returning({ id: capsule.id });
+    return updated.length > 0 ? 'updated' : 'not-found';
+  } catch (error) {
+    if (isUniqueViolation(error)) return 'name-taken';
+    throw error;
+  }
 }
 
 /** Deletes it (its membership cascades, its garments stay); false when not in `ownerId`'s wardrobe. */

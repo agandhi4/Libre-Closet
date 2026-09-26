@@ -401,7 +401,8 @@ export const capsule = pgTable(
   {
     id: serial('id').primaryKey(),
     ownerId: integer('owner_id').notNull(),
-    // Trimmed, never blank; bounded by the route (CAPSULE_NAME_MAX).
+    // Trimmed, never blank; bounded by the route (CAPSULE_NAME_MAX); one
+    // per owner whatever the case (capsule_owner_id_lower_name_unique).
     name: text('name').notNull(),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -409,7 +410,16 @@ export const capsule = pgTable(
       .notNull(),
   },
   (table) => [
-    index('capsule_owner_id_index').on(table.ownerId),
+    // "Office" once per wardrobe, compared as the list sorts it; the
+    // writers answer a violation as 'name-taken'. Also the index of the
+    // owner_id foreign key and of every capsule query (owner first).
+    // owner_id is written as an expression on purpose: drizzle-kit's
+    // introspection marks every column of an index with any expression as
+    // one, so a plain column here reads back as drift (the drift test).
+    uniqueIndex('capsule_owner_id_lower_name_unique').on(
+      sql`${table.ownerId}`,
+      sql`lower(${table.name})`,
+    ),
     foreignKey({
       name: 'capsule_owner_id_foreign',
       columns: [table.ownerId],

@@ -119,6 +119,11 @@ describe('persona bibles', () => {
       /capsule "Shoes": unknown garments: F99/,
     ],
     [
+      'two capsules of one name, in any case',
+      `${bible('| F01 | Shoes | sneakers | white | — |')}\n## Capsules\n\n| Capsule | Garments | Notes |\n|---|---|---|\n| Shoes | F01 | — |\n| SHOES | F01 | — |\n`,
+      /two capsules are called "SHOES"/,
+    ],
+    [
       'a capsule without a name',
       `${bible('| F01 | Shoes | sneakers | white | — |')}\n## Capsules\n\n| Capsule | Garments | Notes |\n|---|---|---|\n| — | F01 | — |\n`,
       /CAPSULE_NAME_REQUIRED|Give the capsule a name/,

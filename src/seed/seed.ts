@@ -148,6 +148,10 @@ export async function seedPersona(
       }
       for (const capsule of persona.capsules) {
         const capsuleId = await createCapsule(tx, userId, capsule.fields);
+        // The bible's names are checked unique (persona.ts): unreachable.
+        if (capsuleId === 'name-taken') {
+          throw new Error(`Capsule "${capsule.fields.name}" twice`);
+        }
         await changeMembership(tx, userId, {
           add: {
             capsuleIds: [capsuleId],

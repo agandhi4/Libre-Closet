@@ -167,8 +167,11 @@ export function parsePersona(key: PersonaKey, markdown: string): Persona {
     ),
     garments,
     outfits,
-    capsules: find('Capsule', 'Garments').flatMap((table) =>
-      table.rows.map((row) => readCapsule(source, row, ids)),
+    capsules: uniqueNames(
+      source,
+      find('Capsule', 'Garments').flatMap((table) =>
+        table.rows.map((row) => readCapsule(source, row, ids)),
+      ),
     ),
     week: week ? readWeek(source, week) : null,
     events: find('From', 'To', 'Wears').flatMap((table) =>
@@ -430,6 +433,20 @@ function readCapsule(
     throw new BibleError(where, `unknown garments: ${unknown.join(', ')}`);
   }
   return { fields: form.fields, garmentIds: garments };
+}
+
+// A wardrobe holds a name once, whatever its case (the capsule table's
+// unique index): refused here, before anything is written.
+function uniqueNames(source: string, capsules: SeedCapsule[]): SeedCapsule[] {
+  const seen = new Set<string>();
+  for (const { fields } of capsules) {
+    const key = fields.name.toLowerCase();
+    if (seen.has(key)) {
+      throw new BibleError(source, `two capsules are called "${fields.name}"`);
+    }
+    seen.add(key);
+  }
+  return capsules;
 }
 
 function readBands(where: string, text: string): Band[] {

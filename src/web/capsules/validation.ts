@@ -45,6 +45,15 @@ export type CapsuleForm =
   | { ok: true; fields: CapsuleFields }
   | { ok: false; values: CapsuleBody; errors: FieldErrors<CapsuleField> };
 
+/** The form again after the owner's other capsule turned out to hold the name. */
+export function nameTaken(values: CapsuleBody): CapsuleForm & { ok: false } {
+  return {
+    ok: false,
+    values,
+    errors: { name: [t('validation.CAPSULE_NAME_TAKEN')] },
+  };
+}
+
 /** The form as stored: trimmed, blank notes null; a blank name is refused. */
 export function readCapsuleForm(body: CapsuleBody): CapsuleForm {
   const name = body.name.trim();
