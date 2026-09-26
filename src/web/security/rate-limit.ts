@@ -48,8 +48,9 @@ export const SIGN_IN_LIMIT: RateLimitOptions = {
 };
 
 /**
- * Change password, change email and delete account (each checks the
- * current password): per signed-in user, whatever address
+ * Every route that checks the current password: change password, change
+ * email, delete account and creating a personal access token (src/web/auth/
+ * token-routes.tsx). Per signed-in user, whatever address
  * they come from. A preHandler, so it runs after the session gate (the web
  * plugin's own preHandler) has guaranteed `request.auth`; an anonymous
  * request is answered by the gate and never counted.

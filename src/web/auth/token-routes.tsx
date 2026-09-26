@@ -1,6 +1,7 @@
 import type { FastifyPluginCallbackTypebox } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { HttpError } from '../errors';
+import { t } from '../i18n';
 import type { WebOptions } from '../plugin';
 import { renderPage } from '../render';
 import { RowId } from '../schemas';
@@ -12,8 +13,11 @@ import {
   revokeToken,
   TOKEN_NAME_MAX,
 } from './personal-tokens';
+import { verifyPassword } from './passwords';
+import { findUserById } from './queries';
 import { sessionUserId } from './require-session';
 import { TokensPage } from './tokens-page';
+import { Password } from './validation';
 
 export const TOKENS_PATH = '/auth/tokens';
 
@@ -26,6 +30,7 @@ const TokensQuery = Type.Object({
 // re-renders the page with a message.
 const CreateTokenBody = Type.Object({
   name: Type.String({ maxLength: TOKEN_NAME_MAX }),
+  currentPassword: Password,
 });
 
 const TokenParams = Type.Object({ id: RowId });
@@ -33,9 +38,11 @@ const TokenParams = Type.Object({ id: RowId });
 /**
  * The profile's "Agent access" (#33): create, list and revoke personal
  * access tokens (src/web/auth/personal-tokens.ts), the MCP endpoint's
- * credential. Every form is a native post (PostForm). Creating answers the
- * page with the token in it, once, and `no-store`, so no cache keeps it;
- * rate-limited like the other account writes.
+ * credential. Every form is a native post (PostForm). Creating needs the
+ * current password (a token is a credential that survives signing out) and
+ * answers the page with the token in it, once, and `no-store`, so no cache
+ * keeps it; rate-limited like the other routes that check the password.
+ * Revoking needs no password: it only narrows access.
  */
 export const tokenRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app,
@@ -66,7 +73,11 @@ export const tokenRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const name = request.body.name.trim();
-      const refuse = async (notice: 'name-required' | 'too-many') =>
+      // The form again with what was typed, the password never echoed.
+      const refuse = async (
+        notice: 'name-required' | 'too-many' | undefined,
+        passwordError?: string,
+      ) =>
         renderPage(
           reply,
           <TokensPage
@@ -74,10 +85,22 @@ export const tokenRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             tokens={await listTokens(db, userId)}
             timeZone={config.timeZone}
             notice={notice}
+            form={{ name: request.body.name, passwordError }}
           />,
           { status: 400 },
         );
       if (!name) return refuse('name-required');
+
+      // Step-up, as for every route that hands out or changes a credential:
+      // a token outlives signing out, so a borrowed unlocked phone or a
+      // stolen cookie must not be enough to mint one.
+      const account = await findUserById(db, userId);
+      if (
+        !(await verifyPassword(request.body.currentPassword, account?.password))
+      ) {
+        logger.info(`Token refused for user ${userId}: wrong current password`);
+        return refuse(undefined, t('WRONG_CURRENT_PASSWORD'));
+      }
 
       const result = await createToken(db, userId, name);
       if (!result.created) {

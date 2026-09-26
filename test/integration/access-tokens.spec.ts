@@ -6,7 +6,13 @@ import {
   hashToken,
   MAX_ACTIVE_TOKENS,
 } from '../../src/web/auth/personal-tokens';
-import { createTestApp, type TestApp, unescapeHtml, userIdOf } from './harness';
+import {
+  createTestApp,
+  TEST_PASSWORD,
+  type TestApp,
+  unescapeHtml,
+  userIdOf,
+} from './harness';
 import { createAccessToken } from './mcp';
 import { expectNativePostForms } from './pages';
 
@@ -37,7 +43,7 @@ describe('agent access tokens', () => {
     const res = await t.inject({
       method: 'POST',
       url: '/auth/tokens',
-      payload: { name: 'Laptop' },
+      payload: { name: 'Laptop', currentPassword: TEST_PASSWORD },
     });
     expect(res.statusCode).toBe(200);
     expect(res.headers['cache-control']).toBe('no-store');
@@ -61,11 +67,86 @@ describe('agent access tokens', () => {
     expect(listed.body).not.toContain(token);
   });
 
+  describe('asks for the current password (a token outlives signing out)', () => {
+    const WRONG = 'Not-the-password-9';
+    const tokensOf = async (userId: number) =>
+      t.db.$count(personalAccessToken, eq(personalAccessToken.userId, userId));
+
+    it('refuses a wrong one: 400, the form again, nothing created, nothing echoed', async () => {
+      const cookie = await t.register('stepup@example.com');
+      const id = await userIdOf(t, 'stepup@example.com');
+      t.logs.clear();
+      const res = await t.inject({
+        method: 'POST',
+        url: '/auth/tokens',
+        payload: { name: 'Borrowed phone', currentPassword: WRONG },
+        headers: { cookie },
+      });
+      expect(res.statusCode).toBe(400);
+      expectNativePostForms(res);
+      expect(res.body).toContain('Current password is incorrect');
+      // The name is kept, the password never.
+      expect(res.body).toContain('value="Borrowed phone"');
+      expect(res.body).not.toContain(WRONG);
+      expect(res.body).not.toMatch(/closet_[A-Za-z0-9_-]{43}/);
+      expect(await tokensOf(id)).toBe(0);
+      expect(t.logs.messages('info', 'Web')).toContain(
+        `Token refused for user ${id}: wrong current password`,
+      );
+      expect(JSON.stringify(t.logs.records)).not.toContain(WRONG);
+    });
+
+    it('refuses a missing one as a malformed form, creating nothing', async () => {
+      const cookie = await t.register('nopassword@example.com');
+      const id = await userIdOf(t, 'nopassword@example.com');
+      const res = await t.inject({
+        method: 'POST',
+        url: '/auth/tokens',
+        payload: { name: 'No password' },
+        headers: { cookie },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(await tokensOf(id)).toBe(0);
+    });
+
+    it('creates with the right one, and never logs the password', async () => {
+      const cookie = await t.register('right@example.com');
+      const id = await userIdOf(t, 'right@example.com');
+      t.logs.clear();
+      await createAccessToken(t, { cookie });
+      expect(await tokensOf(id)).toBe(1);
+      expect(JSON.stringify(t.logs.records)).not.toContain(TEST_PASSWORD);
+    });
+
+    it('counts every attempt against the account limit (5 a minute)', async () => {
+      const cookie = await t.register('guesser@example.com');
+      const id = await userIdOf(t, 'guesser@example.com');
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const res = await t.inject({
+          method: 'POST',
+          url: '/auth/tokens',
+          payload: { name: 'Guess', currentPassword: `${WRONG}${attempt}` },
+          headers: { cookie },
+        });
+        expect(res.statusCode).toBe(400);
+      }
+      // Even the right password is refused once the limit is reached.
+      const limited = await t.inject({
+        method: 'POST',
+        url: '/auth/tokens',
+        payload: { name: 'Guess', currentPassword: TEST_PASSWORD },
+        headers: { cookie },
+      });
+      expect(limited.statusCode).toBe(429);
+      expect(await tokensOf(id)).toBe(0);
+    });
+  });
+
   it('asks for a name', async () => {
     const res = await t.inject({
       method: 'POST',
       url: '/auth/tokens',
-      payload: { name: '   ' },
+      payload: { name: '   ', currentPassword: TEST_PASSWORD },
     });
     expect(res.statusCode).toBe(400);
     expect(res.body).not.toMatch(/closet_[A-Za-z0-9_-]{43}/);
@@ -123,7 +204,7 @@ describe('agent access tokens', () => {
     const res = await t.inject({
       method: 'POST',
       url: '/auth/tokens',
-      payload: { name: 'One more' },
+      payload: { name: 'One more', currentPassword: TEST_PASSWORD },
       headers: { cookie },
     });
     expect(res.statusCode).toBe(400);

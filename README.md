@@ -63,7 +63,7 @@ Open [http://localhost:3000](http://localhost:3000) and register an account: log
 
 Closet is an MCP server: your own Claude (Claude Code, Claude Desktop) can search your wardrobe, add pieces from product links, build outfits and capsules, plan days, keep track of wears and laundry, and compare your closet with a wardrobe shared with you to talk through what to buy next.
 
-1. In the app, open **Profile › Agent Access** (`/auth/tokens`) and create a token. It is shown once; the page also shows the command below with it filled in.
+1. In the app, open **Profile › Agent Access** (`/auth/tokens`) and create a token; it asks for your password, since a token keeps working after you sign out. The token is shown once, and the page also shows the command below with it filled in.
 2. Add the server to Claude Code:
 
    ```bash

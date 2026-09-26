@@ -206,6 +206,7 @@
     "NAME": "Name",
     "NAME_PLACEHOLDER": "Claude Code on my laptop",
     "CREATE": "Create token",
+    "PASSWORD_WHY": "A token keeps working after you sign out, so creating one asks for your password.",
     "SHOWN_ONCE": "Copy this token now: it is not shown again.",
     "CONNECT": "Connect Claude Code:",
     "COPY": "Copy",

@@ -4,7 +4,7 @@ import { Layout } from '../layout/layout';
 import { Navbar } from '../layout/navbar';
 import { CopyableText } from '../share/share-button';
 import type { ViewContext } from '../view-context';
-import { PostForm } from './form';
+import { Field, PostForm } from './form';
 import {
   MAX_ACTIVE_TOKENS,
   TOKEN_NAME_MAX,
@@ -29,6 +29,8 @@ export interface TokensPageProps {
   /** The token just created: its only showing. */
   created?: { name: string; token: string };
   notice?: TokenNotice;
+  /** A refused create: the name as typed and the password's message (never the password). */
+  form?: { name: string; passwordError?: string };
 }
 
 /** The MCP endpoint on the canonical name (SITE_URL), for the connect command. */
@@ -96,20 +98,44 @@ export function TokensPage(props: TokensPageProps) {
         <div class="card bg-base-100 shadow-sm mb-6">
           <div class="card-body">
             <h2 class="card-title text-lg">{t('agentAccess.NEW')}</h2>
-            <PostForm action="/auth/tokens" class="flex gap-2 items-end">
-              <label class="flex flex-col gap-1 flex-1">
+            <p class="text-sm text-base-content/70">
+              {t('agentAccess.PASSWORD_WHY')}
+            </p>
+            <PostForm action="/auth/tokens" class="flex flex-col gap-2">
+              {/* Tells password managers which account's password this is. */}
+              <input
+                type="text"
+                name="username"
+                autocomplete="username"
+                value={ctx.user?.email ?? ''}
+                class="hidden"
+                readonly
+              />
+              <label class="flex flex-col gap-1">
                 <span class="text-sm">{t('agentAccess.NAME')}</span>
                 <input
                   type="text"
                   name="name"
                   class="input input-bordered input-sm w-full"
                   placeholder={t('agentAccess.NAME_PLACEHOLDER')}
+                  value={props.form?.name}
                   maxlength={TOKEN_NAME_MAX}
                   autocomplete="off"
                   required
                 />
               </label>
-              <button type="submit" class="btn btn-primary btn-sm">
+              <Field
+                id="currentPassword"
+                label={t('CURRENT_PASSWORD')}
+                type="password"
+                autocomplete="current-password"
+                errors={
+                  props.form?.passwordError
+                    ? [props.form.passwordError]
+                    : undefined
+                }
+              />
+              <button type="submit" class="btn btn-primary btn-sm self-start">
                 {t('agentAccess.CREATE')}
               </button>
             </PostForm>

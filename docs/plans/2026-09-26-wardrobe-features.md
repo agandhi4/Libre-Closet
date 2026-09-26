@@ -454,7 +454,8 @@ stylist, so section 5 may shrink to what must run without anyone asking.
   `authorizeWardrobe` hold. There is no second path to the database for a write.
 - **Auth: personal access tokens.** `personal_access_token` (user, name, SHA-256 of the token,
   a display prefix, `created_at`, `last_used_at`, `revoked_at`). A token is `closet_` plus 32
-  random bytes in base64url, shown once when created. A fast hash is right for 256 random bits:
+  random bytes in base64url, shown once when created. Creating one asks for the current password
+  (it outlives signing out, like a password change would); revoking does not. A fast hash is right for 256 random bits:
   nothing to brute-force, and a lookup by the hash's unique index. Created, listed and revoked
   on the profile's "Agent access" page (native-post forms). A token acts exactly as its user,
   shares included (VIEW reads Theo's wardrobe, MANAGE writes its garments, wears stay the

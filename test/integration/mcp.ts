@@ -1,6 +1,6 @@
 import type { LightMyRequestResponse } from 'fastify';
 import { expect } from 'vitest';
-import type { TestApp } from './harness';
+import { TEST_PASSWORD, type TestApp } from './harness';
 
 /**
  * An MCP client for the integration specs: what Claude Code sends to
@@ -12,7 +12,10 @@ import type { TestApp } from './harness';
 /** The token in a page: `closet_` and 43 base64url characters. */
 const TOKEN = /closet_[A-Za-z0-9_-]{43}/;
 
-/** POST /auth/tokens as `cookie`'s user (the owner by default); the new token. */
+/**
+ * POST /auth/tokens as `cookie`'s user (the owner by default), with the
+ * harness's password (the step-up); the new token.
+ */
 export async function createAccessToken(
   t: TestApp,
   { cookie, name = 'Claude Code' }: { cookie?: string; name?: string } = {},
@@ -20,7 +23,7 @@ export async function createAccessToken(
   const res = await t.inject({
     method: 'POST',
     url: '/auth/tokens',
-    payload: { name },
+    payload: { name, currentPassword: TEST_PASSWORD },
     headers: cookie ? { cookie } : {},
   });
   expect(res.statusCode).toBe(200);
