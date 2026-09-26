@@ -1,5 +1,10 @@
 import { Readable } from 'node:stream';
+import type { Db } from '../../../db/client';
 import { HttpError } from '../../errors';
+import {
+  MAX_PENDING_PER_USER,
+  recordPendingPhoto,
+} from '../../files/pending-photos';
 import type { ImageSource, Photos } from '../../files/photos';
 import type { StringKey } from '../../i18n';
 import type { Logger } from '../../../logger';
@@ -15,10 +20,16 @@ import { type ExtractedProduct, extractProduct } from './extract';
  * Adding a garment from a link (issue #6; docs/plans/2026-09-26-wardrobe-
  * features.md, section 0): fetch what the link names through the outbound
  * fetcher, the only fetcher of user-supplied URLs, and turn it into what
- * the garment form needs. Nothing here writes a row. A photo it keeps is
- * stored as bytes only (a pending photo), which the form's save claims
- * (createGarmentWithLinkPhoto, ../writes.ts) or reconciliation removes a
- * day later.
+ * the garment form needs. Nothing here writes a `garment` or `file` row. A
+ * photo it keeps is a pending photo: bytes plus a `pending_photo` row bound
+ * to the user who fetched it (src/web/files/pending-photos.ts), which the
+ * form's save claims (createGarmentWithLinkPhoto, ../writes.ts) or
+ * reconciliation removes a day later.
+ *
+ * Memory: one import holds up to MAX_PHOTO_CHOICES images of up to 15 MB
+ * (BYTE_LIMITS.image) at once, about 90 MB transient, plus the decodes for
+ * their previews. LINK_IMPORT_LIMIT bounds one user's rate, not how many
+ * users import at the same moment.
  *
  * - An image: stored as the pending photo.
  * - A web page: extractProduct, then its image candidates fetched for the
@@ -89,6 +100,7 @@ export const REFUSALS: Readonly<
 };
 
 export interface LinkImportDeps {
+  db: Db;
   fetcher: OutboundFetcher;
   photos: Photos;
   logger: Logger;
@@ -128,19 +140,20 @@ export function linkIn(text: string): string | undefined {
 }
 
 /**
- * What `url` gives the garment form, the pending photo stored for
- * `ownerId` (the wardrobe's owner, who owns the photo once saved). Throws
+ * What `url` gives the garment form, the pending photo stored for `userId`
+ * (the user fetching; the save gives the `file` row to the wardrobe's
+ * owner). Throws
  * LinkImportError for a link the fetcher refused or an image that cannot
  * be read.
  */
 export async function importLink(
   deps: LinkImportDeps,
   url: string,
-  ownerId: number,
+  userId: number,
 ): Promise<LinkImport> {
   const resource = await fetchOrRefuse(deps, url, ['html', 'image']);
   if (resource.kind === 'image') {
-    return { kind: 'image', photo: await storePhoto(deps, resource, ownerId) };
+    return { kind: 'image', photo: await storePhoto(deps, resource, userId) };
   }
   const product = extractProduct(pageText(resource), resource.url);
   const readable = await fetchChoices(
@@ -148,7 +161,7 @@ export async function importLink(
     product.images.slice(0, MAX_PHOTO_CHOICES),
   );
   const photo = readable[0]
-    ? await storePhoto(deps, readable[0].resource, ownerId)
+    ? await storePhoto(deps, readable[0].resource, userId)
     : undefined;
   deps.logger.info(
     `Link import from ${resource.url.hostname}: ${product.source ?? 'nothing'} extracted, ${readable.length} of ${product.images.length} photos read${photo ? `, ${photo} pending` : ''}`,
@@ -169,14 +182,14 @@ export async function importLink(
 
 /**
  * The photo at `url` (a choice the form offered, or any image link) stored
- * as a pending photo for `ownerId`; its stored name.
+ * as a pending photo for `userId`; its stored name.
  */
 export async function fetchLinkPhoto(
   deps: LinkImportDeps,
   url: string,
-  ownerId: number,
+  userId: number,
 ): Promise<string> {
-  return storePhoto(deps, await fetchOrRefuse(deps, url, ['image']), ownerId);
+  return storePhoto(deps, await fetchOrRefuse(deps, url, ['image']), userId);
 }
 
 async function fetchOrRefuse(
@@ -195,14 +208,20 @@ async function fetchOrRefuse(
   }
 }
 
+/**
+ * Stores the image as `userId`'s pending photo: the bytes, then its
+ * `pending_photo` row, which evicts their oldest past
+ * MAX_PENDING_PER_USER (those bytes go here too). The bytes are this
+ * request's own, so a failed row insert deletes them.
+ */
 async function storePhoto(
-  { photos }: LinkImportDeps,
+  { db, photos, logger }: LinkImportDeps,
   resource: FetchedResource,
-  ownerId: number,
+  userId: number,
 ): Promise<string> {
+  let fileName: string;
   try {
-    const row = await photos.storeImage(imageSource(resource), ownerId);
-    return row.fileName;
+    ({ fileName } = await photos.storeImage(imageSource(resource), userId));
   } catch (error) {
     // Photos' refusals of the bytes themselves (unreadable, too many pixels).
     if (error instanceof HttpError && error.statusCode < 500) {
@@ -210,6 +229,20 @@ async function storePhoto(
     }
     throw error;
   }
+  let evicted: string[];
+  try {
+    evicted = await recordPendingPhoto(db, fileName, userId);
+  } catch (error) {
+    await photos.deleteVariants(fileName);
+    throw error;
+  }
+  for (const name of evicted) await photos.deleteVariants(name);
+  if (evicted.length > 0) {
+    logger.info(
+      `User ${userId} is over ${MAX_PENDING_PER_USER} pending link photos: evicted ${evicted.join(', ')}`,
+    );
+  }
+  return fileName;
 }
 
 /**

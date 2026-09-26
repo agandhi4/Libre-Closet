@@ -1,12 +1,18 @@
-import { readdir, utimes } from 'node:fs/promises';
+import { eq } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { garment } from '../../src/db/schema';
-import { reconcileStorage } from '../../src/maintenance/reconcile';
+import { garment, pendingPhoto } from '../../src/db/schema';
+import {
+  GUARD_MAX_SETS,
+  reconcileStorage,
+} from '../../src/maintenance/reconcile';
 import {
   parseStoredName,
   variantFileName,
 } from '../../src/web/files/image-variant';
+import { MAX_PENDING_PER_USER } from '../../src/web/files/pending-photos';
 import { type StringKey, t as text } from '../../src/web/i18n';
 import {
   createGarment,
@@ -16,7 +22,13 @@ import {
   photoRowCount,
   uploadPhoto,
 } from './garments';
-import { createTestApp, type TestApp, unescapeHtml, userIdOf } from './harness';
+import {
+  createTestApp,
+  TEST_PASSWORD,
+  type TestApp,
+  unescapeHtml,
+  userIdOf,
+} from './harness';
 import {
   html,
   INTRANET_HOST,
@@ -408,32 +420,180 @@ describe('adding a garment from a link', () => {
     });
   });
 
-  it('an abandoned photo is removed by reconciliation a day later', async () => {
-    // A saved photo, so the reconciliation's guard sees a live file table.
-    const kept = await createGarment(t, { name: 'Saved' });
-    await uploadPhoto(t, kept, await jpegPhoto());
-    const page = await importLink(sites.url('/img/back.jpg'));
-    const abandoned = linkPhotoIn(page.body)!;
-    // What a pending photo has on disk: the original and its thumb (the
-    // cutout comes only after a save queues it).
-    const twoDaysAgo = new Date(Date.now() - 2 * DAY_MS);
-    for (const variant of ['original', 'thumb'] as const) {
-      const path = join(t.dataPath, variantFileName(abandoned, variant));
-      await utimes(path, twoDaysAgo, twoDaysAgo);
-    }
+  describe('pending photos', () => {
+    const pendingOf = (userId: number) =>
+      t.db
+        .select({ fileName: pendingPhoto.fileName })
+        .from(pendingPhoto)
+        .where(eq(pendingPhoto.userId, userId));
+    const importPhoto = async (cookie: string) =>
+      linkPhotoIn(
+        (await importLink(sites.url('/img/back.jpg'), { cookie })).body,
+      )!;
 
-    const report = await reconcileStorage({
-      db: t.db,
-      photos: t.photos,
-      logger: silentLogger,
+    it('are bound to the user who fetched them: nobody else claims or discards one', async () => {
+      const fetcher = await signUp('fetcher@example.com');
+      const other = await signUp('other@example.com');
+      const photo = await importPhoto(fetcher.cookie);
+      expect(await pendingOf(fetcher.id)).toEqual([{ fileName: photo }]);
+
+      await expectNothingWritten(async () => {
+        const claim = await save(
+          { name: 'Not mine', linkPhoto: photo },
+          { cookie: other.cookie },
+        );
+        expect(claim.statusCode).toBe(400);
+        expect(claim.body).toContain(text('linkImport.PHOTO_GONE'));
+      });
+      const discard = await t.inject({
+        method: 'POST',
+        url: '/wardrobe/new/from-link/photo',
+        payload: { url: '', linkPhoto: photo },
+        headers: { cookie: other.cookie, 'hx-request': 'true' },
+      });
+      expect(discard.statusCode).toBe(200);
+      expect(await storedOriginals()).toContain(photo);
+      expect(await pendingOf(fetcher.id)).toEqual([{ fileName: photo }]);
+
+      // The one who fetched it still can.
+      const mine = await save(
+        { name: 'Mine', linkPhoto: photo },
+        { cookie: fetcher.cookie },
+      );
+      expect(mine.statusCode).toBe(302);
+      expect(await pendingOf(fetcher.id)).toEqual([]);
     });
-    expect(report.refused).toBeUndefined();
-    expect(report.orphanedObjectsDeleted).toBe(1);
-    const stored = await readdir(t.dataPath);
-    expect(stored.some((name) => name.startsWith(abandoned.slice(0, 36)))).toBe(
-      false,
-    );
-    expect(stored).toContain(await photoFileName(t, kept));
+
+    it(`are at most ${MAX_PENDING_PER_USER} a user: another evicts the oldest, bytes included`, async () => {
+      const hoarder = await signUp('hoarder@example.com');
+      const photos: string[] = [];
+      for (let i = 0; i < MAX_PENDING_PER_USER; i++) {
+        photos.push(await importPhoto(hoarder.cookie));
+      }
+      // The eleventh through the photo choice (without replacing one): the
+      // imports' rate limit is also ten a minute, and the cap is per user,
+      // whichever route stores the photo.
+      const eleventh = await t.inject({
+        method: 'POST',
+        url: '/wardrobe/new/from-link/photo',
+        payload: { url: sites.url('/img/front.jpg') },
+        headers: { cookie: hoarder.cookie, 'hx-request': 'true' },
+      });
+      photos.push(linkPhotoIn(eleventh.body)!);
+      const [oldest, ...kept] = photos;
+      expect(
+        (await pendingOf(hoarder.id)).map((row) => row.fileName).sort(),
+      ).toEqual([...kept].sort());
+      const stored = await storedOriginals();
+      expect(stored).not.toContain(oldest);
+      for (const photo of kept) expect(stored).toContain(photo);
+      expect(t.logs.messages('info', 'Web').join('\n')).toContain(
+        `evicted ${oldest}`,
+      );
+    });
+
+    it("go with their user's account", async () => {
+      const email = 'leaving@example.com';
+      const leaving = await signUp(email);
+      const photo = await importPhoto(leaving.cookie);
+      const res = await t.inject({
+        method: 'POST',
+        url: '/auth/delete-account',
+        payload: { email, password: TEST_PASSWORD },
+        headers: { cookie: leaving.cookie },
+      });
+      expect(res.statusCode).toBe(302);
+      const stored = await readdir(t.dataPath);
+      expect(stored.some((name) => name.startsWith(photo.slice(0, 36)))).toBe(
+        false,
+      );
+      expect(await pendingOf(leaving.id)).toEqual([]);
+    });
+
+    describe('reconciliation', () => {
+      const reconcile = () =>
+        reconcileStorage({ db: t.db, photos: t.photos, logger: silentLogger });
+
+      /** Every pending photo two days old: its row and its files. */
+      const ageEveryPendingPhoto = async () => {
+        const twoDaysAgo = new Date(Date.now() - 2 * DAY_MS);
+        const rows = await t.db
+          .update(pendingPhoto)
+          .set({ createdAt: twoDaysAgo })
+          .returning({ fileName: pendingPhoto.fileName });
+        // What a pending photo has on disk: the original and its thumb (the
+        // cutout comes only after a save queues it).
+        for (const { fileName } of rows) {
+          for (const variant of ['original', 'thumb'] as const) {
+            const path = join(t.dataPath, variantFileName(fileName, variant));
+            await utimes(path, twoDaysAgo, twoDaysAgo);
+          }
+        }
+        return rows.map((row) => row.fileName);
+      };
+
+      it('removes more than the guard allows of abandoned imports, across users, and still guards the rest', async () => {
+        // A saved photo, so the guard sees a live file table.
+        const kept = await createGarment(t, { name: 'Saved' });
+        await uploadPhoto(t, kept, await jpegPhoto());
+        const keptPhoto = await photoFileName(t, kept);
+        // 27 abandoned imports: more than GUARD_MAX_SETS, from three users
+        // (each within the rate limit and the per-user cap).
+        for (const email of [
+          'a@example.com',
+          'b@example.com',
+          'c@example.com',
+        ]) {
+          const { cookie } = await signUp(email);
+          for (let i = 0; i < 9; i++) await importPhoto(cookie);
+        }
+        const abandoned = await ageEveryPendingPhoto();
+        expect(abandoned.length).toBeGreaterThan(GUARD_MAX_SETS);
+
+        const report = await reconcile();
+        expect(report.refused).toBeUndefined();
+        expect(report.pendingPhotosDeleted).toBe(abandoned.length);
+        expect(report.orphanedObjectsDeleted).toBe(0);
+        const stored = await storedOriginals();
+        for (const photo of abandoned) expect(stored).not.toContain(photo);
+        expect(stored).toContain(keptPhoto);
+        expect(await t.db.$count(pendingPhoto)).toBe(0);
+
+        // A wholesale mismatch (sets nothing explains) is still refused.
+        const strangers = Array.from(
+          { length: GUARD_MAX_SETS + 1 },
+          () => `${randomUUID()}.webp`,
+        );
+        const twoDaysAgo = new Date(Date.now() - 2 * DAY_MS);
+        for (const name of strangers) {
+          const path = join(t.dataPath, name);
+          await writeFile(path, `bytes of ${name}`);
+          await utimes(path, twoDaysAgo, twoDaysAgo);
+        }
+        const guarded = await reconcile();
+        expect(guarded.refused).toBeDefined();
+        expect(await storedOriginals()).toEqual(
+          expect.arrayContaining(strangers),
+        );
+        for (const name of strangers) await rm(join(t.dataPath, name));
+      });
+
+      it('keeps young pending photos and drops pending rows whose files are gone', async () => {
+        const { cookie, id } = await signUp('young@example.com');
+        const young = await importPhoto(cookie);
+        const lost = await importPhoto(cookie);
+        await t.photos.deleteVariants(lost);
+
+        const report = await reconcile();
+        expect(report).toMatchObject({
+          pendingPhotosDeleted: 0,
+          pendingRowsWithoutFiles: 1,
+          orphanedObjectsDeleted: 0,
+        });
+        expect(await storedOriginals()).toContain(young);
+        expect(await pendingOf(id)).toEqual([{ fileName: young }]);
+      });
+    });
   });
 
   describe('refusals', () => {

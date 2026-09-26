@@ -6,6 +6,7 @@ import {
 import type { Db, Queryable } from '../../db/client';
 import { HttpError } from '../errors';
 import { parseStoredName } from '../files/image-variant';
+import { takePendingPhoto } from '../files/pending-photos';
 import type { Photos } from '../files/photos';
 import {
   insertPhotoRow,
@@ -71,22 +72,22 @@ export function createGarment(
 
 /**
  * A new garment whose photo came from a link (link import, #6). The photo's
- * bytes were stored when the link was fetched, without a row: a pending
- * photo, named by the form's hidden `linkPhoto`. Its row is inserted here,
- * queued for its cutout, in the transaction that inserts the garment, so
- * nothing is written to either table until the form is saved; a pending
- * photo never saved is removed by reconciliation after a day, like bytes
- * whose upload transaction never committed.
+ * bytes were stored when the link was fetched, with a `pending_photo` row
+ * naming who fetched it (src/web/files/pending-photos.ts); the form carries
+ * the name as its hidden `linkPhoto`. Here, in one transaction, the pending
+ * row goes, the `file` row is inserted (queued for its cutout) and the
+ * garment with it, so nothing reaches `garment` or `file` until the form is
+ * saved.
  *
- * Undefined when the name cannot be claimed: not a stored original, its
- * bytes gone (reconciled, or discarded by picking another photo), or
- * already a row (a saved photo, anyone's). Nothing is written then, and no
- * bytes are ever deleted here: the name came from the client, so bytes this
- * request cannot prove are its own are left alone.
+ * Undefined when `userId` cannot claim the name: no pending row of theirs
+ * (someone else's import, or claimed, discarded, evicted or reconciled
+ * already), its bytes gone, or already a `file` row. Nothing is written
+ * then, and no bytes are ever deleted here: the name came from the client.
  */
 export async function createGarmentWithLinkPhoto(
   { db, photos, logger, cutouts }: WardrobeDeps,
   ownerId: number,
+  userId: number,
   fields: GarmentFields,
   fileName: string,
 ): Promise<number | undefined> {
@@ -96,6 +97,7 @@ export async function createGarmentWithLinkPhoto(
     // The wardrobe's owner owns the row, whoever saves (as replacePhoto).
     const photo = await photos.pendingPhotoRow(fileName, ownerId);
     if (!photo) return undefined;
+    if (!(await takePendingPhoto(tx, fileName, userId))) return undefined;
     const photoId = await insertPhotoRow(tx, {
       ...photo,
       ...initialCutoutState('pending'),
@@ -103,7 +105,9 @@ export async function createGarmentWithLinkPhoto(
     return insertGarment(tx, ownerId, fields, photoId);
   });
   if (id === undefined) {
-    logger.warn(`Link photo ${fileName} could not be claimed`);
+    logger.warn(
+      `Link photo ${fileName} could not be claimed by user ${userId}`,
+    );
     return undefined;
   }
   logger.info(
@@ -115,24 +119,32 @@ export async function createGarmentWithLinkPhoto(
 
 /**
  * Deletes a pending link photo the form no longer shows (another photo was
- * picked, or none). False, deleting nothing, when the name is not a stored
- * original or has a row: only a photo no garment was ever saved with goes.
- * Under the name's lock, so a save claiming it at the same moment either
- * wins (the row exists, nothing is deleted) or finds it gone.
+ * picked, or none). False, deleting nothing, unless `userId` fetched it and
+ * it is still pending (no `file` row): only an import of theirs that no
+ * garment was saved with goes. Under the name's lock, so a save claiming it
+ * at the same moment either wins (nothing is deleted) or finds it gone. The
+ * bytes go after the commit.
  */
 export async function discardLinkPhoto(
   { db, photos, logger }: WardrobeDeps,
   fileName: string,
+  userId: number,
 ): Promise<boolean> {
   if (parseStoredName(fileName)?.variant !== 'original') return false;
   const discarded = await db.transaction(async (tx) => {
     await lockPhotoName(tx, fileName);
     if (await photoRowExists(tx, fileName)) return false;
-    await photos.deleteVariants(fileName);
-    return true;
+    return takePendingPhoto(tx, fileName, userId);
   });
-  if (discarded) logger.info(`Discarded link photo ${fileName}`);
-  return discarded;
+  if (!discarded) {
+    logger.warn(
+      `Link photo ${fileName} not discarded: not pending for user ${userId}`,
+    );
+    return false;
+  }
+  await photos.deleteVariants(fileName);
+  logger.info(`Discarded link photo ${fileName} of user ${userId}`);
+  return true;
 }
 
 /**

@@ -65,7 +65,7 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   done,
 ) => {
   const { db, logger, photos, fetcher } = options;
-  const importDeps = { fetcher, photos, logger };
+  const importDeps = { db, fetcher, photos, logger };
   const writeDeps: WardrobeDeps = {
     db,
     photos,
@@ -148,7 +148,7 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const link = linkIn(typed);
       if (!link) return refuse(reply, 'no-link', typed, viewOwner);
       try {
-        const result = await importLink(importDeps, link, access.ownerId);
+        const result = await importLink(importDeps, link, userId);
         const form = importedForm(result, link);
         logger.info(
           `Link import by user ${userId} into wardrobe ${access.ownerId}: ${result.kind}${form.link.photo ? `, photo ${form.link.photo} pending` : ', no photo'}, ${form.link.choices.length} choices`,
@@ -169,8 +169,8 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   );
 
   // Another of the page's photos (or none) on the prefilled form: fetched
-  // and stored as the pending photo, the one it replaces deleted (it was
-  // never saved). Always answers the slot, a refusal with its message
+  // and stored as the pending photo, the one it replaces discarded (only if
+  // it is this user's and still pending). Always answers the slot, a refusal with its message
   // (htmx would not swap a 4xx) and the photo it had.
   app.post(
     LINK_PHOTO_PATH,
@@ -179,20 +179,22 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       schema: { querystring: OwnerQuery, body: LinkPhotoBody },
     },
     async (request, reply) => {
-      const { access } = await authorizeWardrobe(
+      // The pending photo is the fetching user's, not the wardrobe's; the
+      // wardrobe is still checked, so only someone who may add to it fetches.
+      const userId = sessionUserId(request);
+      await authorizeWardrobe(
         db,
-        sessionUserId(request),
+        userId,
         request.query.ownerId,
         'manage',
         'Garment not found',
       );
-      const userId = sessionUserId(request);
       const current = request.body.linkPhoto || undefined;
       const url = request.body.url?.trim();
       let photo: string | undefined;
       if (url) {
         try {
-          photo = await fetchLinkPhoto(importDeps, url, access.ownerId);
+          photo = await fetchLinkPhoto(importDeps, url, userId);
         } catch (error) {
           if (!(error instanceof LinkImportError)) throw error;
           logger.warn(
@@ -207,7 +209,7 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           );
         }
       }
-      if (current) await discardLinkPhoto(writeDeps, current);
+      if (current) await discardLinkPhoto(writeDeps, current, userId);
       logger.info(
         `Link photo choice by user ${userId}: ${photo ?? 'no photo'}${current ? ` instead of ${current}` : ''}`,
       );

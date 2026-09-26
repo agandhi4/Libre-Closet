@@ -432,6 +432,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         ? await createGarmentWithLinkPhoto(
             deps,
             access.ownerId,
+            sessionUserId(request),
             form.fields,
             linkPhoto,
           )

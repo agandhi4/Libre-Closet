@@ -979,6 +979,7 @@ describe('authorization matrix', () => {
       'capsule',
       'capsule_garment',
       'file',
+      'pending_photo',
       'outfit',
       'outfit_slot',
       'outfit_calendar',
