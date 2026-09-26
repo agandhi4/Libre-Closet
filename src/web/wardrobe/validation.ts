@@ -716,10 +716,11 @@ type Taggable = Pick<
 /**
  * The properties to store after a tap on the tagging card, or undefined for
  * a type the category does not have. The tapped values replace the stored
- * ones; a type brings its presets, but only into properties still unset
- * (applyPresets from no previous type): tagging never overwrites what the
- * garment form set, the heavy tee's warmth included. Properties outside the
- * garment's role stay as stored (null).
+ * ones; a type brings its presets into properties still unset or still at
+ * the stored type's presets (applyPresets from the stored type): the first
+ * tag never overwrites what the garment form set, the heavy tee's warmth
+ * included, and changing one's mind about the type moves what the first
+ * type filled. Properties outside the garment's role stay as stored (null).
  */
 export function readTags(
   body: TagBody,
@@ -749,7 +750,13 @@ export function readTags(
         length: stored.length,
         waterResistant: stored.waterResistant,
       },
-      null,
+      // From the stored type: a tap on another type moves the values
+      // still at the first type's presets (the card saves every tap, so
+      // they are stored); the first tag has no source and fills only what
+      // is unset. The same rule as the form's hidden presetType.
+      stored.type === null
+        ? null
+        : { category, type: stored.type, fabricWeight: stored.fabricWeight },
       { category, type, fabricWeight: stored.fabricWeight },
     ),
   };

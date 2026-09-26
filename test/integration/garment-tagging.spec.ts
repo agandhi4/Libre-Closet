@@ -140,6 +140,25 @@ describe('tagging mode', () => {
     expect(await row(ids.heavy)).toMatchObject({ warmth: 4, formality: 3 });
   });
 
+  it('moves the first type’s presets when another type is tapped', async () => {
+    const id = await create({ name: 'Undecided', category: 'tops' });
+    await tag(id, { type: 'tank' });
+    expect(await row(id)).toMatchObject({ warmth: 1, sleeve: 'sleeveless' });
+    // The card saved the tank's presets; a sweater replaces them.
+    await tag(id, { type: 'sweater' });
+    expect(await row(id)).toMatchObject({
+      type: 'sweater',
+      warmth: 4,
+      formality: 3,
+      sleeve: 'long',
+    });
+    // A value tapped in between is the user's and stays.
+    await tag(id, { type: 'sweater', warmth: '5' });
+    await tag(id, { type: 'cardigan' });
+    expect(await row(id)).toMatchObject({ warmth: 5, sleeve: 'long' });
+    await t.inject({ method: 'POST', url: `/wardrobe/${id}/archive` });
+  });
+
   it('ignores a warmth posted for a bag', async () => {
     await tag(ids.bag, { warmth: '3', formality: '2' });
     expect(await row(ids.bag)).toMatchObject({ warmth: null, formality: 2 });

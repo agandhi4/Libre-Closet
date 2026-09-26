@@ -510,7 +510,9 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const garment = await requireGarment(options, id, access.ownerId);
       const fields = readTags(request.body, garment);
       if (!fields) throw new HttpError(400, 'Not a type of this category');
-      await updateGarmentProperties(db, id, access.ownerId, fields);
+      if (!(await updateGarmentProperties(db, id, access.ownerId, fields))) {
+        throw notFound();
+      }
       logger.info(
         `Garment ${id} tagged by user ${sessionUserId(request)}: ${Object.keys(request.body).join(', ')}`,
       );
