@@ -358,7 +358,7 @@ export async function replacePhotoRow(
  * garment is not in `ownerId`'s wardrobe.
  */
 export async function toggleArchived(
-  db: Db,
+  db: Queryable,
   id: number,
   ownerId: number,
 ): Promise<boolean | undefined> {
