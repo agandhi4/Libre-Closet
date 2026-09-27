@@ -156,6 +156,33 @@ test('Styling, a garment, Edit, Save, back: Styling, never the form', async ({
   expect(errors, errors.join('\n')).toEqual([]);
 });
 
+test('wardrobe, a garment, Edit, Save, back: the wardrobe shows the save', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await signIn(page, 'back-save-fresh');
+  const tee = await createGarment(page, 'Before tee', 'tops');
+  await page.goto('/wardrobe');
+  const tile = page.locator(`main a[href="/wardrobe/${tee}"]`).first();
+  await expect(tile).toContainText('Before tee');
+  await tile.click();
+  await expect(page).toHaveURL(new RegExp(`/wardrobe/${tee}$`));
+
+  const menu = await openGarmentMenu(page);
+  await menu.getByRole('link', { name: 'Edit' }).click();
+  await page.getByRole('textbox', { name: 'Name' }).fill('After tee');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('h1')).toHaveText('After tee');
+
+  // Back lands on the wardrobe as it is now, not htmx's snapshot from
+  // before the save.
+  await backArrow(page).click();
+  await expect(page).toHaveURL(/\/wardrobe$/);
+  await expect(tile).toContainText('After tee');
+  await expect(page.locator('main').getByText('Before tee')).toHaveCount(0);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('a reload (pull to refresh) keeps the way back', async ({ page }) => {
   const errors = collectErrors(page);
   await signIn(page, 'back-reload');

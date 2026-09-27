@@ -35,12 +35,24 @@
  * page that saves in place lands on itself with a flag in the query
  * (`?saved=1`), and back from it skips the copy from before the save.
  *
+ * A save makes what history holds stale: htmx's snapshots (and a bfcached
+ * document) were taken before it, so the Wardrobe went back to showing the
+ * garment's old name. A native post marks the tab dirty (sessionStorage),
+ * and the next page restored from history while it is marked is reloaded
+ * in place (the entry landed on, so no new entry; its trail survives in
+ * history.state). One reload per save: an entry further back that was
+ * snapshotted before the save still shows its snapshot when a later
+ * back/forward restores it. A document a back/forward loads again counts
+ * as restored (the browser's HTTP cache answers it). htmx writes (autosave, hx-post) do
+ * not mark it: they answer the part of the page they change.
+ *
  * Evaluated once per document (a module; boosted navigations swap only the
  * body): the listeners sit on the document and the window.
  */
 
 const STATE_KEY = 'closetTrail';
 const HANDOFF_KEY = 'closet-back-handoff';
+const DIRTY_KEY = 'closet-back-dirty';
 /** Plenty for any real back chain; keeps history.state small. */
 const TRAIL_LIMIT = 50;
 
@@ -174,14 +186,12 @@ document.addEventListener(
 );
 
 // htmx has just snapshotted the page being left, dropping the trail from its
-// entry. The swap has not happened yet: the page on screen is the one left.
-let leftFormBySaving = false;
-document.addEventListener('htmx:beforeHistoryUpdate', (event) => {
-  remember(trail);
-  leftFormBySaving = event.detail.requestConfig?.verb !== 'get' && onFormPage();
-});
+// entry. A boosted navigation is never a form page's save (every post form
+// is a native PostForm, test/integration/pages.ts), so its entry is never
+// afterForm.
+document.addEventListener('htmx:beforeHistoryUpdate', () => remember(trail));
 document.addEventListener('htmx:pushedIntoHistory', () => {
-  remember([...trail, { path: here(), afterForm: leftFormBySaving }]);
+  remember([...trail, { path: here(), afterForm: false }]);
 });
 document.addEventListener('htmx:replacedInHistory', () => {
   remember([
@@ -203,7 +213,49 @@ window.addEventListener('popstate', (event) => {
     remember([...trail, { path: here(), afterForm: false }]);
   } else remember(coldTrail());
 });
-document.addEventListener('htmx:historyRestore', () => remember(trail));
+document.addEventListener('htmx:historyRestore', () => {
+  remember(trail);
+  reloadIfDirty('history restore');
+});
+
+// Safari (and Chromium) may bring a whole document back from the bfcache
+// instead. When it lands on another of its entries, popstate and htmx's
+// restore follow and reload it above; the task after pageshow catches the
+// entry the document was left on.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted) setTimeout(() => reloadIfDirty('bfcache'));
+});
+// A document a back/forward loads again is no fresher: the browser answers
+// history navigations from its HTTP cache where it can, and the worker's
+// tab roots open from the page cache (only a reload revalidates them).
+if (performance.getEntriesByType('navigation')[0]?.type === 'back_forward') {
+  reloadIfDirty('back/forward load');
+}
+
+function reloadIfDirty(how) {
+  if (!isDirty()) return;
+  setDirty(false);
+  console.info(`[back] ${here()} restored (${how}) after a save: reloading`);
+  location.reload();
+}
+
+function isDirty() {
+  try {
+    return sessionStorage.getItem(DIRTY_KEY) !== null;
+  } catch (error) {
+    console.warn('[back] could not read the save mark', error);
+    return false;
+  }
+}
+
+function setDirty(dirty) {
+  try {
+    if (dirty) sessionStorage.setItem(DIRTY_KEY, '1');
+    else sessionStorage.removeItem(DIRTY_KEY);
+  } catch (error) {
+    console.warn('[back] could not write the save mark', error);
+  }
+}
 
 // A native submit leaves this document: hand the trail to the next one. A
 // boosted form's submit is htmx's (prevented), as is one a confirm() or
@@ -217,10 +269,9 @@ document.addEventListener('submit', (event) => {
   ) {
     return;
   }
-  const handoff = {
-    trail,
-    afterForm: form.method === 'post' && onFormPage(),
-  };
+  const posts = form.method === 'post';
+  if (posts) setDirty(true);
+  const handoff = { trail, afterForm: posts && onFormPage() };
   try {
     sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(handoff));
   } catch (error) {
