@@ -1,8 +1,10 @@
+import type { OutfitCount } from '../../wardrobe/goes-with';
 import {
   type BudgetFit,
   fromCents,
   type ShoppingEntry,
 } from '../../wardrobe/shopping';
+import { OutfitCountLink } from '../gallery/goes-with';
 import { t } from '../i18n';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
@@ -20,6 +22,8 @@ export interface ShoppingPageModel {
   /** The plan shown; undefined when the owner has no active plan (and asked for none). */
   plan: PlanDetail | undefined;
   list: PlanShoppingList | undefined;
+  /** How many outfits each candidate makes with the closet (goesWithCounts, #18b). */
+  outfitCounts: ReadonlyMap<number, OutfitCount>;
 }
 
 type Entry = ShoppingEntry<PlanItemRow, ListedCandidate>;
@@ -81,7 +85,11 @@ export function ShoppingPage(props: {
             <Summary list={list} />
             <ul class="flex flex-col gap-3" id="shopping-list">
               {list.entries.map((entry) => (
-                <ItemCard entry={entry} plan={plan} />
+                <ItemCard
+                  entry={entry}
+                  plan={plan}
+                  outfitCounts={model.outfitCounts}
+                />
               ))}
             </ul>
           </>
@@ -127,7 +135,11 @@ function Summary({ list }: { list: PlanShoppingList }) {
   );
 }
 
-function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
+function ItemCard(props: {
+  entry: Entry;
+  plan: PlanDetail;
+  outfitCounts: ReadonlyMap<number, OutfitCount>;
+}) {
   const { entry, plan } = props;
   const { item, match } = entry;
   const facts = itemFacts(item);
@@ -174,7 +186,11 @@ function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
         ) : (
           <ul class="flex flex-col gap-2" aria-label={t('shopping.CANDIDATES')}>
             {entry.candidates.map(({ candidate, budget }) => (
-              <CandidateRow candidate={candidate} budget={budget} />
+              <CandidateRow
+                candidate={candidate}
+                budget={budget}
+                outfits={props.outfitCounts.get(candidate.garmentId)}
+              />
             ))}
           </ul>
         )}
@@ -198,11 +214,13 @@ const BUDGET_BADGES: Record<BudgetFit, string | null> = {
 /**
  * A candidate: its photo, name and brand linking to its page, its price
  * against the budget, whether it is the kind of thing the item asks for,
- * the product link and "Bought it".
+ * how many outfits it makes with the closet, the product link and "Bought
+ * it".
  */
 function CandidateRow(props: {
   candidate: ListedCandidate;
   budget: BudgetFit;
+  outfits: OutfitCount | undefined;
 }) {
   const { candidate, budget } = props;
   const name = candidate.name ?? categoryLabel(candidate.category);
@@ -241,6 +259,12 @@ function CandidateRow(props: {
             </span>
           )}
         </span>
+        {props.outfits && (
+          <OutfitCountLink
+            garmentId={candidate.garmentId}
+            count={props.outfits}
+          />
+        )}
         {!candidate.matches && (
           <p class="text-xs text-warning" data-mismatch>
             {t('shopping.DOESNT_MATCH', {

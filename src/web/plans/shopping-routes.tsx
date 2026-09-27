@@ -1,7 +1,9 @@
 import type { FastifyPluginCallbackTypebox } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
 import { sessionUserId } from '../auth/require-session';
+import { todayIn } from '../calendar/calendar-date';
 import { HttpError } from '../errors';
+import { goesWithCounts } from '../gallery/ideas';
 import { t } from '../i18n';
 import type { WebOptions } from '../plugin';
 import { renderPage } from '../render';
@@ -80,7 +82,7 @@ export const shoppingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   options,
   done,
 ) => {
-  const { db, logger } = options;
+  const { db, logger, config } = options;
 
   /** The requester's own wishlist item `id`: a 404 unless it is theirs. */
   async function requireOwnGarment(
@@ -105,9 +107,23 @@ export const shoppingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           : await findPlan(db, planId, userId);
       if (planId !== undefined && !plan) throw planNotFound();
       const list = plan && (await planShoppingList(db, plan, userId));
+      const candidateIds = new Set(
+        (list?.entries ?? []).flatMap((entry) =>
+          entry.candidates.map(({ candidate }) => candidate.garmentId),
+        ),
+      );
+      const outfitCounts = await goesWithCounts(
+        db,
+        userId,
+        [...candidateIds],
+        todayIn(config.timeZone, new Date()),
+      );
       return renderPage(
         reply,
-        <ShoppingPage ctx={viewContext(reply)} model={{ plan, list }} />,
+        <ShoppingPage
+          ctx={viewContext(reply)}
+          model={{ plan, list, outfitCounts }}
+        />,
       );
     },
   );
