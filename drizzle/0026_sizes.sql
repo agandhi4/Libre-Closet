@@ -18,6 +18,7 @@ CREATE TABLE "brand_size" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"brand" text NOT NULL,
+	"brand_key" text NOT NULL,
 	"size" text,
 	"note" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -26,4 +27,4 @@ CREATE TABLE "brand_size" (
 --> statement-breakpoint
 ALTER TABLE "body_measurements" ADD CONSTRAINT "body_measurements_user_id_foreign" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
 ALTER TABLE "brand_size" ADD CONSTRAINT "brand_size_user_id_foreign" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE cascade;--> statement-breakpoint
-CREATE UNIQUE INDEX "brand_size_user_id_lower_brand_unique" ON "brand_size" USING btree ("user_id",lower("brand"));
+CREATE UNIQUE INDEX "brand_size_user_id_brand_key_unique" ON "brand_size" USING btree ("user_id","brand_key");

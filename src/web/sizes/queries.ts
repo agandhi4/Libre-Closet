@@ -6,7 +6,7 @@ import {
   bodyMeasurements,
   brandSize,
 } from '../../db/schema';
-import { brandKey, brandSpelling } from '../../wardrobe/brands';
+import { brandKey } from '../../wardrobe/brands';
 import {
   DEFAULT_LENGTH_UNIT,
   type LengthUnit,
@@ -122,12 +122,12 @@ export function brandSizesOf(
   db: Queryable,
   userId: number,
 ): Promise<BrandSize[]> {
-  // brand_size_user_id_lower_brand_unique serves both the filter and the order.
+  // brand_size_user_id_brand_key_unique serves both the filter and the order.
   return db
     .select(BRAND_SIZE)
     .from(brandSize)
     .where(eq(brandSize.userId, userId))
-    .orderBy(asc(sql`lower(${brandSize.brand})`));
+    .orderBy(asc(brandSize.brandKey));
 }
 
 /** One brand's note, however the brand is spelled; undefined for none or a blank brand. */
@@ -136,17 +136,12 @@ export async function brandSizeFor(
   userId: number,
   brand: string,
 ): Promise<BrandSize | undefined> {
-  const spelling = brandSpelling(brand);
-  if (!spelling) return undefined;
+  const key = brandKey(brand);
+  if (!key) return undefined;
   const [row] = await db
     .select(BRAND_SIZE)
     .from(brandSize)
-    .where(
-      and(
-        eq(brandSize.userId, userId),
-        sql`lower(${brandSize.brand}) = lower(${spelling})`,
-      ),
-    );
+    .where(and(eq(brandSize.userId, userId), eq(brandSize.brandKey, key)));
   return row;
 }
 
@@ -177,7 +172,7 @@ export async function addBrandSize(
     return await db.transaction(async (tx) => {
       const [row] = await tx
         .insert(brandSize)
-        .values({ userId, ...fields })
+        .values({ userId, ...fields, brandKey: brandKey(fields.brand) })
         .returning({ id: brandSize.id });
       return row.id;
     });
@@ -197,7 +192,7 @@ export async function updateBrandSize(
   try {
     const updated = await db
       .update(brandSize)
-      .set(fields)
+      .set({ ...fields, brandKey: brandKey(fields.brand) })
       .where(and(eq(brandSize.id, id), eq(brandSize.userId, userId)))
       .returning({ id: brandSize.id });
     return updated.length > 0 ? 'updated' : 'not-found';

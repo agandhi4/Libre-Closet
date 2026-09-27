@@ -4,7 +4,6 @@ import { readdir } from 'node:fs/promises';
 import { count, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  brandSize,
   outfit,
   outfitCalendar,
   outfitSlot,
@@ -16,6 +15,7 @@ import { changeCandidates } from '../../src/web/plans/candidates';
 import { insertItems, saveStyleProfile } from '../../src/web/plans/queries';
 import { EMPTY_STYLE_PROFILE } from '../../src/web/plans/validation';
 import { LOGIN_PATH } from '../../src/web/auth/login-path';
+import { addBrandSize } from '../../src/web/sizes/queries';
 import { addDays, type IsoDate } from '../../src/web/calendar/calendar-date';
 import {
   createGarment,
@@ -2270,10 +2270,12 @@ describe('authorization matrix', () => {
       replaces: garmentId,
       cookie,
     });
-    const [{ id: brandSizeId }] = await t.db
-      .insert(brandSize)
-      .values({ userId: t.owner.id, brand, size: 'M', note: OWNER_SIZE_NOTE })
-      .returning({ id: brandSize.id });
+    const brandSizeId = await addBrandSize(t.db, t.owner.id, {
+      brand,
+      size: 'M',
+      note: OWNER_SIZE_NOTE,
+    });
+    if (brandSizeId === 'brand-taken') throw new Error(`${brand} is taken`);
     const archivedName = `Old ${tag}`;
     const archivedId = await createGarment(t, { name: archivedName, cookie });
     const archived = await t.inject({

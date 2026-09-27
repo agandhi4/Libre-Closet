@@ -1,5 +1,5 @@
 {
-  "id": "fb48e00b-0f96-4e98-be32-8f04d1990914",
+  "id": "5815c9a0-1786-452e-9fa2-a88178c7bc56",
   "prevId": "d52b801d-d94b-4d48-90da-dff5096bb4bc",
   "version": "7",
   "dialect": "postgresql",
@@ -130,6 +130,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "brand_key": {
+          "name": "brand_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "size": {
           "name": "size",
           "type": "text",
@@ -151,19 +157,19 @@
         }
       },
       "indexes": {
-        "brand_size_user_id_lower_brand_unique": {
-          "name": "brand_size_user_id_lower_brand_unique",
+        "brand_size_user_id_brand_key_unique": {
+          "name": "brand_size_user_id_brand_key_unique",
           "columns": [
             {
-              "expression": "\"user_id\"",
+              "expression": "user_id",
+              "isExpression": false,
               "asc": true,
-              "isExpression": true,
               "nulls": "last"
             },
             {
-              "expression": "lower(\"brand\")",
+              "expression": "brand_key",
+              "isExpression": false,
               "asc": true,
-              "isExpression": true,
               "nulls": "last"
             }
           ],

@@ -126,7 +126,7 @@ export const CAPSULE_NAME_UNIQUE = 'capsule_owner_id_lower_name_unique';
 export const PLAN_NAME_UNIQUE = 'wardrobe_plan_owner_id_lower_name_unique';
 export const SHARE_GRANTEE_UNIQUE =
   'wardrobe_share_grantor_id_grantee_id_unique';
-export const BRAND_SIZE_UNIQUE = 'brand_size_user_id_lower_brand_unique';
+export const BRAND_SIZE_UNIQUE = 'brand_size_user_id_brand_key_unique';
 export type UniqueConstraint =
   | typeof USER_EMAIL_UNIQUE
   | typeof CAPSULE_NAME_UNIQUE
@@ -1003,16 +1003,18 @@ export const bodyMeasurements = pgTable(
 // Per-brand sizes (#24; src/web/sizes/): the size a user wears in a brand
 // and a note on how it runs ("runs small, size up"), shown wherever that
 // brand is on the user's own screen (the garment form, the wishlist). One
-// row per brand whatever the case: the brand is stored trimmed with its
-// spaces collapsed (brandSpelling, src/wardrobe/brands.ts), so lower() of it
-// is brandKey, the rule every brand comparison uses. Private, like the style
-// profile. Written only by the writers in src/web/sizes/queries.ts.
+// row per brand whatever the case: brand is the spelling shown (brandSpelling,
+// src/wardrobe/brands.ts) and brand_key its brandKey, the one rule every brand
+// comparison uses, computed in JS (never SQL's lower(), which is the
+// collation's and disagrees on non-ASCII). Private, like the style profile.
+// Written only by the writers in src/web/sizes/queries.ts.
 export const brandSize = pgTable(
   'brand_size',
   {
     id: serial('id').primaryKey(),
     userId: integer('user_id').notNull(),
     brand: text('brand').notNull(),
+    brandKey: text('brand_key').notNull(),
     size: text('size'),
     note: text('note'),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -1021,11 +1023,8 @@ export const brandSize = pgTable(
   },
   (table) => [
     // Also the index of the user_id foreign key and of every read (user
-    // first). user_id as an expression: see capsule's index.
-    uniqueIndex(BRAND_SIZE_UNIQUE).on(
-      sql`${table.userId}`,
-      sql`lower(${table.brand})`,
-    ),
+    // first).
+    uniqueIndex(BRAND_SIZE_UNIQUE).on(table.userId, table.brandKey),
     foreignKey({
       name: 'brand_size_user_id_foreign',
       columns: [table.userId],

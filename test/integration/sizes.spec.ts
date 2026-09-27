@@ -275,6 +275,44 @@ describe('sizes', () => {
       expect(await brandsOf(ownerId)).toHaveLength(1);
     });
 
+    it('keeps one row per brand however its letters are typed, and finds it from any spelling', async () => {
+      // One brand, typed two ways: composed é, İ and ß; then e + accent,
+      // I + dot and SS. brandKey is the one rule for both the index and
+      // the lookups (SQL's lower() would split them).
+      const composed = 'Caf\u00e9 \u0130pek Stra\u00dfe';
+      const typed = 'CAFE\u0301 I\u0307PEK STRASSE';
+      const added = await post('/auth/profile/sizes/brands', {
+        brand: composed,
+        size: 'S',
+      });
+      expect(added.statusCode).toBe(303);
+      const taken = await post('/auth/profile/sizes/brands', {
+        brand: typed,
+        size: 'L',
+      });
+      expect(taken.statusCode).toBe(400);
+      expect(taken.body).toContain(
+        'You have a row for this brand already: change that one.',
+      );
+      const row = (await brandsOf(ownerId)).find(
+        (brand) => brand.brand === composed,
+      )!;
+      const note = `Your size in ${composed}: Small`;
+      const garment = await createGarment(t, {
+        name: 'Linen shirt',
+        category: 'tops',
+        brand: typed,
+      });
+      expect(
+        unescapeHtml((await get(`/wardrobe/${garment}/edit`)).body),
+      ).toContain(note);
+      const hint = await get(
+        `/auth/profile/sizes/hint?brand=${encodeURIComponent(typed)}`,
+      );
+      expect(unescapeHtml(hint.body)).toContain(note);
+      await post(`/auth/profile/sizes/brands/${row.id}/delete`);
+    });
+
     it('asks for a brand, and a size or a note', async () => {
       const blank = await post('/auth/profile/sizes/brands', {
         brand: '   ',

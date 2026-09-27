@@ -32,4 +32,19 @@ describe('brands', () => {
     expect(brandKey('Red  Wing')).toBe(brandKey('red wing'));
     expect(brandKey('   ')).toBe('');
   });
+
+  it('spells and keys an accent typed as a letter plus a mark like the one character', () => {
+    expect(brandSpelling('Cafe\u0301')).toBe('Caf\u00e9');
+    expect(brandKey('CAFE\u0301')).toBe(brandKey('caf\u00e9'));
+  });
+
+  it('keys a dotted capital I whether typed as one character or two', () => {
+    expect(brandKey('\u0130pekyol')).toBe(brandKey('I\u0307pekyol'));
+    expect(brandKey('\u0130PEKYOL')).toBe(brandKey('i\u0307pekyol'));
+  });
+
+  it('keys a sharp s like its capital and like ss', () => {
+    expect(brandKey('Stra\u00dfe')).toBe(brandKey('STRA\u1e9eE'));
+    expect(brandKey('Stra\u00dfe')).toBe(brandKey('STRASSE'));
+  });
 });
