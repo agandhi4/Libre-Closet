@@ -1,5 +1,15 @@
+import {
+  DEFAULT_REMINDER_TIMES,
+  formatMinuteOfDay,
+  type ReminderKind,
+  reminderChoices,
+} from '../../push/reminders';
 import { t } from '../i18n';
+import type { ReminderSettings } from './queries';
 import type { SendReport } from './sender';
+
+/** Where the reminders' fragment goes; push.js loads it once the device is on. */
+export const REMINDERS_ID = 'push-reminders';
 
 /**
  * The profile page's notification controls. Whether this browser can and
@@ -61,6 +71,11 @@ export function PushSettings() {
           >
             {t('PUSH_DISABLE')}
           </button>
+          {/* This device's reminders: only the browser knows which device it
+              is (its subscription's endpoint), so push.js asks for them once
+              the state is on (POST /push/reminders/form) and they replace
+              this slot. */}
+          <div id={REMINDERS_ID} data-show="on" hidden></div>
         </push-settings>
         {/* Sends to all of the user's devices, not only this one, so it is
             there whatever this browser's state; the answer says how many. */}
@@ -98,5 +113,95 @@ export function TestResult({ report }: { report: SendReport }) {
         <p>{t('PUSH_TEST_REMOVED', { count: report.pruned })}</p>
       )}
     </>
+  );
+}
+
+/**
+ * This device's reminders (#15): a toggle and a time for each, saved on
+ * every change (POST /push/reminders answers this again, with `saved`).
+ * The endpoint names the device: the browser's own subscription, sent by
+ * push.js and carried here for the saves; it never reaches a log or a URL.
+ * Shown only while notifications are on (data-show, push.js).
+ */
+export function ReminderSettingsForm(props: {
+  endpoint: string;
+  settings: ReminderSettings | undefined;
+  saved?: boolean;
+}) {
+  const { endpoint, settings } = props;
+  if (!settings) {
+    return (
+      <p id={REMINDERS_ID} data-show="on" class="text-sm">
+        {t('today.reminders.NOT_REGISTERED')}
+      </p>
+    );
+  }
+  return (
+    <form
+      id={REMINDERS_ID}
+      data-show="on"
+      class="flex flex-col gap-3 border-t border-base-300 pt-3"
+      hx-post="/push/reminders"
+      hx-trigger="change"
+      hx-target="this"
+      hx-swap="outerHTML"
+      data-needs-network=""
+    >
+      <h3 class="font-semibold text-sm">{t('today.reminders.HEADING')}</h3>
+      <input type="hidden" name="endpoint" value={endpoint} />
+      <ReminderField
+        kind="morning"
+        label={t('today.reminders.MORNING')}
+        minute={settings.morning}
+      />
+      <ReminderField
+        kind="evening"
+        label={t('today.reminders.EVENING')}
+        hint={t('today.reminders.EVENING_HINT')}
+        minute={settings.evening}
+      />
+      <p class="text-xs text-success min-h-4" aria-live="polite">
+        {props.saved ? t('today.reminders.SAVED') : ''}
+      </p>
+    </form>
+  );
+}
+
+function ReminderField(props: {
+  kind: ReminderKind;
+  label: string;
+  hint?: string;
+  /** The saved time; null when off. */
+  minute: number | null;
+}) {
+  const { kind, minute } = props;
+  const shown = minute ?? DEFAULT_REMINDER_TIMES[kind];
+  return (
+    <div class="flex flex-col gap-1" data-reminder={kind}>
+      <div class="flex items-center justify-between gap-2">
+        <label class="label cursor-pointer gap-2 text-sm text-base-content">
+          <input
+            type="checkbox"
+            class="toggle toggle-sm toggle-primary"
+            name={`${kind}On`}
+            value="1"
+            checked={minute !== null}
+          />
+          {props.label}
+        </label>
+        <select
+          class="select select-sm w-28"
+          name={kind}
+          aria-label={`${props.label}: ${t('today.reminders.TIME')}`}
+        >
+          {reminderChoices(kind).map((choice) => (
+            <option value={String(choice)} selected={choice === shown}>
+              {formatMinuteOfDay(choice)}
+            </option>
+          ))}
+        </select>
+      </div>
+      {props.hint && <p class="text-xs text-base-content/60">{props.hint}</p>}
+    </div>
   );
 }
