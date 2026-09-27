@@ -16,7 +16,10 @@ import { HttpError } from '../errors';
 import { listOutfits } from '../outfits/queries';
 import type { WebOptions } from '../plugin';
 import { navigateTo, renderFragment, renderPage } from '../render';
-import { WEATHER_SEARCH_LIMIT } from '../security/rate-limit';
+import {
+  WEATHER_LOCATION_LIMIT,
+  WEATHER_SEARCH_LIMIT,
+} from '../security/rate-limit';
 import { viewContext } from '../view-context';
 import { AddOutfitPage } from './add-page';
 import { tripForecast } from './forecast';
@@ -68,7 +71,7 @@ import { TripPlaceResults, TripWeather } from './weather';
  * Trips (#10; plan section 4): the Calendar's Trips tab and every trip
  * write. The owner's own, like outfits: `?ownerId=` is not read, another
  * user's trip, trip outfit or extra is a 404 like an unknown id, and shares
- * never reach them (matrix rows in test/integration/authorization.spec.ts).
+ * never reach them (matrix rows in test/integration/authorization-trips.spec.ts).
  *
  * Validation, decided per parameter:
  * - The trip form's fields are data it stores: past their caps a 400 page,
@@ -543,7 +546,10 @@ export const tripRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 
     app.post(
       `${TRIPS_PATH}/:id/destination`,
-      { schema: { params: TripParams, body: DestinationBody } },
+      {
+        schema: { params: TripParams, body: DestinationBody },
+        config: { rateLimit: WEATHER_LOCATION_LIMIT },
+      },
       async (request, reply) => {
         const ownerId = sessionUserId(request);
         const { id } = request.params;
