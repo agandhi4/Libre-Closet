@@ -59,6 +59,7 @@ export function BoughtPage(props: { ctx: ViewContext; model: BoughtModel }) {
         ctx={ctx}
         title={title}
         back={garmentUrl(garment.id, model.viewOwner)}
+        formPage
       />
       <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto">
         <p class="text-sm text-base-content/70 mb-4">

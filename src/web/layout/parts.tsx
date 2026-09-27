@@ -173,12 +173,19 @@ export function PlinthImage(props: {
   );
 }
 
-export function BackLink({ href }: { href: string }) {
+/**
+ * A back arrow to `href`. With `historyBack` (the app bar's) it goes back in
+ * history instead whenever the page before is in the app, and follows
+ * `href` only on a cold entry (public/js/back.js); without, it is a plain
+ * link to a fixed place (a Styling or Ideas destination's way back to it).
+ */
+export function BackLink(props: { href: string; historyBack?: boolean }) {
   return (
     <a
-      href={href}
+      href={props.href}
       class="btn btn-ghost btn-sm btn-circle"
       aria-label={t('BACK')}
+      data-history-back={props.historyBack ? '' : undefined}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

@@ -35,7 +35,7 @@ export function CapsuleFormPage(props: {
   const back = editing ? `/capsules/${capsuleId}` : '/capsules';
   return (
     <Layout ctx={ctx} title={title}>
-      <AppBar ctx={ctx} title={title} back={back} />
+      <AppBar ctx={ctx} title={title} back={back} formPage />
       <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto">
         <PostForm
           action={editing ? `/capsules/${capsuleId}` : '/capsules'}

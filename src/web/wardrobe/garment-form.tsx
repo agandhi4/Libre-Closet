@@ -143,7 +143,7 @@ export function GarmentFormPage(props: {
   const category = normalizeCategory(values.category);
   return (
     <Layout ctx={ctx} title={title}>
-      <AppBar ctx={ctx} title={title} back={back} />
+      <AppBar ctx={ctx} title={title} back={back} formPage />
       <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto">
         {mode.kind === 'new' && !link && (
           <a
