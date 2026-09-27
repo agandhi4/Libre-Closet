@@ -477,7 +477,7 @@ const ROUTES: Route[] = [
     // stores nothing; the snapshot includes DATA_PATH, which proves it.
     name: 'POST /wardrobe/:id/photo',
     kind: 'write',
-    ok: 200,
+    ok: 303,
     secret: garmentName,
     vias: BOTH,
     request: async (f, q) => {

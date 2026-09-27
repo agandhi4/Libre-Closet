@@ -1043,11 +1043,13 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     },
   );
 
-  // htmx (hx-post, multipart): the photo; its cutout is queued. The garment
-  // is checked before the body is read, so a refused upload stores nothing.
-  // Two files: pages cached before server-side removal also send the
-  // browser's cutout (nobgPhoto), which storeUploadParts drains and ignores;
-  // a third file would be a 413.
+  // The photo sheet's native multipart post: the photo; its cutout is
+  // queued; 303 to the garment. The garment is checked before the body is
+  // read, so a refused upload stores nothing, and a refusal is the error
+  // page (htmx dropped it). Pages cached before 2026-09-27 still hx-post:
+  // they get the HX-Redirect they wait for. Two files: pages cached before
+  // server-side removal also send the browser's cutout (nobgPhoto), which
+  // storeUploadParts drains and ignores; a third file would be a 413.
   app.post(
     '/wardrobe/:id/photo',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
@@ -1066,10 +1068,11 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         access.ownerId,
         request.files({ limits: { files: 2 } }),
       );
-      return reply
-        .header('HX-Redirect', garmentUrl(id, viewOwner, '', { photoSaved: 1 }))
-        .status(200)
-        .send();
+      const saved = garmentUrl(id, viewOwner, '', { photoSaved: 1 });
+      if (request.headers['hx-request']) {
+        return reply.header('HX-Redirect', saved).status(200).send();
+      }
+      return reply.redirect(saved, 303);
     },
   );
 
