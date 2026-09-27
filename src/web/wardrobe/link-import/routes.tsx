@@ -5,7 +5,8 @@ import { sessionUserId } from '../../auth/require-session';
 import { t } from '../../i18n';
 import type { WebOptions } from '../../plugin';
 import { renderFragment, renderPage } from '../../render';
-import { LINK_IMPORT_LIMIT } from '../../security/rate-limit';
+import { loggableUrl } from '../../loggable-url';
+import { LINK_IMPORT_LIMIT, tooManyAttempts } from '../../security/rate-limit';
 import { authorizeWardrobe } from '../../sharing/access';
 import { viewContext } from '../../view-context';
 import { resolveDestination } from '../destination';
@@ -58,7 +59,7 @@ const LinkPhotoBody = Type.Object({
  * garment, which claims the pending photo; nothing is written to a garment
  * or `file` row before that. Adding is a write to the addressed wardrobe:
  * the owner or a MANAGE grantee (authorizeWardrobe). Both routes that fetch
- * are rate limited per user.
+ * share one per-user rate limit (linkImportLimit).
  */
 export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app,
@@ -67,10 +68,13 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 ) => {
   const { db, logger, photos, fetcher } = options;
   const importDeps = { db, fetcher, photos, logger };
-  // The photo choice is an hx-post, and htmx swaps no 4xx: a route-level
-  // limit's 429 page was discarded and a tap past the limit did nothing. So
-  // the choice counts itself and answers the slot with the message.
-  const photoChoiceLimit = app.createRateLimit(LINK_IMPORT_LIMIT);
+  // ONE counter for both routes that fetch: the import and its photo
+  // choice spend the same LINK_IMPORT_LIMIT. Never a route's
+  // `config.rateLimit` beside it: every one of those, and every
+  // createRateLimit call, gets a store of its own (LocalStore.child), so
+  // each route would allow the full ten. A checker, not route config, also
+  // lets the photo choice (an hx-post; htmx swaps no 429) answer its slot.
+  const linkImportLimit = app.createRateLimit(LINK_IMPORT_LIMIT);
   const writeDeps: WardrobeDeps = {
     db,
     photos,
@@ -96,18 +100,20 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     );
   }
 
-  /** Counts a photo choice; true (and logged) past LINK_IMPORT_LIMIT. */
-  async function photoChoiceLimited(
+  /**
+   * Counts a fetching request against linkImportLimit: the seconds until
+   * it may retry when past the limit (logged), else undefined.
+   */
+  async function linkImportRetryAfter(
     request: FastifyRequest,
-    userId: number,
-  ): Promise<boolean> {
-    const verdict = await photoChoiceLimit(request);
+  ): Promise<number | undefined> {
+    const verdict = await linkImportLimit(request);
     // `isAllowed` is the plugin's allow list; the count is isExceeded.
-    if (verdict.isAllowed || !verdict.isExceeded) return false;
+    if (verdict.isAllowed || !verdict.isExceeded) return undefined;
     logger.warn(
-      `Rate limit reached: link photo choice by user ${userId}, retry in ${verdict.ttlInSeconds}s`,
+      `Rate limit reached: ${request.method} ${loggableUrl(request)} for user ${sessionUserId(request)}`,
     );
-    return true;
+    return verdict.ttlInSeconds;
   }
 
   // The link page, from the new garment form's "Add from a link", the
@@ -155,14 +161,14 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 
   // Fetch the link and answer the garment form, prefilled (a 200 page, not
   // a redirect: nothing is saved to redirect to). A refusal is the link
-  // page again with the reason.
+  // page again with the reason; past the rate limit, the 429 error page (a
+  // native post shows it).
   app.post(
     LINK_IMPORT_PATH,
-    {
-      config: { rateLimit: LINK_IMPORT_LIMIT },
-      schema: { querystring: DestinationQuery, body: LinkBody },
-    },
+    { schema: { querystring: DestinationQuery, body: LinkBody } },
     async (request, reply) => {
+      const retryAfter = await linkImportRetryAfter(request);
+      if (retryAfter !== undefined) throw tooManyAttempts(retryAfter);
       const { access, viewOwner } = await authorizeWardrobe(
         db,
         sessionUserId(request),
@@ -218,7 +224,7 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const current = request.body.linkPhoto || undefined;
-      if (await photoChoiceLimited(request, userId)) {
+      if ((await linkImportRetryAfter(request)) !== undefined) {
         return renderFragment(
           reply,
           <LinkPhotoSlot
