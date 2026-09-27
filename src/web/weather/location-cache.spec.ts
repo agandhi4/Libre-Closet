@@ -137,9 +137,52 @@ describe('createLocationCache', () => {
     expect(s.calls.fetch).toBe(1);
 
     expect(s.logs.messages('info')).toEqual([
-      'Forecast for 40.69,-73.98: refreshing; serving the one from 2026-09-27T10:00:00.000Z meanwhile',
+      'Forecast for 40.69,-73.98: refreshing; the one from 2026-09-27T10:00:00.000Z kept meanwhile',
       expect.stringMatching(/^Forecast for 40\.69,-73\.98: "new" in \d+ ms$/),
     ]);
+  });
+
+  it("waits for a stale answer's refresh on a fresh read (a job's decision), through the same single flight", async () => {
+    const s = setup(staleRow());
+    const old = { value: 'old', fetchedAt: staleRow().fetchedAt };
+    let answered = false;
+    const job = s.cache.get(HERE, { fresh: true }).then((value) => {
+      answered = true;
+      return value;
+    });
+    // A page asking meanwhile is served the stale answer at once, and the
+    // two share one fetch.
+    await expect(s.cache.get(HERE)).resolves.toEqual(old);
+    await flush();
+    expect(answered).toBe(false);
+    expect(s.calls.fetch).toBe(1);
+    // A second job joins the refresh in flight.
+    const second = s.cache.get(HERE, { fresh: true });
+
+    s.at(1000);
+    s.pending[0].resolve('new');
+    const answer = { value: 'new', fetchedAt: new Date(NOW.getTime() + 1000) };
+    await expect(job).resolves.toEqual(answer);
+    await expect(second).resolves.toEqual(answer);
+    expect(s.calls.fetch).toBe(1);
+  });
+
+  it('falls back to the stale answer on a fresh read whose refresh fails', async () => {
+    const s = setup(staleRow());
+    const job = s.cache.get(HERE, { fresh: true });
+    await flush();
+    s.pending[0].reject(new OutboundFetchError('timeout', 'timed out'));
+    await expect(job).resolves.toEqual({
+      value: 'old',
+      fetchedAt: staleRow().fetchedAt,
+    });
+    // Held back by the retry pause: served stale, not waited on.
+    s.at(MINUTE);
+    await expect(s.cache.get(HERE, { fresh: true })).resolves.toEqual({
+      value: 'old',
+      fetchedAt: staleRow().fetchedAt,
+    });
+    expect(s.calls.fetch).toBe(1);
   });
 
   it('keeps the old answer when the refresh fails, and waits before asking again', async () => {

@@ -206,6 +206,11 @@ export async function reminderPayload(
   now: Date,
   swapped: readonly Swap[],
 ): Promise<PushPayload | null> {
+  // The morning's forecast first, awaiting a stale one's refresh: a push
+  // is sent once, so it must not carry the hour-old weather, and Today's
+  // ideas (todayFor) then read the refreshed row too.
+  const weather =
+    kind === 'morning' ? await weatherText(deps, userId, now) : null;
   const model = await todayFor(deps, userId, now);
   if (kind === 'evening') {
     if (model.wornToday) return null;
@@ -221,7 +226,6 @@ export async function reminderPayload(
     };
   }
   const outfits = [...morningIdea(model), ...plannedOutfits(model)];
-  const weather = await weatherText(deps, userId, now);
   return {
     title: t('today.push.MORNING_TITLE'),
     body: [
@@ -273,6 +277,7 @@ async function weatherText(
     deps.weather,
     userId,
     now,
+    { fresh: true },
   );
   const line =
     active &&

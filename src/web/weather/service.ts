@@ -4,7 +4,12 @@ import type { Forecast } from '../../weather/forecast';
 import type { Location } from '../../weather/location';
 import { type ClimateNormals, normalYears } from '../../weather/normals';
 import { todayIn } from '../calendar/calendar-date';
-import { createLocationCache, elapsed, failureReason } from './location-cache';
+import {
+  createLocationCache,
+  elapsed,
+  failureReason,
+  type ReadOptions,
+} from './location-cache';
 import type { Place, WeatherClient } from './open-meteo';
 import {
   type ActiveLocation,
@@ -29,7 +34,9 @@ import {
  * at a time, the last good answer kept, RETRY_AFTER_MS between failed
  * tries). A page (its weather fragment, Today, Ideas), the MCP tools or the
  * seed ask; only an ask with nothing cached waits, for at most one fetch
- * (the fetcher's 10 s bound). Built once by
+ * (the fetcher's 10 s bound), or a job's one-shot decision reading with
+ * `{ fresh: true }` (the week's plan and re-plan, the morning reminder),
+ * which waits for a stale answer's refresh. Built once by
  * createApp() when WEATHER_ENABLED, never otherwise, so with the flag off
  * nothing can fetch.
  *
@@ -66,7 +73,10 @@ export interface WeatherService {
    * stale), fetched while the ask waits only when none is cached; null if
    * Open-Meteo never answered.
    */
-  forecastFor(location: Location): Promise<CachedForecast | null>;
+  forecastFor(
+    location: Location,
+    read?: ReadOptions,
+  ): Promise<CachedForecast | null>;
   /**
    * The location's climate normals, null if Open-Meteo never answered. For
    * a trip's days past the forecast only: Today, the calendar and the
@@ -143,8 +153,8 @@ export function createWeatherService(options: {
   });
 
   return {
-    async forecastFor(location) {
-      const cached = await forecasts.get(location);
+    async forecastFor(location, read) {
+      const cached = await forecasts.get(location, read);
       return cached && { forecast: cached.value, fetchedAt: cached.fetchedAt };
     },
 
@@ -182,9 +192,13 @@ export async function userWeather(
   weather: WeatherService,
   userId: number,
   now: Date,
+  /** `{ fresh: true }` for a job's one-shot decision (location-cache.ts). */
+  read?: ReadOptions,
 ): Promise<UserWeather> {
   const settings = await findWeatherSettings(db, userId);
   const active = activeLocation(settings, now);
-  const cached = active ? await weather.forecastFor(active.location) : null;
+  const cached = active
+    ? await weather.forecastFor(active.location, read)
+    : null;
   return { settings, active, cached };
 }

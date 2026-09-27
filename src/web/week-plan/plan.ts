@@ -62,7 +62,9 @@ export const NO_FORECAST: WeekForecast = { days: new Map(), offset: 0 };
 /**
  * The person's forecast (a cached read, at most one bounded fetch; nothing
  * without WEATHER_ENABLED or a location). Read before any transaction: a
- * plan never holds the owner lock while Open-Meteo answers.
+ * plan never holds the owner lock while Open-Meteo answers. `fresh`: a plan
+ * and the daily re-plan are decisions made once (the re-plan claims its
+ * day), so a stale forecast's refresh is awaited, not served around.
  */
 export async function weekForecast(
   deps: { db: Db; weather: WeatherService | undefined },
@@ -75,6 +77,7 @@ export async function weekForecast(
     deps.weather,
     userId,
     now,
+    { fresh: true },
   );
   return {
     days: new Map((cached?.forecast.days ?? []).map((day) => [day.day, day])),

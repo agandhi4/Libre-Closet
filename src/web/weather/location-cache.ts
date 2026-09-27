@@ -14,7 +14,11 @@ import type { CacheRow } from './queries';
  * - an answer younger than `freshForMs` is served from the row;
  * - an older one is served at once and refreshed in the background (#114):
  *   the first page after the hour must not wait for Open-Meteo. Only a cold
- *   miss (no answer kept) waits, for at most the fetcher's bound;
+ *   miss (no answer kept) waits, for at most the fetcher's bound. A one-shot
+ *   decision that is not redone when the answer changes (the daily re-plan,
+ *   the morning reminder, "Plan my week") asks with `{ fresh: true }`
+ *   instead: it waits for the refresh like a cold miss and falls back to the
+ *   stale answer only if the refresh fails;
  * - a failed refresh keeps the last good answer and records the attempt, so
  *   the provider is asked again only `retryAfterMs` later;
  * - one refresh per location at a time in this process, and no read of the
@@ -56,19 +60,39 @@ export interface LocationCacheOptions<T> {
   mismatch(value: T): string | null;
 }
 
+export interface ReadOptions {
+  /**
+   * Wait for a stale answer's refresh rather than serve it (a job's
+   * decision, not a page's display). The refresh's failure still falls back
+   * to the stale answer; a refresh held back by `retryAfterMs` is not
+   * started, so the stale answer is served then too.
+   */
+  fresh?: boolean;
+}
+
 export interface LocationCache<T> {
   /**
    * The location's kept answer, stale or not (a stale one starts a
-   * background refresh); the provider's, waited for, when none is kept;
-   * null if the provider never answered.
+   * background refresh; `fresh` waits for it); the provider's, waited for,
+   * when none is kept; null if the provider never answered.
    */
-  get(location: Location): Promise<Cached<T> | null>;
+  get(location: Location, read?: ReadOptions): Promise<Cached<T> | null>;
   /**
    * Resolves once no refresh is running. The app's close awaits it before
    * ending the pool (a background refresh still has a row to save); specs
    * await it to see what a refresh stored.
    */
   settled(): Promise<void>;
+}
+
+/**
+ * What one read of the row decided: the answer to serve now, and the
+ * refresh it started (null when none was needed or allowed). Shared by the
+ * asks that joined the read, each taking what its mode asks for.
+ */
+interface Decision<T> {
+  kept: Cached<T> | null;
+  refresh: Promise<Cached<T> | null> | null;
 }
 
 /** A refresh under way: the answer it started from, and its outcome. */
@@ -86,15 +110,15 @@ export function createLocationCache<T>(
   // decision, `refreshing` the fetch and save the decision started. An ask
   // looks in `refreshing` first, and a lookup enters its refresh there before
   // its own promise settles, so no ask reads the row while a refresh runs.
-  const reading = new Map<string, Promise<Cached<T> | null>>();
+  const reading = new Map<string, Promise<Decision<T>>>();
   const refreshing = new Map<string, Refresh<T>>();
 
-  async function lookup(location: Location): Promise<Cached<T> | null> {
+  async function lookup(location: Location): Promise<Decision<T>> {
     const row = await options.read(location);
     const at = now().getTime();
     const kept = answering(location, lastGood(row));
     if (kept && at - kept.fetchedAt.getTime() < options.freshForMs) {
-      return kept;
+      return { kept, refresh: null };
     }
     // A refresh failed a moment ago: do not ask again yet.
     if (
@@ -102,10 +126,18 @@ export function createLocationCache<T>(
       at - row.attemptedAt.getTime() < options.retryAfterMs &&
       row.attemptedAt.getTime() !== row.fetchedAt?.getTime()
     ) {
-      return kept;
+      return { kept, refresh: null };
     }
-    const { done } = startRefresh(location, kept);
-    return kept ?? done;
+    return { kept, refresh: startRefresh(location, kept).done };
+  }
+
+  /** What an ask gets from a decision: the refresh when it must wait. */
+  function served(
+    { kept, refresh }: Decision<T>,
+    fresh: boolean,
+  ): Promise<Cached<T> | null> {
+    if (refresh && (fresh || !kept)) return refresh;
+    return Promise.resolve(kept);
   }
 
   /** The kept answer, unless it answers another question than today's. */
@@ -130,7 +162,7 @@ export function createLocationCache<T>(
     logger.info(
       `${name} for ${key}: refreshing; ${
         kept
-          ? `serving the one from ${kept.fetchedAt.toISOString()} meanwhile`
+          ? `the one from ${kept.fetchedAt.toISOString()} kept meanwhile`
           : 'none kept, the ask waits'
       }`,
     );
@@ -177,17 +209,19 @@ export function createLocationCache<T>(
   }
 
   return {
-    get(location) {
+    async get(location, read = {}) {
+      const fresh = read.fresh ?? false;
       const key = locationLabel(location);
       const running = refreshing.get(key);
       if (running) {
-        return running.kept ? Promise.resolve(running.kept) : running.done;
+        return served({ kept: running.kept, refresh: running.done }, fresh);
       }
-      const looking = reading.get(key);
-      if (looking) return looking;
-      const read = lookup(location).finally(() => reading.delete(key));
-      reading.set(key, read);
-      return read;
+      let looking = reading.get(key);
+      if (!looking) {
+        looking = lookup(location).finally(() => reading.delete(key));
+        reading.set(key, looking);
+      }
+      return served(await looking, fresh);
     },
 
     async settled() {

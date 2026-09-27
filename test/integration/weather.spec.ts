@@ -298,7 +298,7 @@ describe('weather', () => {
       await refreshed(t, 61 * MINUTE);
       expect(forecastHits(stub)).toHaveLength(before + 1);
       expect(t.logs.messages('info', 'Weather')).toEqual([
-        'Forecast for 40.69,-73.98: refreshing; serving the one from 2026-09-27T00:30:00.000Z meanwhile',
+        'Forecast for 40.69,-73.98: refreshing; the one from 2026-09-27T00:30:00.000Z kept meanwhile',
         expect.stringMatching(
           /^Forecast for 40\.69,-73\.98: 16 days in \d+ ms$/,
         ),
