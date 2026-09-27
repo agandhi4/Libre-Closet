@@ -160,7 +160,7 @@ export async function closetGarments(
 /**
  * The owner's wishlist items among `ids`, as the generator locks them. The
  * only read that hands a wishlist item to the generator: goesWithCloset and
- * goesWithCounts (ideas.ts) lock it, and nothing adds it to a pool.
+ * goesWithCount (ideas.ts) lock it, and nothing adds it to a pool.
  */
 export async function wishlistGarments(
   db: Db,

@@ -191,3 +191,27 @@ export function OutfitCountLink(props: {
     </a>
   );
 }
+
+/**
+ * Where a shopping list candidate's count arrives (#18b): replaced by
+ * OutfitCountLink from GET /wardrobe/:id/outfit-count when it scrolls into
+ * view (`revealed`: the list scrolls with the window). Loaded, not
+ * rendered: each count is a search over the closet, and a plan's items are
+ * unbounded, so the page's cost stays the list's and each chip pays for
+ * itself only once seen. Its own hx-indicator keeps the navbar spinner
+ * still, as the cutout's polling does.
+ */
+export function OutfitCountSlot(props: { garmentId: number }) {
+  return (
+    <span
+      class="text-xs text-base-content/50"
+      hx-get={garmentUrl(props.garmentId, undefined, '/outfit-count')}
+      hx-trigger="revealed"
+      hx-swap="outerHTML"
+      hx-indicator="this"
+      data-outfit-count-slot=""
+    >
+      {t('goesWith.COUNTING')}
+    </span>
+  );
+}

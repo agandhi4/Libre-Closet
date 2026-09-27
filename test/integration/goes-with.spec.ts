@@ -4,7 +4,7 @@ import { outfit, planItem } from '../../src/db/schema';
 import { changeCandidates } from '../../src/web/plans/candidates';
 import { createTestApp, type TestApp, unescapeHtml } from './harness';
 import { callTool, createAccessToken, tool } from './mcp';
-import { HX_FRAGMENT } from './pages';
+import { expectFragment, HX_FRAGMENT } from './pages';
 
 /**
  * "Goes with my closet" (#18b): a wishlist item's page judges it against
@@ -473,13 +473,38 @@ describe('goes with my closet', () => {
       await changeCandidates(t.db, t.owner.id, {
         add: { itemIds: [itemId], garmentIds: [sweater] },
       });
+      // The list renders no count itself: each chip loads as it scrolls
+      // into view, so the page's cost is the list's whatever its length.
       const res = await get(`/wardrobe/shopping?plan=${planId}`);
       expect(res.statusCode).toBe(200);
       const row = new RegExp(`id="candidate-${sweater}"[^]*?</li>`).exec(
         unescapeHtml(res.body),
       )![0];
-      expect(row).toContain('Goes with 6 outfits');
-      expect(row).toContain(`href="/wardrobe/${sweater}#goes-with"`);
+      expect(row).not.toContain('Goes with');
+      expect(row).toContain(`hx-get="/wardrobe/${sweater}/outfit-count"`);
+      expect(row).toContain('hx-trigger="revealed"');
+      const chip = await t.inject({
+        method: 'GET',
+        url: `/wardrobe/${sweater}/outfit-count`,
+        headers: HX_FRAGMENT,
+      });
+      expect(chip.statusCode).toBe(200);
+      expectFragment(chip);
+      expect(chip.body).toContain('Goes with 6 outfits');
+      expect(unescapeHtml(chip.body)).toContain(
+        `href="/wardrobe/${sweater}#goes-with"`,
+      );
+    });
+
+    it('answers a count only for the owner’s own wishlist item', async () => {
+      const count = (id: number, cookie?: string) =>
+        get(`/wardrobe/${id}/outfit-count`, cookie);
+      expect((await count(closet['White tee'])).statusCode).toBe(404);
+      expect((await count(othersItem)).statusCode).toBe(404);
+      expect((await count(999_999)).statusCode).toBe(404);
+      expect((await count(othersItem, otherUser)).body).toContain(
+        'Goes with 50+ outfits',
+      );
     });
   });
 });

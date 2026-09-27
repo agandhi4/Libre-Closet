@@ -326,27 +326,21 @@ export async function goesWithCloset(
 }
 
 /**
- * How many outfits each of the owner's wishlist items among `itemIds`
- * makes with the closet (goesWithCloset's count, from the same search): the
- * shopping list's candidate cards. Three statements whatever the number of
- * items; ids that are not the owner's wishlist items are left out.
+ * How many outfits the owner's wishlist item `itemId` makes with the closet
+ * (goesWithCloset's count, from the same search): the shopping list's
+ * candidate chip, GET /wardrobe/:id/outfit-count. Undefined when it is not
+ * one of the owner's wishlist items. Three statements and one search.
  */
-export async function goesWithCounts(
+export async function goesWithCount(
   db: Db,
   ownerId: number,
-  itemIds: readonly number[],
+  itemId: number,
   today: IsoDate,
-): Promise<Map<number, OutfitCount>> {
-  if (itemIds.length === 0) return new Map();
-  const [items, closet, avoid] = await Promise.all([
-    wishlistGarments(db, ownerId, itemIds, today),
+): Promise<OutfitCount | undefined> {
+  const [[item], closet, avoid] = await Promise.all([
+    wishlistGarments(db, ownerId, [itemId], today),
     closetGarments(db, ownerId, today),
     avoidedPairs(db, ownerId),
   ]);
-  return new Map(
-    items.map((item) => [
-      item.id,
-      outfitCount({ item, closet, avoid, seed: item.id }),
-    ]),
-  );
+  return item && outfitCount({ item, closet, avoid, seed: item.id });
 }

@@ -819,7 +819,8 @@
     "SAME": "In both, the same · {count}",
     "CHANGE_QUANTITY": "×{a} → ×{b}",
     "CHANGE_PRIORITY": "{a} → {b} priority",
-    "CHANGE_DETAILS": "details differ"
+    "CHANGE_DETAILS": "details differ",
+    "TOO_MANY_CANDIDATES": "A plan item takes at most {max} candidates: a few to choose between. Remove one before adding another."
   },
   "gallery": {
     "TITLE": "Outfit ideas",
@@ -944,6 +945,7 @@
       "accessory": "Accessories",
       "bag": "Bags",
       "none": "Other"
-    }
+    },
+    "COUNTING": "Counting outfits…"
   }
 }
