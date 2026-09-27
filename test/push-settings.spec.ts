@@ -99,11 +99,10 @@ test.describe('notification settings on the profile page', () => {
     context,
   }) => {
     await context.grantPermissions(['notifications']);
-    await stubPushManager(page, fakeSubscription(), false);
+    // Subscribed already: the stand-in's state lives in the document, so a
+    // subscription made by a tap would be gone after the reload below.
+    await stubPushManager(page, fakeSubscription(), true);
     await page.goto('/auth/profile');
-    await page
-      .getByRole('button', { name: 'Enable notifications on this device' })
-      .click();
     await expect(shown(page, 'on')).toBeVisible();
 
     const reminders = page.locator('form#push-reminders');
@@ -112,31 +111,39 @@ test.describe('notification settings on the profile page', () => {
       name: "Morning: today's outfit",
     });
     await expect(morning).not.toBeChecked();
-    const saved = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === '/push/reminders' &&
-        response.request().method() === 'POST',
-    );
+    const save = () =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === '/push/reminders' &&
+          response.request().method() === 'POST',
+      );
+    let saved = save();
     await morning.check();
     expect((await saved).status()).toBe(200);
     await expect(reminders.getByText('Saved.')).toBeVisible();
+    saved = save();
     await reminders
       .getByLabel('Evening: what did you wear?: Time')
       .selectOption('22:00');
+    await saved;
+    saved = save();
     await reminders
       .getByRole('checkbox', { name: 'Evening: what did you wear?' })
       .check();
-    await expect(
-      page.locator('form#push-reminders select[name="evening"]'),
-    ).toHaveValue(String(22 * 60));
+    await saved;
 
     // A reload asks the server again: the device's reminders are kept.
     await page.reload();
+    const again = page.locator('form#push-reminders');
     await expect(
-      page
-        .locator('form#push-reminders')
-        .getByRole('checkbox', { name: "Morning: today's outfit" }),
+      again.getByRole('checkbox', { name: "Morning: today's outfit" }),
     ).toBeChecked();
+    await expect(
+      again.getByRole('checkbox', { name: 'Evening: what did you wear?' }),
+    ).toBeChecked();
+    await expect(again.locator('select[name="evening"]')).toHaveValue(
+      String(22 * 60),
+    );
 
     // Turned off, the reminders go with the device.
     await page.getByRole('button', { name: 'Turn off on this device' }).click();

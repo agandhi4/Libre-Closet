@@ -181,6 +181,9 @@ describe('push reminders', () => {
       const endpoint = await subscribe();
       const blank = unescapeHtml((await form(endpoint)).body);
       expect(blank).toContain('hx-post="/push/reminders"');
+      // Saves go out in order and answer the status line only.
+      expect(blank).toContain('hx-sync="this:queue last"');
+      expect(blank).toContain('hx-target="find [data-reminders-status]"');
       expect(blank).toContain(`name="endpoint" value="${endpoint}"`);
       expect(blank).not.toMatch(/name="(morning|evening)On" value="1" checked/);
       // The defaults are selected, ready for the toggle.
@@ -194,8 +197,13 @@ describe('push reminders', () => {
         evening: '1260',
       });
       expect(res.statusCode).toBe(200);
+      // Only the status line: the controls stay as the person left them.
       expect(res.body).toContain('Saved.');
-      expect(res.body).toMatch(/name="morningOn" value="1" checked/);
+      expect(res.body).not.toContain('<form');
+      // Read again, the form shows what was saved.
+      expect(unescapeHtml((await form(endpoint)).body)).toMatch(
+        /name="morningOn" value="1" checked/,
+      );
       const row = await deviceAt(endpoint);
       expect(row).toMatchObject({
         morningReminder: 420,

@@ -118,15 +118,19 @@ export function TestResult({ report }: { report: SendReport }) {
 
 /**
  * This device's reminders (#15): a toggle and a time for each, saved on
- * every change (POST /push/reminders answers this again, with `saved`).
- * The endpoint names the device: the browser's own subscription, sent by
- * push.js and carried here for the saves; it never reaches a log or a URL.
- * Shown only while notifications are on (data-show, push.js).
+ * every change. The controls are the person's: a save answers only the
+ * status line under them (ReminderStatus), never the form, so an answer
+ * landing between two quick changes cannot put back what was just changed;
+ * each save posts the whole form, in order (`queue last`: a change made
+ * while a save is in flight is sent after it, where htmx's default would
+ * drop it), so the last one holds everything. The endpoint names the
+ * device: the browser's own subscription, sent by push.js and carried here
+ * for the saves; it never reaches a log or a URL. Shown only while
+ * notifications are on (data-show, push.js).
  */
 export function ReminderSettingsForm(props: {
   endpoint: string;
   settings: ReminderSettings | undefined;
-  saved?: boolean;
 }) {
   const { endpoint, settings } = props;
   if (!settings) {
@@ -143,8 +147,9 @@ export function ReminderSettingsForm(props: {
       class="flex flex-col gap-3 border-t border-base-300 pt-3"
       hx-post="/push/reminders"
       hx-trigger="change"
-      hx-target="this"
-      hx-swap="outerHTML"
+      hx-sync="this:queue last"
+      hx-target="find [data-reminders-status]"
+      hx-swap="innerHTML"
       data-needs-network=""
     >
       <h3 class="font-semibold text-sm">{t('today.reminders.HEADING')}</h3>
@@ -160,10 +165,21 @@ export function ReminderSettingsForm(props: {
         hint={t('today.reminders.EVENING_HINT')}
         minute={settings.evening}
       />
-      <p class="text-xs text-success min-h-4" aria-live="polite">
-        {props.saved ? t('today.reminders.SAVED') : ''}
-      </p>
+      <p
+        class="text-xs min-h-4"
+        aria-live="polite"
+        data-reminders-status=""
+      ></p>
     </form>
+  );
+}
+
+/** POST /push/reminders' answer: the form's status line. */
+export function ReminderStatus(props: { saved: boolean }) {
+  return props.saved ? (
+    <span class="text-success">{t('today.reminders.SAVED')}</span>
+  ) : (
+    <span class="text-error">{t('today.reminders.NOT_REGISTERED')}</span>
   );
 }
 

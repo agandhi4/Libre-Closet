@@ -15,7 +15,7 @@ import {
   upsertDevice,
 } from './queries';
 import type { PushSender, VapidConfig } from './sender';
-import { ReminderSettingsForm, TestResult } from './settings';
+import { ReminderSettingsForm, ReminderStatus, TestResult } from './settings';
 
 /**
  * The browser's PushSubscription.toJSON(), as public/js/push.js posts it.
@@ -160,7 +160,8 @@ export const pushRoutes: FastifyPluginCallbackTypebox<PushRouteOptions> = (
   );
 
   // Every change of the reminders form (htmx): both times saved, stamped
-  // now (a time already past today first sends tomorrow).
+  // now (a time already past today first sends tomorrow). Answers only the
+  // form's status line (ReminderStatus): the controls stay the person's.
   app.post(
     '/push/reminders',
     { schema: { body: RemindersBody } },
@@ -188,20 +189,14 @@ export const pushRoutes: FastifyPluginCallbackTypebox<PushRouteOptions> = (
       );
       if (deviceId === undefined) {
         logger.info(`User ${userId} set reminders on a device not theirs`);
-        return renderFragment(
-          reply,
-          <ReminderSettingsForm endpoint={endpoint} settings={undefined} />,
-        );
+        return renderFragment(reply, <ReminderStatus saved={false} />);
       }
       const time = (minute: number | null) =>
         minute === null ? 'off' : String(minute);
       logger.info(
         `User ${userId} set reminders on push device ${deviceId}: morning ${time(settings.morning)}, evening ${time(settings.evening)} (minutes after midnight)`,
       );
-      return renderFragment(
-        reply,
-        <ReminderSettingsForm endpoint={endpoint} settings={settings} saved />,
-      );
+      return renderFragment(reply, <ReminderStatus saved />);
     },
   );
 
