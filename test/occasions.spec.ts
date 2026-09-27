@@ -42,8 +42,9 @@ test('a three-outfit day: planned by occasion, stacked in order, each with its p
     await sheet.getByRole('radio', { name: occasion, exact: true }).check();
     await sheet.getByRole('button', { name: 'Pick a saved outfit' }).click();
     // The Saved tab picking for the day (R5), with the occasion chosen.
+    // A GET form encodes the colon: for=day%3A<day>.
     await expect(page).toHaveURL(
-      new RegExp(`/outfits\\?for=day:${day}&occasion=`),
+      new RegExp(`/outfits\\?for=day(:|%3A)${day}&occasion=`),
     );
     await expect(page.locator(`[data-destination-day="${day}"]`)).toContainText(
       `· ${occasion}`,
