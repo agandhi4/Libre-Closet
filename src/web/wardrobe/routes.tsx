@@ -63,6 +63,7 @@ import {
   updateGarmentProperties,
 } from './queries';
 import { garmentRef, replacementsOf } from '../wishlist/queries';
+import { brandSizeFor } from '../sizes/queries';
 import {
   destinationValues,
   postedDestination,
@@ -720,8 +721,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       // wishlist item has no wears, washes or capsules (closet reads), and
       // says what it replaces; a closet garment lists the wishlist items
       // that would replace it.
-      const [capsules, replaces, replacedBy, own, goesWith] = await Promise.all(
-        [
+      const [capsules, replaces, replacedBy, own, goesWith, brandSize] =
+        await Promise.all([
           garment.status === 'wishlist'
             ? []
             : capsulesOfGarment(db, access.ownerId, id),
@@ -733,8 +734,12 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             : [],
           ownerRecords(garment, access, today),
           judgeWishlistItem(garment, access, today),
-        ],
-      );
+          // The owner's size in a wishlist item's brand (#24): their body,
+          // so never read for a grantee.
+          garment.status === 'wishlist' && access.isOwner && garment.brand
+            ? brandSizeFor(db, access.ownerId, garment.brand)
+            : undefined,
+        ]);
       return renderPage(
         reply,
         <GarmentPage
@@ -753,6 +758,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
               avoided: own.avoided,
             },
             goesWith,
+            brandSize,
             outfits: own.outfits,
             canEdit: access.canManage,
             canDelete: access.isOwner,

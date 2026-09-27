@@ -30,6 +30,8 @@ import {
   WhereaboutsSection,
 } from '../wears/wear-section';
 import type { GarmentRef } from '../wishlist/queries';
+import type { BrandSize } from '../sizes/queries';
+import { BrandSizeNote } from '../sizes/views';
 import { categoryLabel, priceLabel } from './garment';
 import { GarmentCondition } from './garment-condition';
 import { fabricWeightLabel, valueLabel } from './labels';
@@ -65,6 +67,11 @@ export interface GarmentPageModel {
    * wishlist.
    */
   goesWith: GoesWithCloset | undefined;
+  /**
+   * The owner's size in a wishlist item's brand (#24), under the facts.
+   * Undefined for a grantee and for anything not on the wishlist.
+   */
+  brandSize: BrandSize | undefined;
   /**
    * "In N outfits" (#84): the owner's outfits that hold it, private like
    * outfits. Undefined for a grantee and for a wishlist item.
@@ -169,6 +176,7 @@ function Summary({ model }: { model: GarmentPageModel }) {
       <div class="flex flex-col gap-2">
         <StatusBadge status={garment.status} />
         <FactsLine garment={garment} />
+        <BrandSizeNote note={model.brandSize} />
       </div>
       {model.wear ? (
         <WearSection garment={garment} panel={model.wear} />
