@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import { addDays } from '../src/web/calendar/calendar-date';
 import { createGarment, createOutfit } from './support/e2e-data';
 import { SAME_ORIGIN, signIn } from './support/e2e-session';
@@ -41,6 +41,28 @@ async function tapBack(page: Page, to: RegExp): Promise<{ wentBack: boolean }> {
   return { wentBack: (await historyLength(page)) === before };
 }
 
+/**
+ * A finger's tap on a Styling strip's item: once the strip has come to rest
+ * with the item centred, a click at the item's middle. Not `locator.click()`:
+ * its scroll-into-view (retried with other alignments under load) scrolls a
+ * snapping strip, which then settles on a neighbour, so the page would open
+ * one garment and snapshot the row choosing another.
+ */
+async function tapCentredItem(page: Page, item: Locator): Promise<void> {
+  await expect
+    .poll(() =>
+      item.evaluate((element) => {
+        const strip = element.closest('.styling-strip')!;
+        const a = element.getBoundingClientRect();
+        const b = strip.getBoundingClientRect();
+        return Math.abs(a.left + a.width / 2 - (b.left + b.width / 2)) < 2;
+      }),
+    )
+    .toBe(true);
+  const box = (await item.boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 test('wardrobe, a garment, back: the wardrobe, back in history', async ({
   page,
 }) => {
@@ -79,7 +101,7 @@ test('Styling, a garment, back: Styling with its rows as they were', async ({
   await expect(chosen).toHaveValue(String(oldTee));
 
   // A tap on the chosen garment opens its page.
-  await tops.locator(`[data-garment-id="${oldTee}"]`).click();
+  await tapCentredItem(page, tops.locator(`[data-garment-id="${oldTee}"]`));
   await expect(page).toHaveURL(new RegExp(`/wardrobe/${oldTee}$`));
   await expect(page.locator('h1')).toHaveText('Old tee');
 
@@ -138,7 +160,7 @@ test('Styling, a garment, Edit, Save, back: Styling, never the form', async ({
   await page.goto('/styling');
 
   const tops = page.locator('[data-styling-row="top"]').first();
-  await tops.locator(`[data-garment-id="${tee}"]`).click();
+  await tapCentredItem(page, tops.locator(`[data-garment-id="${tee}"]`));
   await expect(page).toHaveURL(new RegExp(`/wardrobe/${tee}$`));
 
   const menu = await openGarmentMenu(page);
