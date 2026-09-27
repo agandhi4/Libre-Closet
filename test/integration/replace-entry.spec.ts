@@ -1,10 +1,18 @@
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { outfit, outfitCalendar, selfie, weekPlan } from '../../src/db/schema';
+import {
+  outfit,
+  outfitCalendar,
+  selfie,
+  tripOutfit,
+  weekPlan,
+} from '../../src/db/schema';
 import type { Occasion } from '../../src/wardrobe/occasions';
 import { addDays, type IsoDate } from '../../src/web/calendar/calendar-date';
 import { replaceEntryOutfit } from '../../src/web/calendar/replace';
 import { pickIdea } from '../../src/web/gallery/ideas';
+import { tripModel } from '../../src/web/trips/model';
+import { addTripOutfit, createTrip } from '../../src/web/trips/queries';
 import {
   createWeekPlan,
   recordAutoEntry,
@@ -489,6 +497,50 @@ describe('changing a planned outfit in place', () => {
         expect(res.statusCode).toBe(302);
         expect(await outfitExists(entry.outfitId), occasion).toBe(true);
       }
+    });
+
+    it('keeps a planner-made outfit a trip holds, with the trip’s packing list', async () => {
+      const day = addDays(t.today(), 1);
+      const auto = await planAuto([tops[0], bottoms[1], shoes[1]], day, 'work');
+      const tripId = await createTrip(t.db, t.owner.id, {
+        name: 'Austin',
+        destination: null,
+        startsOn: addDays(day, 3),
+        endsOn: addDays(day, 5),
+        notes: null,
+      });
+      expect(
+        await addTripOutfit(t.db, {
+          tripId,
+          ownerId: t.owner.id,
+          outfitId: auto.outfitId,
+        }),
+      ).toBe('added');
+      const chosen = await outfitOf([tops[1], bottoms[0], shoes[0]]);
+
+      const res = await post('/calendar', {
+        date: day,
+        outfitId: String(chosen),
+        occasion: 'work',
+        replace: String(auto.entryId),
+      });
+      expect(res.statusCode).toBe(302);
+      expect(await entriesFor(day, 'work')).toMatchObject([
+        { id: auto.entryId, outfitId: chosen },
+      ]);
+      expect(await outfitExists(auto.outfitId)).toBe(true);
+      expect(
+        await t.db.$count(
+          tripOutfit,
+          and(
+            eq(tripOutfit.tripId, tripId),
+            eq(tripOutfit.outfitId, auto.outfitId),
+          ),
+        ),
+      ).toBe(1);
+      const model = await tripModel(t.db, t.owner.id, tripId, t.today());
+      expect(model!.undated.map((o) => o.outfitId)).toEqual([auto.outfitId]);
+      expect(model!.packing.garments).toBe(3);
     });
 
     it('keeps an outfit the planner found already saved: it was the person’s', async () => {
