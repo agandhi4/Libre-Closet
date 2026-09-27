@@ -538,7 +538,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
       await expect(page).toHaveURL(/\/wardrobe\/new\?photo=/);
       await expect(page.locator('#link-photo img')).toBeVisible();
-      await shot(page, `74-demo-add-from-photo${suffix}`);
+      await shot(page, `75-demo-add-from-photo${suffix}`);
       await page.locator('input[name="name"]').fill('Suede overshirt');
       await page.locator('#garment-category').fill('jacket');
       await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -548,7 +548,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       // At once, not through shot(): waiting for the network to settle
       // could outlast the stub's 3 s, and this shot is the cutout pending.
       await page.screenshot({
-        path: `${DIR}/75-demo-add-from-photo-saved${suffix}.png`,
+        path: `${DIR}/76-demo-add-from-photo-saved${suffix}.png`,
         fullPage: true,
         animations: 'disabled',
       });
