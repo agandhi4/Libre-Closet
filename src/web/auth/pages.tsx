@@ -6,6 +6,8 @@ import { Layout } from '../layout/layout';
 import { Navbar } from '../layout/navbar';
 import { PushSettings } from '../push/settings';
 import type { ViewContext } from '../view-context';
+import type { WeatherSettings as Settings } from '../weather/queries';
+import { WeatherSettings } from '../weather/settings';
 import { ErrorAlert, Field, Fieldset, PostForm, SubmitButton } from './form';
 import { LOGOUT_PATH } from './logout';
 import type {
@@ -172,6 +174,8 @@ export function RegisterPage(props: { ctx: ViewContext } & RegisterFormState) {
 export function ProfilePage(props: {
   ctx: ViewContext;
   passwordChanged: boolean;
+  /** The weather section's state; absent with WEATHER_ENABLED=false. */
+  weather?: { settings: Settings; timeZone: string; now: Date };
 }) {
   return (
     <AccountShell ctx={props.ctx}>
@@ -198,6 +202,7 @@ export function ProfilePage(props: {
       </a>
       {/* Web Push needs the service worker, which only PWA_ENABLED serves. */}
       {props.ctx.pwaEnabled && <PushSettings />}
+      {props.weather && <WeatherSettings {...props.weather} />}
     </AccountShell>
   );
 }
