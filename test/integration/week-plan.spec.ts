@@ -1221,23 +1221,43 @@ describe('the weekly auto-plan', () => {
           const today = (await weekEntries()).find((e) => e.day === TODAY)!;
           expect(today.outfitId).not.toBe(planned.outfitId);
           expect(await garmentsOf(today.outfitId)).toContain(coat);
+          // One push: the reminder says what swapped, then the day's outfit.
           const [reminder] = reminderTo();
-          expect(reminder.payload.body).toBe(
+          expect(reminder.payload.body.split('\n')).toEqual([
+            expect.stringMatching(/^Swapped in .+: it turned cold$/),
             `All day: ${await nameOf(today.outfitId)}`,
-          );
-          expect(reminder.payload.body).not.toBe(`All day: ${oldName}`);
-          // The swap notice went first, and the day is claimed: the
-          // re-plan's own run finds nothing left to do.
-          expect(sends.map((s) => s.payload.tag)).toEqual([
-            'week-replan',
-            'today-morning',
           ]);
+          expect(reminder.payload.body).not.toContain(`All day: ${oldName}`);
+          expect(sends.map((s) => s.payload.tag)).toEqual(['today-morning']);
+          // The day is claimed: the re-plan's own run finds nothing to do.
           expect(await replanWeeks(deps, at(TODAY, hour))).toMatchObject({
             claimed: 0,
           });
-          expect(swapNotices()).toHaveLength(1);
+          expect(swapNotices()).toEqual([]);
         },
       );
+
+      it('names today’s swap in the reminder and another day’s in one swap notice', async () => {
+        await planWarm();
+        await remindAt(REPLAN_HOUR);
+        forecastDays = weekAt((day) =>
+          day === TODAY || day === WEEK[3] ? -2 : 24,
+        );
+        const run = await sendDueReminders(reminders, at(TODAY, REPLAN_HOUR));
+        expect(run).toMatchObject({ claimed: 1, sent: 1, failed: 0 });
+        expect(sends.map((s) => s.payload.tag).sort()).toEqual([
+          'today-morning',
+          'week-replan',
+        ]);
+        expect(reminderTo()[0].payload.body).toMatch(
+          /^Swapped in .+: it turned cold\nAll day: /,
+        );
+        const [notice] = swapNotices();
+        expect(notice.payload.body).toMatch(
+          /^Thursday turned cold: swapped in /,
+        );
+        expect(notice.payload.body).not.toContain('Monday');
+      });
 
       it('two servers running the reminders and the re-plan at the same minute re-plan once and remind once, after the re-plan', async () => {
         const logger = t.logger.child({ context: 'WeekPlan' });
@@ -1279,10 +1299,14 @@ describe('the weekly auto-plan', () => {
             expect(today, `round ${round}`).toHaveLength(1);
             expect(today[0].outfitId).not.toBe(planned.outfitId);
             expect(reminderTo(), `round ${round}`).toHaveLength(1);
-            expect(reminderTo()[0].payload.body).toBe(
-              `All day: ${await nameOf(today[0].outfitId)}`,
-            );
-            expect(swapNotices(), `round ${round}`).toHaveLength(1);
+            const body = reminderTo()[0].payload.body;
+            expect(
+              body.endsWith(`All day: ${await nameOf(today[0].outfitId)}`),
+            ).toBe(true);
+            // Said once: in the reminder when it ran the re-plan, in a swap
+            // notice when the minutely run did.
+            const inReminder = body.startsWith('Swapped in ') ? 1 : 0;
+            expect(swapNotices().length + inReminder, `round ${round}`).toBe(1);
             expect(await t.db.$count(weekReplan)).toBe(1);
             expect((await weekEntries()).map((e) => e.slot).sort()).toEqual(
               TEMPLATE_SLOTS,

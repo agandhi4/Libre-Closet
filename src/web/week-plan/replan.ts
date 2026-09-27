@@ -157,13 +157,18 @@ export async function replanWeeks(
 /**
  * `userId`'s re-plan for today, once a day whoever asks (see the module
  * comment): the judgement and its writes in one transaction with the
- * day's claim, then the swap notice. Never throws: a failure is logged and
- * the day claimed all the same, so it is not retried every minute.
+ * day's claim, then the swap notice. With `announcesToday` (the morning
+ * reminder, which names today's swaps in its own text) the notice leaves
+ * today's swaps out and goes only for other days': one push per swap,
+ * never two. The returned swaps are all of them, today's included. Never
+ * throws: a failure is logged and the day claimed all the same, so it is
+ * not retried every minute.
  */
 export async function replanToday(
   deps: ReplanDeps,
   userId: number,
   now: Date,
+  { announcesToday = false }: { announcesToday?: boolean } = {},
 ): Promise<ReplanOutcome> {
   const today = todayIn(deps.timeZone, now);
   const started = performance.now();
@@ -183,7 +188,11 @@ export async function replanToday(
     deps.logger.info(
       `Week re-plan for user ${userId} on ${today}: ${swaps.length} swapped (${swapped}), ${kept} kept in ${ms} ms`,
     );
-    const pushed = swaps.length > 0 && (await pushSwaps(deps, userId, swaps));
+    const unannounced = announcesToday
+      ? swaps.filter((s) => s.slot.day !== today)
+      : swaps;
+    const pushed =
+      unannounced.length > 0 && (await pushSwaps(deps, userId, unannounced));
     return { kind: 'replanned', swaps, kept, pushed };
   } catch (error) {
     deps.logger.error(
@@ -357,6 +366,40 @@ const CHANGE_LINES: Readonly<Record<NeedsChange, StringKey>> = {
   dry: 'weekPlan.push.DRY',
   swing: 'weekPlan.push.SWING',
 };
+
+// Why a swap happened, for a line that names the slot elsewhere: the
+// morning reminder's "Swapped in Chelsea boots: Bean Boots is at repair".
+const CHANGE_WHY: Readonly<Record<NeedsChange, StringKey>> = {
+  forecast: 'weekPlan.why.FORECAST',
+  rain: 'weekPlan.why.RAIN',
+  colder: 'weekPlan.why.COLDER',
+  warmer: 'weekPlan.why.WARMER',
+  dry: 'weekPlan.why.DRY',
+  swing: 'weekPlan.why.SWING',
+};
+
+const UNWEARABLE_WHY: Readonly<Record<Unwearable['reason'], StringKey>> = {
+  lent: 'weekPlan.why.LENT',
+  repair: 'weekPlan.why.REPAIR',
+  archived: 'weekPlan.why.ARCHIVED',
+  wishlist: 'weekPlan.why.WISHLIST',
+  dirty: 'weekPlan.why.DIRTY',
+  deleted: 'weekPlan.why.DELETED',
+};
+
+/**
+ * Today's swap as the morning reminder says it, before the day's outfits
+ * (src/web/push/reminders.ts): "Swapped in Wool coat: it turned cold".
+ */
+export function reminderSwapLine(swap: Swap): string {
+  const why =
+    swap.cause.kind === 'weather'
+      ? t(CHANGE_WHY[swap.cause.change])
+      : t(UNWEARABLE_WHY[swap.cause.unwearable.reason], {
+          garment: swap.garment ?? '',
+        });
+  return t('today.push.SWAPPED', { garments: swap.swappedIn, why });
+}
 
 const UNWEARABLE_LINES: Readonly<Record<Unwearable['reason'], StringKey>> = {
   lent: 'weekPlan.push.LENT',

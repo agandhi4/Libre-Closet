@@ -10,7 +10,12 @@ import { TODAY_PATH } from '../today/urls';
 import { userWeather, type WeatherService } from '../weather/service';
 import { todayLine } from '../weather/summary';
 import { weatherLineText } from '../weather/views';
-import { type ReplanDeps, replanToday } from '../week-plan/replan';
+import {
+  reminderSwapLine,
+  type ReplanDeps,
+  replanToday,
+  type Swap,
+} from '../week-plan/replan';
 import type { PushPayload } from './payload';
 import {
   claimReminders,
@@ -44,7 +49,10 @@ import type { PushSender } from './sender';
  * whoever asks, the claim committed with the work). So a 05:00 reminder
  * never names an outfit the day's own re-plan is about to swap, whatever
  * the two minute timers' order, and with two servers the one that loses
- * the claim waits for the other's re-plan to commit before reading.
+ * the claim waits for the other's re-plan to commit before reading. What
+ * that re-plan swapped today is said in the reminder itself, first ("Swapped
+ * in Wool coat: it turned cold"): one push, not a swap notice beside it;
+ * other days' swaps still get the re-plan's notice.
  */
 
 /**
@@ -125,10 +133,9 @@ export async function sendDueReminders(
       `Claimed the ${kind} reminder for user ${userId}, devices ${deviceIds.join(', ')}`,
     );
     try {
-      // Never throws: a failed re-plan is logged, and the reminder still
-      // names the plan as it stands.
-      if (kind === 'morning') await replanToday(deps.replan, userId, now);
-      const payload = await reminderPayload(deps, userId, kind, now);
+      const swapped =
+        kind === 'morning' ? await swappedToday(deps, userId, now) : [];
+      const payload = await reminderPayload(deps, userId, kind, now, swapped);
       if (!payload) {
         run.skipped += 1;
         logger.info(
@@ -169,14 +176,35 @@ export async function pruneReminders(
 }
 
 /**
+ * The person's re-plan for today, if nothing has run it yet, announcing
+ * today's swaps itself: what it swapped on today's entries, for the
+ * reminder to say. Never throws: a failed re-plan is logged, and the
+ * reminder names the plan as it stands.
+ */
+async function swappedToday(
+  deps: ReminderDeps,
+  userId: number,
+  now: Date,
+): Promise<Swap[]> {
+  const outcome = await replanToday(deps.replan, userId, now, {
+    announcesToday: true,
+  });
+  if (outcome.kind !== 'replanned') return [];
+  const today = todayIn(deps.timeZone, now);
+  return outcome.swaps.filter((swap) => swap.slot.day === today);
+}
+
+/**
  * The reminder a person gets now, from Today as the page shows it; null
- * for an evening one when something is already marked worn today.
+ * for an evening one when something is already marked worn today. A
+ * morning one says first what today's re-plan swapped (`swapped`).
  */
 export async function reminderPayload(
   deps: ReminderDeps,
   userId: number,
   kind: ReminderKind,
   now: Date,
+  swapped: readonly Swap[],
 ): Promise<PushPayload | null> {
   const model = await todayFor(deps, userId, now);
   if (kind === 'evening') {
@@ -197,6 +225,7 @@ export async function reminderPayload(
   return {
     title: t('today.push.MORNING_TITLE'),
     body: [
+      ...swapped.map(reminderSwapLine),
       weather,
       outfits.length > 0
         ? outfits.join(' · ')
