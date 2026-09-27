@@ -31,6 +31,11 @@ import type { Photos } from '../web/files/photos';
 import { insertPhotoRow, type NewPhotoRow } from '../web/files/queries';
 import { t } from '../web/i18n';
 import { createOutfit } from '../web/outfits/queries';
+import {
+  createPlan,
+  saveStyleProfile,
+  setActivePlan,
+} from '../web/plans/queries';
 import { markWashed, setAway, setEntryWorn } from '../web/wears/queries';
 import {
   acceptInvite,
@@ -80,6 +85,8 @@ export interface SeedReport {
   photos: number;
   outfits: number;
   capsules: number;
+  /** Wardrobe plans (#34), with the style profile when the bible has one. */
+  plans: number;
   entries: number;
   worn: number;
   /** garment_wear rows the worn entries wrote. */
@@ -191,6 +198,7 @@ export async function seedPersona(
           },
         });
       }
+      await writePlans(tx, userId, persona);
       const wears = await writeHistory(tx, life, {
         userId,
         outfitIds,
@@ -205,6 +213,7 @@ export async function seedPersona(
         photos: photos.size,
         outfits: outfitIds.length,
         capsules: persona.capsules.length,
+        plans: persona.plans.length,
         entries: life.entries.length,
         worn: life.entries.filter((e) => e.worn).length,
         wears,
@@ -213,7 +222,7 @@ export async function seedPersona(
       };
     });
     logger.info(
-      `Seeded ${persona.key} as user ${report.userId}: ${report.garments} garments, ${report.wishlist} wishlist items, ${report.photos} photos, ${report.outfits} outfits, ${report.capsules} capsules, ${report.entries} calendar entries (${report.worn} worn, ${report.wears} wears), ${report.washes} laundry days in ${report.ms}ms`,
+      `Seeded ${persona.key} as user ${report.userId}: ${report.garments} garments, ${report.wishlist} wishlist items, ${report.photos} photos, ${report.outfits} outfits, ${report.capsules} capsules, ${report.plans} plans, ${report.entries} calendar entries (${report.worn} worn, ${report.wears} wears), ${report.washes} laundry days in ${report.ms}ms`,
     );
     return report;
   } catch (error) {
@@ -224,6 +233,29 @@ export async function seedPersona(
       await deps.photos.deleteVariants(photo.fileName);
     }
     throw error;
+  }
+}
+
+/**
+ * The bible's style profile and wardrobe plans (#34), through the app's
+ * writers: saveStyleProfile, createPlan with its items (the first plan is
+ * active by the app's rule), then setActivePlan for the one marked
+ * `(active)`.
+ */
+async function writePlans(
+  tx: Queryable,
+  userId: number,
+  persona: Persona,
+): Promise<void> {
+  if (persona.styleProfile) {
+    await saveStyleProfile(tx, userId, persona.styleProfile);
+  }
+  for (const plan of persona.plans) {
+    const id = await createPlan(tx, userId, plan.fields, plan.items);
+    // The bible's names are checked unique (persona.ts): unreachable.
+    if (id === 'name-taken')
+      throw new Error(`Plan "${plan.fields.name}" twice`);
+    if (plan.active) await setActivePlan(tx, id, userId);
   }
 }
 
@@ -595,7 +627,7 @@ async function seedOne(
   const report = await seedPersona(command, persona, options);
   output.write(
     report
-      ? `${persona.key}: seeded ${report.garments} garments, ${report.wishlist} wishlist items, ${report.photos} photos, ${report.outfits} outfits, ${report.capsules} capsules, ${report.entries} calendar entries in ${(report.ms / 1000).toFixed(1)} s. Sign in as ${persona.account.email} with ${options.password}\n`
+      ? `${persona.key}: seeded ${report.garments} garments, ${report.wishlist} wishlist items, ${report.photos} photos, ${report.outfits} outfits, ${report.capsules} capsules, ${report.plans} plans, ${report.entries} calendar entries in ${(report.ms / 1000).toFixed(1)} s. Sign in as ${persona.account.email} with ${options.password}\n`
       : `${persona.key}: already seeded, left as it is (--reset rebuilds it)\n`,
   );
   const account = await findUserByEmail(
