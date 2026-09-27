@@ -1,6 +1,6 @@
 import type { FastifyPluginCallbackTypebox } from '@fastify/type-provider-typebox';
 import { Type } from '@sinclair/typebox';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { sessionUserId } from '../../auth/require-session';
 import { t } from '../../i18n';
 import type { WebOptions } from '../../plugin';
@@ -94,6 +94,20 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       />,
       { status },
     );
+  }
+
+  /** Counts a photo choice; true (and logged) past LINK_IMPORT_LIMIT. */
+  async function photoChoiceLimited(
+    request: FastifyRequest,
+    userId: number,
+  ): Promise<boolean> {
+    const verdict = await photoChoiceLimit(request);
+    // `isAllowed` is the plugin's allow list; the count is isExceeded.
+    if (verdict.isAllowed || !verdict.isExceeded) return false;
+    logger.warn(
+      `Rate limit reached: link photo choice by user ${userId}, retry in ${verdict.ttlInSeconds}s`,
+    );
+    return true;
   }
 
   // The link page, from the new garment form's "Add from a link", the
@@ -204,12 +218,7 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const current = request.body.linkPhoto || undefined;
-      // `isAllowed` is the plugin's allow list; the count is isExceeded.
-      const verdict = await photoChoiceLimit(request);
-      if (!verdict.isAllowed && verdict.isExceeded) {
-        logger.warn(
-          `Rate limit reached: link photo choice by user ${userId}, retry in ${verdict.ttlInSeconds}s`,
-        );
+      if (await photoChoiceLimited(request, userId)) {
         return renderFragment(
           reply,
           <LinkPhotoSlot
