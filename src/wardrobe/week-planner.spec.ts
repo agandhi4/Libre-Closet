@@ -216,6 +216,25 @@ describe('planWeek', () => {
     }
   });
 
+  it('plans the same week from the same closet whatever its ids and row order (a reseed)', () => {
+    const colorsOf = (plan: ReturnType<typeof planWeek>) =>
+      plan.planned.map((slot) => [
+        slot.day,
+        slot.idea.garments.map((g) => `${g.role} ${g.colors.join('/')}`),
+      ]);
+    const pool = roomyCloset();
+    const before = planWeek(input({ pool }));
+    // Reseeded: new ids, in the same relative order, and the rows read back
+    // in another order (Postgres returns a query's rows in no set order).
+    const reseeded = pool
+      .map((g) => ({ ...g, id: g.id + 1000 }))
+      .reverse()
+      .sort((a, b) => (a.role < b.role ? -1 : a.role > b.role ? 1 : 0));
+    expect(colorsOf(planWeek(input({ pool: reseeded })))).toEqual(
+      colorsOf(before),
+    );
+  });
+
   it('never plans the same outfit twice in the week, nor a saved one', () => {
     const pool = roomyCloset();
     const [white] = pool;
