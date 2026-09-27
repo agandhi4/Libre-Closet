@@ -32,7 +32,11 @@ function AccountShell(props: {
       ogDescription={props.ogDescription}
     >
       <Navbar ctx={props.ctx} />
-      <main class="flex flex-col justify-center items-center h-full gap-3">
+      {/* Centred while it fits; from the top once it does not (the profile's
+          sections), so nothing ends up under the fixed navbar, where no
+          scroll reaches it. The padding clears the navbar and the dock, as
+          on every other page. */}
+      <main class="flex flex-col justify-center-safe items-center min-h-full gap-3 px-4 pt-20 pb-24">
         {props.children}
       </main>
       <Dock ctx={props.ctx} />
