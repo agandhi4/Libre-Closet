@@ -65,7 +65,9 @@ export const ACCOUNT_LIMIT: RateLimitOptions = {
 /**
  * The routes that fetch a URL the user supplied through the outbound
  * fetcher (the link import and its photo choice; one import fetches the
- * page and up to MAX_PHOTO_CHOICES images). Per signed-in user, like
+ * page and up to MAX_PHOTO_CHOICES images). The photo choice applies it
+ * through `createRateLimit` rather than its route config: it is an
+ * hx-post, and its refusal must be a 200 answer htmx swaps. Per signed-in user, like
  * ACCOUNT_LIMIT: generous for someone adding what they bought, and a
  * ceiling on how hard the server can be made to hammer another site.
  */

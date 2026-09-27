@@ -207,6 +207,25 @@ describe('adding a garment from a link', () => {
       expect(sites.hits.length).toBe(hits);
     });
 
+    it('lets shared text through the field: a text input for a URL keyboard, not type="url"', async () => {
+      const res = await t.inject({
+        method: 'GET',
+        url: '/wardrobe/new/from-link',
+      });
+      const field = /<input[^>]*id="link-url"[^>]*>/.exec(res.body)?.[0];
+      expect(field).toContain('type="text"');
+      expect(field).toContain('inputmode="url"');
+
+      // What such a field posts: the words and the link, which linkIn finds.
+      const { cookie } = await signUp('sharer@example.com');
+      const shared = await importLink(
+        `Heavyweight Pocket Tee | Studio Knit ${sites.url('/products/tee')}`,
+        { cookie },
+      );
+      expect(shared.statusCode).toBe(200);
+      expect(shared.body).toContain('value="Heavyweight Pocket Tee"');
+    });
+
     it('says so when the shared text holds no link', async () => {
       const res = await t.inject({
         method: 'GET',
@@ -325,6 +344,42 @@ describe('adding a garment from a link', () => {
       expect(linkPhotoIn(res.body)).toBe(current);
       expect(res.body).toContain(text('linkImport.HTTP_STATUS'));
       expect(await storedOriginals()).toContain(current);
+    });
+
+    it('queues the taps on the choice group, so each pick posts the photo the last one left', async () => {
+      const { cookie } = await signUp('picker@example.com');
+      const page = await importLink(sites.url('/products/tee'), { cookie });
+      const buttons = page.body.match(/<button[^>]*name="url"[^>]*>/g) ?? [];
+      // Two photos and "No photo".
+      expect(buttons).toHaveLength(3);
+      for (const button of buttons) {
+        expect(button).toContain('hx-sync="#link-photo-choices:queue last"');
+      }
+      expect(page.body).toContain('id="link-photo-choices"');
+    });
+
+    it('answers the slot, keeping the photo, past the rate limit (htmx swaps no 429)', async () => {
+      const { cookie } = await signUp('choosy@example.com');
+      const current = `${randomUUID()}.webp`;
+      const choose = () =>
+        t.inject({
+          method: 'POST',
+          url: '/wardrobe/new/from-link/photo',
+          payload: { url: '', linkPhoto: current },
+          headers: { cookie, 'hx-request': 'true' },
+        });
+      for (let i = 0; i < 10; i++) {
+        const res = await choose();
+        expect(res.body).not.toContain(text('linkImport.RATE_LIMITED'));
+      }
+
+      const refused = await choose();
+      expect(refused.statusCode).toBe(200);
+      expect(refused.body).toContain(text('linkImport.RATE_LIMITED'));
+      expect(linkPhotoIn(refused.body)).toBe(current);
+      expect(t.logs.messages('warn', 'Web').join('\n')).toMatch(
+        /Rate limit reached: link photo choice by user \d+/,
+      );
     });
 
     it('never deletes a photo that has a row', async () => {

@@ -67,6 +67,10 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 ) => {
   const { db, logger, photos, fetcher } = options;
   const importDeps = { db, fetcher, photos, logger };
+  // The photo choice is an hx-post, and htmx swaps no 4xx: a route-level
+  // limit's 429 page was discarded and a tap past the limit did nothing. So
+  // the choice counts itself and answers the slot with the message.
+  const photoChoiceLimit = app.createRateLimit(LINK_IMPORT_LIMIT);
   const writeDeps: WardrobeDeps = {
     db,
     photos,
@@ -191,18 +195,31 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 
   // Another of the page's photos (or none) on the prefilled form: fetched
   // and stored as the pending photo, the one it replaces discarded (only if
-  // it is this user's and still pending). Always answers the slot, a refusal with its message
-  // (htmx would not swap a 4xx) and the photo it had.
+  // it is this user's and still pending). Always answers the slot, a
+  // refusal (the rate limit's included) with its message and the photo it
+  // had: htmx would not swap a 4xx.
   app.post(
     LINK_PHOTO_PATH,
-    {
-      config: { rateLimit: LINK_IMPORT_LIMIT },
-      schema: { querystring: OwnerQuery, body: LinkPhotoBody },
-    },
+    { schema: { querystring: OwnerQuery, body: LinkPhotoBody } },
     async (request, reply) => {
+      const userId = sessionUserId(request);
+      const current = request.body.linkPhoto || undefined;
+      // `isAllowed` is the plugin's allow list; the count is isExceeded.
+      const verdict = await photoChoiceLimit(request);
+      if (!verdict.isAllowed && verdict.isExceeded) {
+        logger.warn(
+          `Rate limit reached: link photo choice by user ${userId}, retry in ${verdict.ttlInSeconds}s`,
+        );
+        return renderFragment(
+          reply,
+          <LinkPhotoSlot
+            photo={current}
+            errors={[t('linkImport.RATE_LIMITED')]}
+          />,
+        );
+      }
       // The pending photo is the fetching user's, not the wardrobe's; the
       // wardrobe is still checked, so only someone who may add to it fetches.
-      const userId = sessionUserId(request);
       await authorizeWardrobe(
         db,
         userId,
@@ -210,7 +227,6 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         'manage',
         'Garment not found',
       );
-      const current = request.body.linkPhoto || undefined;
       const url = request.body.url?.trim();
       let photo: string | undefined;
       if (url) {
