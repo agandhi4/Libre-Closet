@@ -205,6 +205,24 @@ export function BackLink(props: { href: string; historyBack?: boolean }) {
   );
 }
 
+/**
+ * A form page's Cancel: a back arrow in words (public/js/back.js). It goes
+ * back to the page the form was opened from, as history holds it, and to
+ * `href` (the app bar's `back`) only on a cold entry; either way the form
+ * is left done, so the page reached never goes back into it.
+ */
+export function CancelLink(props: { href: string; class?: string }) {
+  return (
+    <a
+      href={props.href}
+      class={`btn btn-ghost${props.class ? ` ${props.class}` : ''}`}
+      data-history-back=""
+    >
+      {t('CANCEL')}
+    </a>
+  );
+}
+
 /** A page with nothing to list yet: an icon, a message and what to do about it. */
 export function EmptyState(props: {
   message: string;

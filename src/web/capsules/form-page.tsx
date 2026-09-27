@@ -10,6 +10,7 @@ import {
   CAPSULE_NOTES_MAX,
   type CapsuleField,
 } from './validation';
+import { CancelLink } from '../layout/parts';
 
 export interface CapsuleFormModel {
   /** Absent for a new capsule. */
@@ -79,9 +80,7 @@ export function CapsuleFormPage(props: {
             <button type="submit" class="btn btn-primary flex-1">
               {t('SAVE')}
             </button>
-            <a href={back} class="btn btn-ghost">
-              {t('CANCEL')}
-            </a>
+            <CancelLink href={back} />
           </div>
         </PostForm>
         {editing && (

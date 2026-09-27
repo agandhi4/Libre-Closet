@@ -7,6 +7,7 @@ import { Layout } from '../layout/layout';
 import type { ViewContext } from '../view-context';
 import { PLANS_PATH, planUrl } from './urls';
 import { PLAN_NAME_MAX, PLAN_NOTES_MAX } from './validation';
+import { CancelLink } from '../layout/parts';
 
 export interface PlanFormModel {
   /** Absent for a new plan. */
@@ -76,9 +77,7 @@ export function PlanFormPage(props: {
             <button type="submit" class="btn btn-primary flex-1">
               {t('SAVE')}
             </button>
-            <a href={back} class="btn btn-ghost">
-              {t('CANCEL')}
-            </a>
+            <CancelLink href={back} />
           </div>
         </PostForm>
       </main>

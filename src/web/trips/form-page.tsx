@@ -12,6 +12,7 @@ import {
   TRIP_NOTES_MAX,
   type TripField,
 } from './validation';
+import { CancelLink } from '../layout/parts';
 
 export interface TripFormModel {
   /** Absent for a new trip. */
@@ -108,9 +109,7 @@ export function TripFormPage(props: {
             <button type="submit" class="btn btn-primary flex-1">
               {t('SAVE')}
             </button>
-            <a href={back} class="btn btn-ghost">
-              {t('CANCEL')}
-            </a>
+            <CancelLink href={back} />
           </div>
         </PostForm>
         {editing && (

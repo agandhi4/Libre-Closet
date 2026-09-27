@@ -4,7 +4,7 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
-import { Messages } from '../layout/parts';
+import { CancelLink, Messages } from '../layout/parts';
 import type { ViewContext } from '../view-context';
 import { categoryLabel } from '../wardrobe/garment';
 import { garmentUrl } from '../wardrobe/urls';
@@ -119,12 +119,10 @@ export function BoughtPage(props: { ctx: ViewContext; model: BoughtModel }) {
             <PlanSection plans={model.plans} ticked={model.ticked} />
           )}
           <div class="flex gap-2 mt-2">
-            <a
+            <CancelLink
               href={garmentUrl(garment.id, model.viewOwner)}
-              class="btn btn-ghost flex-1"
-            >
-              {t('CANCEL')}
-            </a>
+              class="flex-1"
+            />
             <button type="submit" class="btn btn-primary flex-1">
               {t('wishlist.MOVE_TO_CLOSET')}
             </button>

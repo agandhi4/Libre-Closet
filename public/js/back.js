@@ -27,8 +27,11 @@
  * referrer is the page that posted (a push notification's navigation never
  * matches).
  *
- * A form page (AppBar `formPage`: an edit or add page) is done once saved:
- * the page its save lands on goes back past it, past a refused attempt's
+ * A form page (AppBar `formPage`: an edit or add page, Styling where it can
+ * save) is done once saved or cancelled. Its Cancel (`CancelLink`) is a back
+ * arrow too, and on a cold entry, where the arrow and Cancel go forward to
+ * their href, that entry counts as the form's exit. The page its save or
+ * exit lands on goes back past it, past a refused attempt's
  * re-render, and past the entries of its own page (the garment as it was
  * before the edit). Garment, Edit, Save, back: to where the garment page was
  * opened from, never to the stale form. "Its own page" is the pathname: a
@@ -37,14 +40,15 @@
  *
  * A save makes what history holds stale: htmx's snapshots (and a bfcached
  * document) were taken before it, so the Wardrobe went back to showing the
- * garment's old name. A native post marks the tab dirty (sessionStorage),
- * and the next page restored from history while it is marked is reloaded
- * in place (the entry landed on, so no new entry; its trail survives in
- * history.state). One reload per save: an entry further back that was
- * snapshotted before the save still shows its snapshot when a later
- * back/forward restores it. A document a back/forward loads again counts
- * as restored (the browser's HTTP cache answers it). htmx writes (autosave, hx-post) do
- * not mark it: they answer the part of the page they change.
+ * garment's old name. Each trail entry keeps when its page was rendered
+ * (`at`), a native post records when the tab last saved (sessionStorage),
+ * and an entry restored from history that was rendered before that save is
+ * reloaded in place (no new entry; its trail survives in history.state, and
+ * the reload renders it anew). Every stale entry refreshes once, however far
+ * back; one rendered after the last save (anything after signing in) is
+ * restored as it was. A document a back/forward loads again counts as
+ * restored (the browser's HTTP cache answers it). htmx writes (autosave,
+ * hx-post) are not saves here: they answer the part of the page they change.
  *
  * Evaluated once per document (a module; boosted navigations swap only the
  * body): the listeners sit on the document and the window.
@@ -52,14 +56,23 @@
 
 const STATE_KEY = 'closetTrail';
 const HANDOFF_KEY = 'closet-back-handoff';
-const DIRTY_KEY = 'closet-back-dirty';
+const SAVED_AT_KEY = 'closet-back-saved-at';
 /** Plenty for any real back chain; keeps history.state small. */
 const TRAIL_LIMIT = 50;
 
 const here = () => location.pathname + location.search;
 const last = (entries) => entries[entries.length - 1];
 const pathnameOf = (path) => path.split('?')[0];
-const coldTrail = () => [{ path: here(), afterForm: false }];
+/** A new entry for the page on screen, rendered now. */
+const entryHere = (afterForm) => ({ path: here(), afterForm, at: Date.now() });
+const coldTrail = () => [entryHere(false)];
+/**
+ * What the logs name a page by: its first path segment. Paths can carry
+ * secrets (an invite token: the server's `secretPath` routes) and queries
+ * whatever the user typed, and the console is readable by anything on the
+ * page.
+ */
+const routeKind = (path) => `/${path.split(/[/?#]/)[1] ?? ''}`;
 
 /** The page on screen is a form its save leaves (AppBar `formPage`). */
 const onFormPage = () =>
@@ -75,7 +88,9 @@ function trailEndingAt(value, path) {
     value.length > 0 &&
     value.every(
       (entry) =>
-        typeof entry?.path === 'string' && typeof entry.afterForm === 'boolean',
+        typeof entry?.path === 'string' &&
+        typeof entry.afterForm === 'boolean' &&
+        typeof entry.at === 'number',
     );
   return valid && last(value).path === path ? value : null;
 }
@@ -118,38 +133,49 @@ function takeHandoff() {
   const handoff = takeHandoff();
   const stored = trailEndingAt(history.state?.[STATE_KEY], here());
   if (stored) {
-    trail = stored;
+    // A reload (pull to refresh, the save's own) renders the page anew; a
+    // back/forward load may come from the HTTP cache (below).
+    if (navigationType() === 'back_forward') trail = stored;
+    else
+      remember([...stored.slice(0, -1), { ...last(stored), at: Date.now() }]);
   } else if (handoff) {
-    remember([
-      ...handoff.trail,
-      { path: here(), afterForm: handoff.afterForm },
-    ]);
+    remember([...handoff.trail, entryHere(handoff.afterForm)]);
   } else {
-    console.debug(`[back] cold entry at ${here()}`);
+    console.debug(`[back] cold entry at ${routeKind(here())}`);
     remember(coldTrail());
   }
 }
 
 /**
  * How many entries back the arrow goes: to the one before this, skipping
- * the form page a save left (and, while each skipped entry was itself a
- * save's result, the form before it) and entries of this very page. 0
- * when that runs past the trail's start: nothing in the app to go back to.
+ * the form page this entry left as done (and, while each skipped entry was
+ * itself one, the form before it) and, once in such a chain, entries of
+ * this very page (the garment as it was before its edit). Outside a form
+ * chain an entry of the same page is a place of its own (Insights before
+ * `?unworn=30`). 0 when that runs past the trail's start: nothing in the
+ * app to go back to.
  */
 function stepsBack(entries) {
   const current = entries.length - 1;
   const page = pathnameOf(entries[current].path);
   let from = current;
   let target = current - 1;
-  while (
-    target >= 0 &&
-    (entries[from].afterForm || pathnameOf(entries[target].path) === page)
-  ) {
+  let inFormChain = false;
+  while (target >= 0) {
+    if (entries[from].afterForm) inFormChain = true;
+    else if (!inFormChain || pathnameOf(entries[target].path) !== page) break;
     from = target;
     target -= 1;
   }
   return target < 0 ? 0 : current - target;
 }
+
+/**
+ * Where a form page's back arrow or Cancel is going forward to on a cold
+ * entry (its href): the entry it pushes is the form's exit, done like a
+ * save, so its own back arrow does not return into the abandoned form.
+ */
+let formExit = null;
 
 // Capture phase: ahead of htmx's own click listener on the (boosted) link,
 // which would otherwise also navigate forward to the href.
@@ -170,15 +196,17 @@ document.addEventListener(
     if (!link) return;
     const steps = stepsBack(trail);
     if (steps === 0) {
+      const href = new URL(link.href);
+      if (onFormPage()) formExit = href.pathname + href.search;
       console.info(
-        `[back] nothing in-app before ${here()}: following ${link.getAttribute('href')}`,
+        `[back] nothing in-app before ${routeKind(here())}: following its link to ${routeKind(href.pathname)}`,
       );
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     console.info(
-      `[back] ${here()} -> ${trail[trail.length - 1 - steps].path} (${steps} back)`,
+      `[back] ${routeKind(here())} -> ${routeKind(trail[trail.length - 1 - steps].path)} (${steps} back)`,
     );
     history.go(-steps);
   },
@@ -187,17 +215,17 @@ document.addEventListener(
 
 // htmx has just snapshotted the page being left, dropping the trail from its
 // entry. A boosted navigation is never a form page's save (every post form
-// is a native PostForm, test/integration/pages.ts), so its entry is never
-// afterForm.
+// is a native PostForm, test/integration/pages.ts): its entry is afterForm
+// only as a form page's cold exit (formExit), never for another link a form
+// page holds (Styling's garments, the garment form's "Add from a link").
 document.addEventListener('htmx:beforeHistoryUpdate', () => remember(trail));
 document.addEventListener('htmx:pushedIntoHistory', () => {
-  remember([...trail, { path: here(), afterForm: false }]);
+  const afterForm = formExit === here();
+  formExit = null;
+  remember([...trail, entryHere(afterForm)]);
 });
 document.addEventListener('htmx:replacedInHistory', () => {
-  remember([
-    ...trail.slice(0, -1),
-    { path: here(), afterForm: last(trail).afterForm },
-  ]);
+  remember([...trail.slice(0, -1), { ...entryHere(last(trail).afterForm) }]);
 });
 
 // Back/forward within this document: the entry landed on has its own trail
@@ -210,12 +238,12 @@ window.addEventListener('popstate', (event) => {
   const stored = trailEndingAt(event.state?.[STATE_KEY], here());
   if (stored) remember(stored);
   else if (last(trail).path === here()) {
-    remember([...trail, { path: here(), afterForm: false }]);
+    remember([...trail, entryHere(false)]);
   } else remember(coldTrail());
 });
 document.addEventListener('htmx:historyRestore', () => {
   remember(trail);
-  reloadIfDirty('history restore');
+  reloadIfStale('history restore');
 });
 
 // Safari (and Chromium) may bring a whole document back from the bfcache
@@ -223,37 +251,46 @@ document.addEventListener('htmx:historyRestore', () => {
 // restore follow and reload it above; the task after pageshow catches the
 // entry the document was left on.
 window.addEventListener('pageshow', (event) => {
-  if (event.persisted) setTimeout(() => reloadIfDirty('bfcache'));
+  if (event.persisted) setTimeout(() => reloadIfStale('bfcache'));
 });
 // A document a back/forward loads again is no fresher: the browser answers
 // history navigations from its HTTP cache where it can, and the worker's
 // tab roots open from the page cache (only a reload revalidates them).
-if (performance.getEntriesByType('navigation')[0]?.type === 'back_forward') {
-  reloadIfDirty('back/forward load');
+// Once loaded: a reload while the page's modules and the worker's
+// registration are still loading aborts them mid-flight.
+if (navigationType() === 'back_forward') {
+  window.addEventListener('load', () => reloadIfStale('back/forward load'), {
+    once: true,
+  });
 }
 
-function reloadIfDirty(how) {
-  if (!isDirty()) return;
-  setDirty(false);
-  console.info(`[back] ${here()} restored (${how}) after a save: reloading`);
+function navigationType() {
+  return performance.getEntriesByType('navigation')[0]?.type;
+}
+
+/** Reloads the entry on screen if it was rendered before the tab's last save. */
+function reloadIfStale(how) {
+  if (last(trail).at >= lastSavedAt()) return;
+  console.info(
+    `[back] ${routeKind(here())} restored (${how}) from before a save: reloading`,
+  );
   location.reload();
 }
 
-function isDirty() {
+function lastSavedAt() {
   try {
-    return sessionStorage.getItem(DIRTY_KEY) !== null;
+    return Number(sessionStorage.getItem(SAVED_AT_KEY) ?? 0);
   } catch (error) {
-    console.warn('[back] could not read the save mark', error);
-    return false;
+    console.warn('[back] could not read when the tab last saved', error);
+    return 0;
   }
 }
 
-function setDirty(dirty) {
+function recordSave() {
   try {
-    if (dirty) sessionStorage.setItem(DIRTY_KEY, '1');
-    else sessionStorage.removeItem(DIRTY_KEY);
+    sessionStorage.setItem(SAVED_AT_KEY, String(Date.now()));
   } catch (error) {
-    console.warn('[back] could not write the save mark', error);
+    console.warn('[back] could not record the save', error);
   }
 }
 
@@ -270,7 +307,7 @@ document.addEventListener('submit', (event) => {
     return;
   }
   const posts = form.method === 'post';
-  if (posts) setDirty(true);
+  if (posts) recordSave();
   const handoff = { trail, afterForm: posts && onFormPage() };
   try {
     sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(handoff));

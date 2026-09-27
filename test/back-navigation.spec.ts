@@ -1,7 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { addDays } from '../src/web/calendar/calendar-date';
 import { createGarment, createOutfit } from './support/e2e-data';
-import { signIn } from './support/e2e-session';
+import { SAME_ORIGIN, signIn } from './support/e2e-session';
 import { openGarmentMenu } from './support/garment-page';
 import { householdToday } from './support/household-today';
 
@@ -200,4 +200,98 @@ test('a reload (pull to refresh) keeps the way back', async ({ page }) => {
   await expect(page.locator('h1')).toHaveText('Reloaded tee');
   expect(await tapBack(page, /\/wardrobe$/)).toEqual({ wentBack: true });
   expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('Insights, another window, back: Insights as it was, not the wardrobe', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await signIn(page, 'back-insights');
+  await createGarment(page, 'Idle tee');
+  await page.goto('/wardrobe/insights');
+  await page.locator('a[href^="/wardrobe/insights?unworn=30"]').click();
+  await expect(page).toHaveURL(/\/wardrobe\/insights\?unworn=30/);
+
+  // A query of the same page is a place of its own outside a form's save.
+  expect(await tapBack(page, /\/wardrobe\/insights(#[\w-]*)?$/)).toEqual({
+    wentBack: true,
+  });
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('an outfit, Edit in Styling, Save, back: the outfits, never the editor', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await signIn(page, 'back-styling-save');
+  const tee = await createGarment(page, 'Styled tee', 'tops');
+  const outfit = await createOutfit(page, 'Tuesday', tee);
+  await page.goto('/outfits');
+  await page.locator(`[data-outfit-id="${outfit}"]`).click();
+  await expect(page).toHaveURL(new RegExp(`/outfits/${outfit}$`));
+
+  await page.getByRole('link', { name: 'Edit in Styling' }).click();
+  await expect(page).toHaveURL(new RegExp(`/styling\\?outfit=${outfit}`));
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await page
+    .locator('#styling-save')
+    .getByRole('button', { name: 'Save changes' })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/outfits/${outfit}$`));
+
+  await backArrow(page).click();
+  await expect(page).toHaveURL(/\/outfits$/);
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test('a garment, Edit, Cancel, back: the wardrobe, never the form', async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await signIn(page, 'back-cancel');
+  const id = await createGarment(page, 'Cancelled tee');
+  await page.goto('/wardrobe');
+  await page.locator(`main a[href="/wardrobe/${id}"]`).first().click();
+  const menu = await openGarmentMenu(page);
+  await menu.getByRole('link', { name: 'Edit' }).click();
+  await expect(page).toHaveURL(new RegExp(`/wardrobe/${id}/edit`));
+
+  // Cancel is a back arrow: back to the garment, no new entry.
+  const before = await historyLength(page);
+  await page.getByRole('link', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(new RegExp(`/wardrobe/${id}$`));
+  expect(await historyLength(page)).toBe(before);
+  expect(await tapBack(page, /\/wardrobe$/)).toEqual({ wentBack: true });
+
+  // Cold (a new tab on the form): Cancel goes forward to the garment, which
+  // then goes back past the abandoned form to its own parent.
+  const tab = await page.context().newPage();
+  await tab.goto(`/wardrobe/${id}/edit`);
+  await tab.getByRole('link', { name: 'Cancel' }).click();
+  await expect(tab).toHaveURL(new RegExp(`/wardrobe/${id}$`));
+  expect(await tapBack(tab, /\/wardrobe$/)).toEqual({ wentBack: false });
+  await tab.close();
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
+test("the back logs never name a secret path (an invite's token)", async ({
+  page,
+}) => {
+  const messages: string[] = [];
+  page.on('console', (msg) => messages.push(msg.text()));
+  await signIn(page, 'back-secret');
+  const invite = await page.request.post('/wardrobe-share/create-invite-link', {
+    form: { permission: 'VIEW' },
+    headers: { ...SAME_ORIGIN, 'hx-request': 'true' },
+  });
+  const token = /\/wardrobe-share\/invite\/([0-9a-f-]{36})/.exec(
+    await invite.text(),
+  )![1];
+
+  await page.goto(`/wardrobe-share/invite/${token}`);
+  await expect(page.locator('h1')).toBeVisible();
+  await expect
+    .poll(() => messages.filter((text) => text.startsWith('[back]')))
+    .toContain('[back] cold entry at /wardrobe-share');
+  expect(messages.filter((text) => text.includes(token))).toEqual([]);
 });

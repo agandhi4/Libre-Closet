@@ -27,6 +27,7 @@ import {
   type PlanItemField,
   type PlanItemFormValues,
 } from './validation';
+import { CancelLink } from '../layout/parts';
 
 export interface ItemFormModel {
   planId: number;
@@ -191,9 +192,7 @@ export function ItemFormPage(props: {
             <button type="submit" class="btn btn-primary flex-1">
               {t(model.proposed ? 'plans.SAVE_AND_ACCEPT' : 'SAVE')}
             </button>
-            <a href={back} class="btn btn-ghost">
-              {t('CANCEL')}
-            </a>
+            <CancelLink href={back} />
           </div>
         </PostForm>
         {editing && (
