@@ -63,8 +63,9 @@ test('insights on the phone, from the Wardrobe’s ⋯ menu', async ({ page }) =
   await expect(page.locator('#insights-attention')).toContainText(
     'Needs repair: 1',
   );
+  // Three tees at $24.90 each: the cost is price × copies (CLAUDE.md, Insights).
   await expect(page.locator('#insights-cost')).toContainText(
-    '$24.90 a wear · worn once',
+    '$74.70 a wear · worn once',
   );
   await expect(page.locator('[data-strip="closet"] [data-colour]')).toHaveCount(
     2,
