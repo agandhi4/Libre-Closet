@@ -116,7 +116,7 @@ and response bandwidth/latency. */
    Faint is for decorative graphics only (a placeholder hanger where a
    garment has no photo, a dash beside its label): it fails AA on purpose
    and never carries text or information. The eslint rule in
-   eslint.config.mjs refuses text-base-content/10 to /60 in markup, so
+   eslint.config.mjs refuses text-base-content/0 to /69 in markup, so
    these two are the only ways below /70. */
 @theme inline {
   --color-muted: color-mix(in oklab, var(--color-base-content) 65%, transparent);
