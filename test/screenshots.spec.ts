@@ -121,7 +121,9 @@ test.describe('dark', () => {
     await page.locator('#wardrobe-grid a').first().click();
     await expect(page.getByText('Raw selvedge jeans').first()).toBeVisible();
     await shot(page, '03-demo-garment-dark');
-    await shot(page, '08-demo-outfit-builder-dark', '/outfits/new');
+    await page.goto('/styling');
+    await expect(page.locator('[data-styling-row]').first()).toBeVisible();
+    await shot(page, '08-demo-styling-dark');
     await shot(
       page,
       '10-demo-calendar-planned-dark',
@@ -418,8 +420,10 @@ test('demo: Theo, outfit selfies (#19)', async ({ page }) => {
   await expect(page.locator('dialog[open] img')).toBeVisible();
   await shot(page, '59-demo-selfie');
   // The outfit's Worn strip: every day it was worn, with its looks.
-  const edit = await row.locator('a[href^="/outfits/"]').getAttribute('href');
-  const outfit = /^\/outfits\/(\d+)\//.exec(edit ?? '')?.[1];
+  const edit = await row
+    .locator('a[href^="/styling?outfit="]')
+    .getAttribute('href');
+  const outfit = /[?&]outfit=(\d+)/.exec(edit ?? '')?.[1];
   await shot(page, '60-demo-outfit-worn', `/outfits/${outfit}`);
   await expect(page.locator('[data-worn-strip] img').first()).toBeVisible();
 });
