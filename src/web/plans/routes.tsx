@@ -33,6 +33,7 @@ import {
   updateItem,
   updatePlan,
 } from './queries';
+import { findWeatherSettings } from '../weather/queries';
 import { StyleProfilePage } from './style-page';
 import { PLANS_PATH, planUrl, STYLE_PROFILE_PATH } from './urls';
 import {
@@ -76,6 +77,19 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   done,
 ) => {
   const { db, logger } = options;
+
+  /**
+   * The home city for the style page, read-only: the weather's (#14,
+   * user_weather), never a second copy. Undefined with WEATHER_ENABLED off,
+   * when there is no home to speak of.
+   */
+  async function homeCity(
+    userId: number,
+  ): Promise<{ name: string | null } | undefined> {
+    if (!options.weather) return undefined;
+    const settings = await findWeatherSettings(db, userId);
+    return { name: settings.home?.name ?? null };
+  }
 
   async function requirePlan(
     request: FastifyRequest,
@@ -518,6 +532,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           ctx={viewContext(reply)}
           model={{
             values: styleProfilePost(profile),
+            home: await homeCity(sessionUserId(request)),
             saved: request.query.saved === '1',
           }}
         />,
@@ -539,7 +554,11 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           reply,
           <StyleProfilePage
             ctx={viewContext(reply)}
-            model={{ values: form.values, errors: form.errors }}
+            model={{
+              values: form.values,
+              errors: form.errors,
+              home: await homeCity(userId),
+            }}
           />,
           { status: 400 },
         );

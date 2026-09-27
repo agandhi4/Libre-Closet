@@ -7,6 +7,8 @@
 
 export const PLANS_PATH = '/wardrobe/plans';
 export const STYLE_PROFILE_PATH = '/auth/profile/style';
+/** Where the home city is set: the profile's Weather section (#14). */
+export const WEATHER_SETTINGS_PATH = '/auth/profile#weather';
 
 /** A plan's page, or one of its sub-paths ('/edit', '/duplicate'). */
 export function planUrl(id: number, suffix = ''): string {

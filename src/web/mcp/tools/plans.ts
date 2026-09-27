@@ -302,7 +302,7 @@ export const planTools = [
     name: 'get_style_profile',
     title: 'Get my style profile',
     description:
-      "Your style profile: the styles you dress in, your budget band per piece (budget under $50, mid $50-150, premium $150-400, luxury above), your palette (garment colours), and your week's rhythm: how many times a week or a month each calendar occasion (work, workout, daytime, evening, night-out, all-day) comes round. Null when you never saved one. Your home location is the weather's, not here.",
+      "Your style profile: the styles you dress in, your budget band per piece (budget under $50, mid $50-150, premium $150-400, luxury above), your palette (garment colours), and your week's rhythm: how many times a week or a month each calendar occasion (work, workout, daytime, evening, night-out, all-day) comes round. Null when you never saved one. Your home city is the weather's (get_weather), not part of it.",
     input: z.object({}),
     writes: false,
     async run(_args, ctx) {

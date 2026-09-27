@@ -96,6 +96,23 @@ function sqlList(values: readonly string[]) {
   return sql.raw(values.map((value) => `'${value}'`).join(', '));
 }
 
+/**
+ * The unique constraints a writer answers a violation of with a message
+ * (isUniqueViolation, src/db/errors.ts), each named once here and used by
+ * both the index below and the writer that catches it. Only these: a
+ * violation of any other constraint is a bug to surface, never a message.
+ */
+export const USER_EMAIL_UNIQUE = 'user_lower_email_unique';
+export const CAPSULE_NAME_UNIQUE = 'capsule_owner_id_lower_name_unique';
+export const PLAN_NAME_UNIQUE = 'wardrobe_plan_owner_id_lower_name_unique';
+export const SHARE_GRANTEE_UNIQUE =
+  'wardrobe_share_grantor_id_grantee_id_unique';
+export type UniqueConstraint =
+  | typeof USER_EMAIL_UNIQUE
+  | typeof CAPSULE_NAME_UNIQUE
+  | typeof PLAN_NAME_UNIQUE
+  | typeof SHARE_GRANTEE_UNIQUE;
+
 export const user = pgTable(
   'user',
   {
@@ -108,9 +125,7 @@ export const user = pgTable(
     // bcrypt hash.
     password: varchar('password', { length: 255 }).notNull(),
   },
-  (table) => [
-    uniqueIndex('user_lower_email_unique').on(sql`lower(${table.email})`),
-  ],
+  (table) => [uniqueIndex(USER_EMAIL_UNIQUE).on(sql`lower(${table.email})`)],
 );
 
 // One row per browser push subscription (Web Push, src/web/push/). The
@@ -660,7 +675,7 @@ export const capsule = pgTable(
     // owner_id is written as an expression on purpose: drizzle-kit's
     // introspection marks every column of an index with any expression as
     // one, so a plain column here reads back as drift (the drift test).
-    uniqueIndex('capsule_owner_id_lower_name_unique').on(
+    uniqueIndex(CAPSULE_NAME_UNIQUE).on(
       sql`${table.ownerId}`,
       sql`lower(${table.name})`,
     ),
@@ -713,8 +728,8 @@ export const capsuleGarment = pgTable(
 // A person's style profile (#34, slice 34a; src/wardrobe/style.ts): what
 // they dress for and toward, one row per user, written only by
 // saveStyleProfile (src/web/plans/queries.ts) with its rhythm. Private, like
-// outfits: shares never reach it. The home location is the weather's (#14),
-// kept on the profile there, never copied here.
+// outfits: shares never reach it. The home city is the weather's
+// (user_weather, #14): the style page reads it from there, never a copy here.
 export const styleProfile = pgTable(
   'style_profile',
   {
@@ -815,7 +830,7 @@ export const wardrobePlan = pgTable(
     // Also the index of the owner_id foreign key and of every plan query.
     // owner_id as an expression, for drizzle-kit's introspection (see
     // capsule_owner_id_lower_name_unique).
-    uniqueIndex('wardrobe_plan_owner_id_lower_name_unique').on(
+    uniqueIndex(PLAN_NAME_UNIQUE).on(
       sql`${table.ownerId}`,
       sql`lower(${table.name})`,
     ),
@@ -952,10 +967,7 @@ export const wardrobeShare = pgTable(
       .onDelete('cascade'),
     // Also the acceptInvite lookup index.
     unique('wardrobe_share_invite_token_unique').on(table.inviteToken),
-    unique('wardrobe_share_grantor_id_grantee_id_unique').on(
-      table.grantorId,
-      table.granteeId,
-    ),
+    unique(SHARE_GRANTEE_UNIQUE).on(table.grantorId, table.granteeId),
   ],
 );
 

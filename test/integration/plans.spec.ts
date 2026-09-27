@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   planItem,
@@ -7,7 +7,12 @@ import {
   user,
   wardrobePlan,
 } from '../../src/db/schema';
-import { insertItems } from '../../src/web/plans/queries';
+import {
+  createPlan as insertPlan,
+  insertItems,
+} from '../../src/web/plans/queries';
+import { findWeatherSettings, setHome } from '../../src/web/weather/queries';
+import { startWeatherStub, type WeatherStub } from '../support/weather-stub';
 import { acceptInvite, createInvite } from '../../src/web/sharing/queries';
 import { createWishlistItem } from './garments';
 import {
@@ -224,6 +229,11 @@ describe('wardrobe plans', () => {
       const profile = await get('/auth/profile');
       expect(profile.body).toContain('href="/auth/profile/style"');
     });
+
+    it('says nothing of a home city with the weather off', async () => {
+      const page = await get('/auth/profile/style');
+      expect(page.body).not.toContain('id="style-home"');
+    });
   });
 
   describe('plans', () => {
@@ -252,6 +262,42 @@ describe('wardrobe plans', () => {
       expect(t.logs.messages('info', 'Web')).toContainEqual(
         `Plan ${first} created by user ${ownerId}`,
       );
+    });
+
+    it('creates two first plans made at the same moment (a double tap, two tabs): both saved, exactly one active, no name error', async () => {
+      await t.register('racing-plans@example.com');
+      const racer = await userIdOf(t, 'racing-plans@example.com');
+      // A creates the user's first plan and holds its transaction open.
+      let created!: () => void;
+      const aCreated = new Promise<void>((resolve) => (created = resolve));
+      let release!: () => void;
+      const aReleased = new Promise<void>((resolve) => (release = resolve));
+      const a = t.db.transaction(async (tx) => {
+        const id = await insertPlan(tx, racer, { name: 'Tab A', notes: null });
+        created();
+        await aReleased;
+        return id;
+      });
+      await aCreated;
+      // B, from the other tab, must wait for A rather than both taking
+      // "first plan, so active" and colliding on the one-active index.
+      const b = insertPlan(t.db, racer, { name: 'Tab B', notes: null });
+      await expect
+        .poll(async () => {
+          const { rows } = await t.db.execute<{ waiting: number }>(
+            sql`select count(*)::int as waiting from pg_stat_activity
+                where datname = current_database() and wait_event_type = 'Lock'`,
+          );
+          return rows[0].waiting;
+        })
+        .toBe(1);
+      release();
+      const [aId, bId] = await Promise.all([a, b]);
+      expect(typeof bId).toBe('number');
+      expect(await plansOf(racer)).toEqual([
+        { id: aId, name: 'Tab A', active: true },
+        { id: bId, name: 'Tab B', active: false },
+      ]);
     });
 
     it('refuses a blank name and one the owner already uses, in any case', async () => {
@@ -762,5 +808,61 @@ describe('wardrobe plans', () => {
         .where(and(eq(planItem.id, item)));
       expect(row).toEqual({ category: 'tops', planId: b });
     });
+  });
+});
+
+/**
+ * The style page and the weather's home city (#14): shown read-only from
+ * user_weather, with the way to change it (Profile › Weather); the style
+ * profile never stores a location of its own.
+ */
+describe('the style profile beside the weather', () => {
+  let stub: WeatherStub;
+  let t: TestApp;
+
+  beforeAll(async () => {
+    stub = await startWeatherStub();
+    t = await createTestApp(
+      { WEATHER_ENABLED: 'true' },
+      { weather: stub.options },
+    );
+  });
+
+  afterAll(async () => {
+    await t?.cleanup();
+    await stub?.close();
+  });
+
+  it('offers to set a home city when there is none', async () => {
+    const page = unescapeHtml(
+      (await t.inject({ method: 'GET', url: '/auth/profile/style' })).body,
+    );
+    expect(page).toMatch(
+      /id="style-home"[\s\S]*href="\/auth\/profile#weather"[^>]*>Add your city for the weather/,
+    );
+  });
+
+  it('shows the home city read-only, linking to Weather to change it, and stores none of it', async () => {
+    await setHome(t.db, t.owner.id, {
+      name: 'Fort Greene, Brooklyn',
+      location: { latitude: 40.69, longitude: -73.97 },
+    });
+    const page = unescapeHtml(
+      (await t.inject({ method: 'GET', url: '/auth/profile/style' })).body,
+    );
+    expect(page).toContain('Home: Fort Greene, Brooklyn');
+    expect(page).toMatch(
+      /id="style-home"[\s\S]*href="\/auth\/profile#weather"[^>]*>Change it in Weather/,
+    );
+    // No field posts it: saving the style profile cannot write a location.
+    expect(page).not.toMatch(/name="(home|city|location)/);
+    const saved = await t.inject({
+      method: 'POST',
+      url: '/auth/profile/style',
+      payload: { styles: 'minimal', home: 'Elsewhere' },
+    });
+    expect(saved.statusCode).toBe(303);
+    const settings = await findWeatherSettings(t.db, t.owner.id);
+    expect(settings.home?.name).toBe('Fort Greene, Brooklyn');
   });
 });

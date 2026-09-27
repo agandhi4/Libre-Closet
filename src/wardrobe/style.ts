@@ -9,9 +9,8 @@
  * rhythm is counted per OCCASION (src/wardrobe/occasions.ts): the words the
  * calendar (#13) and the future week template (#16) already use, so "work 3
  * a week" here and a work entry on the calendar are the same thing. The home
- * location is not here: the weather (#14) keeps one, rounded, in the
- * profile, and the style profile reads it from there rather than hold a
- * second copy.
+ * city is not here: the weather (#14) keeps it (user_weather), and the style
+ * page shows it read-only from there rather than hold a second copy.
  */
 
 /** Ways of dressing, as a person would name their own. A profile holds a few. */

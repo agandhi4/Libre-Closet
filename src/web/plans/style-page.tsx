@@ -16,7 +16,7 @@ import { Navbar } from '../layout/navbar';
 import { BackLink, SavedToast, StripFlags } from '../layout/parts';
 import type { ViewContext } from '../view-context';
 import { budgetLabel, periodLabel, styleLabel } from './labels';
-import { PLANS_PATH, STYLE_PROFILE_PATH } from './urls';
+import { PLANS_PATH, STYLE_PROFILE_PATH, WEATHER_SETTINGS_PATH } from './urls';
 import {
   rhythmFieldNames,
   STYLE_NOTES_MAX,
@@ -28,6 +28,11 @@ export interface StyleProfileModel {
   values: StyleProfileBody;
   errors?: Partial<Record<Occasion, string[]>>;
   saved?: boolean;
+  /**
+   * The weather's home city (#14), shown read-only: set and changed in
+   * Profile › Weather, never stored here. Undefined with the weather off.
+   */
+  home?: { name: string | null };
 }
 
 const FLAGS = ['saved'] as const;
@@ -37,8 +42,8 @@ const FLAGS = ['saved'] as const;
  * 34a), a section of the Profile (docs/plans/2026-09-26-redesign.md):
  * styles, the budget band, the palette and the week's rhythm, counted per
  * calendar occasion (#13's words; the week template #16 will read them).
- * Private: nobody else ever sees it. The home location belongs to the
- * weather (#14) and is set there, not here.
+ * Private: nobody else ever sees it. The home city belongs to the weather
+ * (#14): shown here read-only, linking to Profile › Weather to change it.
  */
 export function StyleProfilePage(props: {
   ctx: ViewContext;
@@ -60,6 +65,7 @@ export function StyleProfilePage(props: {
             {t('plans.TITLE')}
           </a>
         </p>
+        {model.home && <HomeCity name={model.home.name} />}
         <PostForm
           action={STYLE_PROFILE_PATH}
           class="flex flex-col gap-5"
@@ -144,6 +150,26 @@ export function StyleProfilePage(props: {
       <StripFlags names={FLAGS} />
       <Dock ctx={ctx} />
     </Layout>
+  );
+}
+
+/** The weather's home city, and where to change it (the profile's Weather section). */
+function HomeCity({ name }: { name: string | null }) {
+  return (
+    <p class="text-sm mb-4" id="style-home">
+      {name === null ? (
+        <a class="link link-primary" href={WEATHER_SETTINGS_PATH}>
+          {t('weather.SET_LOCATION')}
+        </a>
+      ) : (
+        <>
+          {t('weather.HOME_IS', { name })}{' '}
+          <a class="link link-primary" href={WEATHER_SETTINGS_PATH}>
+            {t('style.CHANGE_HOME')}
+          </a>
+        </>
+      )}
+    </p>
   );
 }
 

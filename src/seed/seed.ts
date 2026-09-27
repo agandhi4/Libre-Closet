@@ -125,48 +125,10 @@ export async function seedPersona(
         lastName: persona.account.lastName,
       });
       if (deps.weatherEnabled) await writeWeather(tx, userId, persona.weather);
-      const ids = new Map<string, number>();
-      const photoIdOf = async (bibleId: string) => {
-        const photo = photos.get(bibleId);
-        return photo
-          ? insertPhotoRow(tx, {
-              ...photo,
-              createdById: userId,
-              // The art is its own cutout: nothing to queue.
-              ...initialCutoutState('ready'),
-            })
-          : null;
-      };
-      for (const garment of persona.garments) {
-        const acquiredOn = garment.fields.acquiredOn;
-        const id = await insertGarment(
-          tx,
-          userId,
-          {
-            ...garment.fields,
-            acquiredOn: acquiredOn && addDays(acquiredOn, life.shiftDays),
-          },
-          await photoIdOf(garment.id),
-          'closet',
-        );
-        if (garment.archivedOn) await archive(tx, id, userId, garment.id);
-        if (garment.away) await setAway(tx, userId, id, garment.away);
-        ids.set(garment.id, id);
-      }
-      // After the owned garments: an item names the one it replaces.
-      for (const item of persona.wishlist) {
-        await insertGarment(
-          tx,
-          userId,
-          {
-            ...item.fields,
-            replacesGarmentId:
-              item.replaces === null ? null : ids.get(item.replaces)!,
-          },
-          await photoIdOf(item.id),
-          'wishlist',
-        );
-      }
+      const ids = await writeGarments(tx, userId, persona, {
+        photos,
+        shiftDays: life.shiftDays,
+      });
       const byId = new Map(persona.garments.map((g) => [g.id, g]));
       const outfitIds: number[] = [];
       for (const outfit of persona.outfits) {
@@ -257,6 +219,62 @@ async function writePlans(
       throw new Error(`Plan "${plan.fields.name}" twice`);
     if (plan.active) await setActivePlan(tx, id, userId);
   }
+}
+
+/**
+ * The persona's garments with their photo rows (the art stored before the
+ * transaction), archive and away, then the wishlist, which names the owned
+ * garment each item replaces. The garments' ids by bible id.
+ */
+async function writeGarments(
+  tx: Queryable,
+  userId: number,
+  persona: Persona,
+  art: { photos: Map<string, NewPhotoRow>; shiftDays: number },
+): Promise<Map<string, number>> {
+  const photoIdOf = async (bibleId: string) => {
+    const photo = art.photos.get(bibleId);
+    return photo
+      ? insertPhotoRow(tx, {
+          ...photo,
+          createdById: userId,
+          // The art is its own cutout: nothing to queue.
+          ...initialCutoutState('ready'),
+        })
+      : null;
+  };
+  const ids = new Map<string, number>();
+  for (const garment of persona.garments) {
+    const acquiredOn = garment.fields.acquiredOn;
+    const id = await insertGarment(
+      tx,
+      userId,
+      {
+        ...garment.fields,
+        acquiredOn: acquiredOn && addDays(acquiredOn, art.shiftDays),
+      },
+      await photoIdOf(garment.id),
+      'closet',
+    );
+    if (garment.archivedOn) await archive(tx, id, userId, garment.id);
+    if (garment.away) await setAway(tx, userId, id, garment.away);
+    ids.set(garment.id, id);
+  }
+  // After the owned garments: an item names the one it replaces.
+  for (const item of persona.wishlist) {
+    await insertGarment(
+      tx,
+      userId,
+      {
+        ...item.fields,
+        replacesGarmentId:
+          item.replaces === null ? null : ids.get(item.replaces)!,
+      },
+      await photoIdOf(item.id),
+      'wishlist',
+    );
+  }
+  return ids;
 }
 
 /** An archived garment of the bible, archived as the garment page does. */

@@ -501,8 +501,8 @@ as a plan.
     `budget` band (budget, mid, premium, luxury), notes. **`style_rhythm`** (user, occasion, times,
     `per` week or month): the week's rhythm counted per calendar occasion (#13's `OCCASIONS`: "work 3
     a week", "evening 3 a month"), the words the week template (#16) will read. **No city**: the
-    home location is the weather's (#14, built in parallel), kept on the profile there and read
-    from there, never copied.
+    home city is the weather's (`user_weather`, #14); the style page shows it read-only, with a
+    link to Profile › Weather, and never copies it.
   - `wardrobe_plan` (owner, name unique per owner in any case, notes, `active`; a partial unique
     index keeps one active per owner). A first plan is active; `setActivePlan` moves it.
   - `plan_item` (plan, optional name, category, type, `colors` and `materials` sets, warmth and
