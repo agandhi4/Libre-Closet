@@ -138,6 +138,22 @@ describe('the Wardrobe header and tabs', () => {
     expect(html).not.toContain('aria-label="Add"');
   });
 
+  it('gives a VIEW grantee’s filtered-grid fragment a ⋯ menu still without Select or tagging', async () => {
+    const html = await get(
+      `/wardrobe?ownerId=${ownerId}&category=bottoms`,
+      viewer,
+      true,
+    );
+    expect(html).toMatch(/^<main id="wardrobe-main"/);
+    const menu = menuOf(html)!;
+    expect(menu).toContain('hx-swap-oob="true"');
+    expect(menu).not.toContain('select=1');
+    expect(menu).not.toContain('/wardrobe/tag');
+    expect(menu).toContain('href="/wardrobe/plans"');
+    expect(sheetOf(html)).toBeUndefined();
+    expect(html).not.toContain('aria-label="Add"');
+  });
+
   it('adds to the closet or the wishlist from the sheet, in the shared wardrobe for a MANAGE grantee', async () => {
     const own = sheetOf(await get('/wardrobe'))!;
     expect(own).toContain('href="/wardrobe/new/from-link"');
