@@ -54,7 +54,7 @@ export function AppBar(props: AppBarProps) {
             so it never covers or moves the content. */}
         <span
           id="freshness"
-          class="hidden truncate text-xs text-base-content/60"
+          class="hidden truncate text-xs text-muted"
         ></span>
       </div>
       {props.scope && (
