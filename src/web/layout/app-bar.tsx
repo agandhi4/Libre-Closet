@@ -9,6 +9,11 @@ export interface AppBarProps {
   ctx: ViewContext;
   /** The page's heading, its one h1. Short: the bar truncates it. */
   title: Child;
+  /**
+   * The title as a menu: its items (`<li>`s), opened by tapping the title
+   * (the Wardrobe's switcher between the wardrobes shared with the user).
+   */
+  titleMenu?: Child;
   /** The back arrow's target; absent on a section's root page. */
   back?: string;
   /** Beside the title: what the page is scoped to (a wardrobe, a capsule). */
@@ -38,7 +43,11 @@ export function AppBar(props: AppBarProps) {
       {props.back && <BackLink href={props.back} />}
       <div class="flex flex-col flex-1 min-w-0 px-1">
         <div class="flex items-center gap-2 min-w-0">
-          <h1 class="text-xl font-semibold truncate">{props.title}</h1>
+          {props.titleMenu ? (
+            <TitleMenu title={props.title}>{props.titleMenu}</TitleMenu>
+          ) : (
+            <h1 class="text-xl font-semibold truncate">{props.title}</h1>
+          )}
           {/* In-flight htmx request spinner: every request's indicator (the
               body's hx-indicator, layout.tsx). Connectivity is a separate
               concern: AppStatus. */}
@@ -62,6 +71,39 @@ export function AppBar(props: AppBarProps) {
       )}
       <Account ctx={ctx} />
     </header>
+  );
+}
+
+/**
+ * The title that opens a menu: the h1 inside the summary (a summary may
+ * hold one heading), so the page keeps its one h1 and the tap target is
+ * the title itself. The menu draws over the content from inside the bar.
+ */
+function TitleMenu(props: { title: Child; children: Child }) {
+  return (
+    <details class="dropdown min-w-0" id="title-menu">
+      <summary class="btn btn-ghost btn-sm px-1 gap-1 flex-nowrap max-w-full">
+        <h1 class="text-xl font-semibold truncate">{props.title}</h1>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke-width="2"
+          stroke="currentColor"
+          class="size-4 shrink-0"
+          aria-hidden="true"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            d="m19.5 8.25-7.5 7.5-7.5-7.5"
+          />
+        </svg>
+      </summary>
+      <ul class="dropdown-content menu bg-base-100 rounded-box border border-base-300 z-20 w-64 mt-2 p-2">
+        {props.children}
+      </ul>
+    </details>
   );
 }
 
