@@ -24,11 +24,12 @@ import {
  * cache table (weather_forecast), refreshed from Open-Meteo once it is
  * FRESH_FOR_MS old, and its climate normals (weather_normals, for #10's
  * trips' days past the forecast) once they are NORMALS_FRESH_FOR_MS old;
- * both through createLocationCache (location-cache.ts: one lookup per
- * location at a time, the last good answer kept, RETRY_AFTER_MS between
- * failed tries). Nothing runs in the background: a page (its weather
- * fragment), the MCP tools or the seed ask, and the asking request waits
- * for at most one fetch (the fetcher's 10 s bound). Built once by
+ * both through createLocationCache (location-cache.ts: a stale answer
+ * served at once and refreshed in the background, one refresh per location
+ * at a time, the last good answer kept, RETRY_AFTER_MS between failed
+ * tries). A page (its weather fragment, Today, Ideas), the MCP tools or the
+ * seed ask; only an ask with nothing cached waits, for at most one fetch
+ * (the fetcher's 10 s bound). Built once by
  * createApp() when WEATHER_ENABLED, never otherwise, so with the flag off
  * nothing can fetch.
  *
@@ -60,7 +61,11 @@ export interface CachedNormals {
 }
 
 export interface WeatherService {
-  /** The location's forecast, fresh when Open-Meteo answers; null if it never has. */
+  /**
+   * The location's cached forecast (refreshed in the background once
+   * stale), fetched while the ask waits only when none is cached; null if
+   * Open-Meteo never answered.
+   */
   forecastFor(location: Location): Promise<CachedForecast | null>;
   /**
    * The location's climate normals, null if Open-Meteo never answered. For
@@ -69,6 +74,11 @@ export interface WeatherService {
    */
   normalsFor(location: Location): Promise<CachedNormals | null>;
   searchPlaces(query: string): Promise<Place[]>;
+  /**
+   * Resolves once no background refresh is running: the app's close awaits
+   * it before ending the pool.
+   */
+  settled(): Promise<void>;
 }
 
 /** A user's weather: settings, where it is for, and its forecast. */
@@ -119,13 +129,17 @@ export function createWeatherService(options: {
 
   return {
     async forecastFor(location) {
-      const cached = await forecasts(location);
+      const cached = await forecasts.get(location);
       return cached && { forecast: cached.value, fetchedAt: cached.fetchedAt };
     },
 
     async normalsFor(location) {
-      const cached = await normals(location);
+      const cached = await normals.get(location);
       return cached && { normals: cached.value, fetchedAt: cached.fetchedAt };
+    },
+
+    async settled() {
+      await Promise.all([forecasts.settled(), normals.settled()]);
     },
 
     async searchPlaces(query) {

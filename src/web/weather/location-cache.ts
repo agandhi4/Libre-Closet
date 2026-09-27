@@ -8,18 +8,22 @@ import type { CacheRow } from './queries';
  * (service.ts: the forecast, weather_forecast; the climate normals,
  * weather_normals). The discipline both share, so it lives once:
  * - an answer younger than `freshForMs` is served from the row;
- * - an older one is refreshed, and a failed refresh keeps the last good
- *   answer and records the attempt, so the provider is asked again only
- *   `retryAfterMs` later;
- * - one lookup per location at a time in this process, the row's read
- *   included: the pages of one household ask for the same place together,
- *   and an ask that read the stale row just before another's refresh saved
- *   would fetch again. Across processes a duplicate fetch is harmless.
- * Nothing runs in the background: the asking request waits for at most one
- * bounded fetch.
+ * - an older one is served at once and refreshed in the background (#114):
+ *   the first page after the hour must not wait for Open-Meteo. Only a cold
+ *   miss (no answer kept) waits, for at most the fetcher's bound;
+ * - a failed refresh keeps the last good answer and records the attempt, so
+ *   the provider is asked again only `retryAfterMs` later;
+ * - one refresh per location at a time in this process, and no read of the
+ *   row while one runs: an ask meanwhile is served the answer the refresh
+ *   started from (or joins it, on a cold miss), so an ask that read the
+ *   stale row just before the refresh saved can never fetch again. The pages
+ *   of one household ask for the same place together. Across processes a
+ *   duplicate fetch is harmless.
+ * A page is the same whether the refresh succeeds, fails or is still
+ * running: it shows what it was served, and the next ask the new answer.
  *
  * Logs name the rounded location (`Forecast for 40.69,-73.97: ...`), never
- * the user.
+ * the user: a refresh's start, then its outcome with its duration.
  */
 
 export interface Cached<T> {
@@ -43,16 +47,38 @@ export interface LocationCacheOptions<T> {
   describe(value: T): string;
 }
 
-/** The location's answer, fresh when the provider answers; null if it never has. */
-export type LocationCache<T> = (
-  location: Location,
-) => Promise<Cached<T> | null>;
+export interface LocationCache<T> {
+  /**
+   * The location's kept answer, stale or not (a stale one starts a
+   * background refresh); the provider's, waited for, when none is kept;
+   * null if the provider never answered.
+   */
+  get(location: Location): Promise<Cached<T> | null>;
+  /**
+   * Resolves once no refresh is running. The app's close awaits it before
+   * ending the pool (a background refresh still has a row to save); specs
+   * await it to see what a refresh stored.
+   */
+  settled(): Promise<void>;
+}
+
+/** A refresh under way: the answer it started from, and its outcome. */
+interface Refresh<T> {
+  kept: Cached<T> | null;
+  /** Never rejects: a failure is logged and resolves to `kept`. */
+  done: Promise<Cached<T> | null>;
+}
 
 export function createLocationCache<T>(
   options: LocationCacheOptions<T>,
 ): LocationCache<T> {
   const { name, now, logger } = options;
-  const inFlight = new Map<string, Promise<Cached<T> | null>>();
+  // Both keyed by locationLabel. `reading` holds the row's read and the
+  // decision, `refreshing` the fetch and save the decision started. An ask
+  // looks in `refreshing` first, and a lookup enters its refresh there before
+  // its own promise settles, so no ask reads the row while a refresh runs.
+  const reading = new Map<string, Promise<Cached<T> | null>>();
+  const refreshing = new Map<string, Refresh<T>>();
 
   async function lookup(location: Location): Promise<Cached<T> | null> {
     const row = await options.read(location);
@@ -69,7 +95,28 @@ export function createLocationCache<T>(
     ) {
       return kept;
     }
-    return refresh(location, kept);
+    const { done } = startRefresh(location, kept);
+    return kept ?? done;
+  }
+
+  function startRefresh(
+    location: Location,
+    kept: Cached<T> | null,
+  ): Refresh<T> {
+    const key = locationLabel(location);
+    logger.info(
+      `${name} for ${key}: refreshing; ${
+        kept
+          ? `serving the one from ${kept.fetchedAt.toISOString()} meanwhile`
+          : 'none kept, the ask waits'
+      }`,
+    );
+    const running: Refresh<T> = {
+      kept,
+      done: refresh(location, kept).finally(() => refreshing.delete(key)),
+    };
+    refreshing.set(key, running);
+    return running;
   }
 
   async function refresh(
@@ -87,7 +134,6 @@ export function createLocationCache<T>(
       );
       return { value, fetchedAt };
     } catch (error) {
-      await options.recordFailure(location, now());
       logger.warn(
         `${name} for ${label} failed (${failureReason(error)}) after ${elapsed(started)} ms; ${
           kept
@@ -95,17 +141,37 @@ export function createLocationCache<T>(
             : 'none to serve'
         }`,
       );
+      // Nobody awaits a background refresh, so it must never reject: an
+      // unhandled rejection ends the process.
+      await options.recordFailure(location, now()).catch((failure: unknown) => {
+        logger.error(
+          { err: failure },
+          `${name} for ${label}: recording the failed attempt failed`,
+        );
+      });
       return kept;
     }
   }
 
-  return (location) => {
-    const key = locationLabel(location);
-    const running = inFlight.get(key);
-    if (running) return running;
-    const looking = lookup(location).finally(() => inFlight.delete(key));
-    inFlight.set(key, looking);
-    return looking;
+  return {
+    get(location) {
+      const key = locationLabel(location);
+      const running = refreshing.get(key);
+      if (running) {
+        return running.kept ? Promise.resolve(running.kept) : running.done;
+      }
+      const looking = reading.get(key);
+      if (looking) return looking;
+      const read = lookup(location).finally(() => reading.delete(key));
+      reading.set(key, read);
+      return read;
+    },
+
+    async settled() {
+      while (refreshing.size > 0) {
+        await Promise.all([...refreshing.values()].map(({ done }) => done));
+      }
+    },
   };
 }
 
