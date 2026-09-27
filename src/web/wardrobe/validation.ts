@@ -1115,14 +1115,15 @@ export const TagQuery = Type.Object({
 
 /**
  * POST /wardrobe/:id/tag: the tagging card's chips, posted whole on every
- * tap. A field the card never showed or the user never tapped is absent and
- * leaves the stored value; a type outside the garment's category is a 400
- * (the card only offers its own).
+ * tap, and by Next with `next=1`. A field the card never showed or the user
+ * never tapped is absent and leaves the stored value; a type outside the
+ * garment's category is a 400 (the card only offers its own).
  */
 export const TagBody = Type.Object({
   type: Type.Optional(Type.String({ maxLength: 40 })),
   warmth: choice(WARMTHS),
   formality: choice(FORMALITIES),
+  next: Type.Optional(Type.Literal('1')),
 });
 export type TagBody = Static<typeof TagBody>;
 

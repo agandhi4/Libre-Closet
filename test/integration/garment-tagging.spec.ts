@@ -13,8 +13,9 @@ import {
  * their type (where the category has types), warmth (where the role has
  * one) or formality; /wardrobe/tag shows them one at a time, newest first;
  * a tap saves at once and a type fills its presets only where nothing is
- * set; Next moves past (`?before=`), so a garment left alone waits for the
- * next pass.
+ * set, answering the chips alone (the card's form is an AutosaveForm,
+ * src/web/autosave.tsx); Next saves the card and moves past it, so a
+ * garment left alone waits for the next pass.
  */
 
 type Props = Record<string, unknown>;
@@ -95,10 +96,34 @@ describe('tagging mode', () => {
     expectNativePostForms(res);
     expect(res.body).toContain('Blank tee');
     expect(res.body).toContain('3 left to tag');
-    expect(res.body).toContain(`href="/wardrobe/tag?before=${ids.blank}"`);
+    // One form, saved on every tap and posted by Next: its queue carries a
+    // tap made just before Next along with it.
+    expect(res.body).toContain(`hx-post="/wardrobe/${ids.blank}/tag"`);
+    expect(res.body).toContain('hx-target="#tag-fields"');
+    expect(res.body).toMatch(
+      /<button type="submit" name="next" value="1" class="btn btn-primary">Next<\/button>/,
+    );
   });
 
   it('moves past a garment with Next, leaving it for the next pass', async () => {
+    const res = await tag(ids.blank, { next: '1' });
+    expect(res.statusCode).toBe(200);
+    expectFragment(res);
+    // The next garment's card, in place of this one's.
+    expect(res.headers['hx-retarget']).toBe('#tag-card');
+    expect(res.headers['hx-reswap']).toBe('outerHTML');
+    expect(res.body).toContain('id="tag-card"');
+    expect(res.body).toContain('Heavy tee');
+    expect(res.body).not.toContain('Blank tee');
+    // Nothing tapped, nothing written: no presets for a garment left alone.
+    expect(await row(ids.blank)).toMatchObject({
+      type: null,
+      warmth: null,
+      formality: null,
+    });
+  });
+
+  it('still answers the card after a garment to pages cached with the Next link', async () => {
     const res = await card(`?before=${ids.blank}`);
     expectFragment(res);
     expect(res.body).toContain('Heavy tee');
@@ -117,6 +142,12 @@ describe('tagging mode', () => {
     expect(res.statusCode).toBe(200);
     expectFragment(res);
     expect(res.body).toMatch(/name="warmth" value="2"[^>]*checked/);
+    // The chips and the count, never the form or the card around them.
+    expect(res.body).not.toContain('id="tag-card"');
+    expect(res.body).not.toContain('hx-post');
+    expect(res.body).toMatch(
+      /<p id="tag-left" class="[^"]*" hx-swap-oob="true">2 left to tag<\/p>/,
+    );
     expect(await row(ids.blank)).toMatchObject({
       type: 't-shirt',
       warmth: 2,
@@ -156,6 +187,28 @@ describe('tagging mode', () => {
     await tag(id, { type: 'sweater', warmth: '5' });
     await tag(id, { type: 'cardigan' });
     expect(await row(id)).toMatchObject({ warmth: 5, sleeve: 'long' });
+    await t.inject({ method: 'POST', url: `/wardrobe/${id}/archive` });
+  });
+
+  it('saves the taps Next carries, then moves on', async () => {
+    const id = await create({ name: 'Quick polo', category: 'tops' });
+    const res = await tag(id, {
+      type: 'polo',
+      warmth: '4',
+      formality: '3',
+      next: '1',
+    });
+    expect(res.headers['hx-retarget']).toBe('#tag-card');
+    expect(res.body).not.toContain('Quick polo');
+    expect(await row(id)).toMatchObject({
+      type: 'polo',
+      warmth: 4,
+      formality: 3,
+      sleeve: 'short',
+    });
+    expect(t.logs.messages('info', 'Web')).toContainEqual(
+      `Tagging: user ${t.owner.id} moved on from garment ${id}`,
+    );
     await t.inject({ method: 'POST', url: `/wardrobe/${id}/archive` });
   });
 
