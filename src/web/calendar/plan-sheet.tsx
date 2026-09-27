@@ -20,7 +20,8 @@ import { CALENDAR_PLAN_PATH } from './urls';
  * back to the day, and the occasion needs no script: the form posts the
  * checked radio. Static per day, so `/calendar` stays byte-stable.
  *
- * Opened by the day's "+ Plan" and its open template slots (OpenSlotRow):
+ * Opened by the day's open template slots (OpenSlotRow) or, on a day with
+ * none, its "+ Plan" (all day):
  * `data-plan` names the occasion's radio, which the one-line handler checks
  * before it opens the radio's dialog.
  */

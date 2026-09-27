@@ -15,7 +15,7 @@ import {
   TestApp,
   unescapeHtml,
 } from './harness';
-import { dayColumns } from './calendar-page';
+import { dayColumns, planButtonLabel } from './calendar-page';
 import { expectFullPage } from './pages';
 
 /**
@@ -349,6 +349,12 @@ describe('calendar', () => {
         expect(columns.get('2026-09-25')).toContain(
           'data-plan="plan-2026-09-25-evening"',
         );
+        // A day with open slots has them as its one way into the sheet,
+        // with or without an outfit already; without any, its "+ Plan".
+        const html = await weekPage('/calendar');
+        expect(planButtonLabel(html, '2026-09-23')).toBeUndefined();
+        expect(planButtonLabel(html, '2026-09-25')).toBeUndefined();
+        expect(planButtonLabel(html, '2026-09-26')).toBe('+ Plan');
       } finally {
         vi.useRealTimers();
         const cleared = new URLSearchParams();

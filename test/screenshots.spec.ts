@@ -115,8 +115,10 @@ test('demo: Theo, every feature with real data', async ({ page }) => {
   // The calendar's month of collages (R6, #86): August's history.
   await shot(page, '70-demo-calendar-month', '/calendar/month?month=2026-08');
   // The planned week's "+ Plan" on Tuesday: its sheet, the three ways.
+  // Opened by the day's button or, while the week template leaves it open
+  // slots (from today on), the first of those.
   await page.goto('/calendar?week=2026-09-27');
-  await page.locator('[data-day-plan="2026-09-29"]').click();
+  await page.locator('[data-plan^="plan-2026-09-29-"]').first().click();
   await expect(
     page.locator('dialog[data-plan-sheet="2026-09-29"]'),
   ).toBeVisible();

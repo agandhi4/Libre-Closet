@@ -15,7 +15,10 @@ export function dayColumns(html: string): Map<string, string> {
   return columns;
 }
 
-/** The label of a day's "+ Plan" button, which opens its sheet (all day). */
+/**
+ * The label of a day's "+ Plan" button, which opens its sheet (all day):
+ * undefined on a day with open template slots, which open it instead.
+ */
 export function planButtonLabel(html: string, day: string): string | undefined {
   return new RegExp(`data-day-plan="${day}"[^>]*>([^<]*)<`)
     .exec(html)?.[1]

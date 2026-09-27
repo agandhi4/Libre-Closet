@@ -30,7 +30,7 @@ import { dayAnchor, weekUrl } from './urls';
  * its entries in occasion order (OccasionRow), the week template's
  * occasions it has no outfit for yet (OpenSlotRow), the selfies kept after
  * their outfit went (DayLooks, #19) and "+ Plan", which opens the day's
- * sheet (PlanSheet). `data-day` on each block is what the specs split days
+ * sheet (PlanSheet), unless an open slot already does. `data-day` on each block is what the specs split days
  * on (test/integration/calendar-page.ts).
  */
 export function CalendarPage(props: {
@@ -159,18 +159,23 @@ function DaySection({ ctx, day }: { ctx: ViewContext; day: CalendarDayView }) {
         <OpenSlotRow day={day.date} occasion={occasion} />
       ))}
       {day.looks.length > 0 && <DayLooks day={day} />}
-      <button
-        type="button"
-        class="btn btn-ghost btn-sm mt-1 -ms-3 font-normal text-muted"
-        data-plan={planSheetChoice(day.date, DEFAULT_OCCASION)}
-        data-day-plan={day.date}
-        onclick={OPEN_PLAN_SHEET}
-      >
-        +{' '}
-        {day.entries.length > 0
-          ? t('CALENDAR_ANOTHER_OUTFIT')
-          : t('CALENDAR_PLAN')}
-      </button>
+      {/* One way into the sheet per day: an open slot opens the same sheet
+          (every occasion on it), so the day's own button would say it
+          twice. */}
+      {day.openSlots.length === 0 && (
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm mt-1 -ms-3 font-normal text-muted"
+          data-plan={planSheetChoice(day.date, DEFAULT_OCCASION)}
+          data-day-plan={day.date}
+          onclick={OPEN_PLAN_SHEET}
+        >
+          +{' '}
+          {day.entries.length > 0
+            ? t('CALENDAR_ANOTHER_OUTFIT')
+            : t('CALENDAR_PLAN')}
+        </button>
+      )}
     </section>
   );
 }
