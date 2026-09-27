@@ -15,6 +15,7 @@ import {
   CameraIcon,
   HangerIcon,
   PhotoLibraryIcon,
+  PHOTO_ACCEPT,
   PREPARE_AND_SUBMIT_PHOTO,
   SavedToast,
   StripFlags,
@@ -78,9 +79,6 @@ export interface GarmentPageModel {
   justSavedPhoto: boolean;
   justBought: boolean;
 }
-
-const PHOTO_ACCEPT =
-  'image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif,.heic,.heif';
 
 const PHOTO_SHEET_ID = 'garment-photo-sheet';
 
