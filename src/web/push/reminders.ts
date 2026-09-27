@@ -129,19 +129,7 @@ export async function sendDueReminders(
     group.deviceIds.push(deviceId);
     groups.set(key, group);
   }
-  // The morning's forecasts, refreshed together before anyone's re-plan or
-  // weather line reads them: each read below is then a refreshed row (or the
-  // stale one), never a person's own wait on Open-Meteo in turn.
-  const mornings = [...groups.values()]
-    .filter((group) => group.kind === 'morning')
-    .map((group) => group.userId);
-  if (deps.weather && mornings.length > 0) {
-    await refreshForecastsFor(
-      { db, weather: deps.weather, logger },
-      mornings,
-      now,
-    );
-  }
+  await refreshMorningForecasts(deps, [...groups.values()], now);
   for (const { userId, kind, deviceIds } of groups.values()) {
     // Logged before sending: a claim is never retried (claim before send, so
     // a crash loses a reminder rather than doubling it), and this line is
@@ -176,6 +164,27 @@ export async function sendDueReminders(
     `Reminders at ${now.toISOString()}: ${run.claimed} claimed of ${run.due} due, ${run.sent} sent, ${run.skipped} skipped, ${run.failed} failed`,
   );
   return run;
+}
+
+/**
+ * The morning's forecasts, refreshed together before anyone's re-plan or
+ * weather line reads them: each read after is then a refreshed row (or the
+ * stale one), never a person's own wait on Open-Meteo in turn.
+ */
+async function refreshMorningForecasts(
+  deps: ReminderDeps,
+  groups: readonly { userId: number; kind: ReminderKind }[],
+  now: Date,
+): Promise<void> {
+  const mornings = groups
+    .filter((group) => group.kind === 'morning')
+    .map((group) => group.userId);
+  if (!deps.weather || mornings.length === 0) return;
+  await refreshForecastsFor(
+    { db: deps.db, weather: deps.weather, logger: deps.logger },
+    mornings,
+    now,
+  );
 }
 
 /**
