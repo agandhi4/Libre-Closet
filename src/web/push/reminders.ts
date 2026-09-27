@@ -7,7 +7,11 @@ import { ideaName } from '../gallery/ideas';
 import { t } from '../i18n';
 import { todayFor, type TodayModel } from '../today/today';
 import { TODAY_PATH } from '../today/urls';
-import { userWeather, type WeatherService } from '../weather/service';
+import {
+  refreshForecastsFor,
+  userWeather,
+  type WeatherService,
+} from '../weather/service';
 import { todayLine } from '../weather/summary';
 import { weatherLineText } from '../weather/views';
 import {
@@ -125,6 +129,19 @@ export async function sendDueReminders(
     group.deviceIds.push(deviceId);
     groups.set(key, group);
   }
+  // The morning's forecasts, refreshed together before anyone's re-plan or
+  // weather line reads them: each read below is then a refreshed row (or the
+  // stale one), never a person's own wait on Open-Meteo in turn.
+  const mornings = [...groups.values()]
+    .filter((group) => group.kind === 'morning')
+    .map((group) => group.userId);
+  if (deps.weather && mornings.length > 0) {
+    await refreshForecastsFor(
+      { db, weather: deps.weather, logger },
+      mornings,
+      now,
+    );
+  }
   for (const { userId, kind, deviceIds } of groups.values()) {
     // Logged before sending: a claim is never retried (claim before send, so
     // a crash loses a reminder rather than doubling it), and this line is
@@ -206,9 +223,8 @@ export async function reminderPayload(
   now: Date,
   swapped: readonly Swap[],
 ): Promise<PushPayload | null> {
-  // The morning's forecast first, awaiting a stale one's refresh: a push
-  // is sent once, so it must not carry the hour-old weather, and Today's
-  // ideas (todayFor) then read the refreshed row too.
+  // The morning's forecast first (sendDueReminders refreshed the batch's
+  // rows), so the line and Today's ideas (todayFor) read the same row.
   const weather =
     kind === 'morning' ? await weatherText(deps, userId, now) : null;
   const model = await todayFor(deps, userId, now);
@@ -277,7 +293,6 @@ async function weatherText(
     deps.weather,
     userId,
     now,
-    { fresh: true },
   );
   const line =
     active &&

@@ -1,7 +1,7 @@
 import type { Db } from '../../db/client';
 import type { Logger } from '../../logger';
 import type { Forecast } from '../../weather/forecast';
-import type { Location } from '../../weather/location';
+import { type Location, locationLabel } from '../../weather/location';
 import { type ClimateNormals, normalYears } from '../../weather/normals';
 import { todayIn } from '../calendar/calendar-date';
 import {
@@ -43,6 +43,15 @@ import {
  * Logs (context Weather) name the rounded location (`40.69,-73.97`), never
  * the user; the fetcher's own line names only the host.
  */
+
+/**
+ * A batch job's forecast refresh (refreshForecastsFor): how many locations
+ * are fetched at once, and the one deadline over all of them. The deadline
+ * is a little over one fetch's bound (the fetcher's 10 s), so a minute's
+ * run never waits much longer than one slow Open-Meteo answer.
+ */
+export const BATCH_REFRESH_CONCURRENCY = 4;
+export const BATCH_REFRESH_DEADLINE_MS = 12_000;
 
 /** A forecast is refreshed once it is this old: once an hour per location. */
 export const FRESH_FOR_MS = 60 * 60 * 1000;
@@ -201,4 +210,70 @@ export async function userWeather(
     ? await weather.forecastFor(active.location, read)
     : null;
   return { settings, active, cached };
+}
+
+/**
+ * Refreshes, together, the forecasts a batch job is about to decide on:
+ * the distinct active locations of `userIds`, each through the cache's
+ * fresh read (its single flight), BATCH_REFRESH_CONCURRENCY at a time,
+ * within BATCH_REFRESH_DEADLINE_MS in all. The job then reads each person's
+ * forecast without `fresh` (a refreshed row, or the stale one where the
+ * refresh failed or overran), so N people at N places cost about one fetch,
+ * not N one after another: the minutely timers skip a minute a slow run
+ * overran. Used by the morning reminders and the daily re-plan. Never
+ * throws: a location that fails is logged and left to its stale row.
+ */
+export async function refreshForecastsFor(
+  deps: { db: Db; weather: WeatherService; logger: Logger },
+  userIds: readonly number[],
+  now: Date,
+): Promise<void> {
+  const locations = new Map<string, Location>();
+  for (const userId of new Set(userIds)) {
+    const active = activeLocation(
+      await findWeatherSettings(deps.db, userId),
+      now,
+    );
+    if (active) locations.set(locationLabel(active.location), active.location);
+  }
+  if (locations.size === 0) return;
+  const started = performance.now();
+  const queue = [...locations.values()];
+  let expired = false;
+  let pending = queue.length;
+  const worker = async () => {
+    // No new fetch once the deadline has passed: the job reads stale rows.
+    while (!expired) {
+      const location = queue.shift();
+      if (!location) return;
+      await deps.weather
+        .forecastFor(location, { fresh: true })
+        .catch((error: unknown) =>
+          deps.logger.error(
+            { err: error },
+            `Forecast refresh for ${locationLabel(location)} failed`,
+          ),
+        );
+      pending -= 1;
+    }
+  };
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.all(
+      Array.from(
+        { length: Math.min(BATCH_REFRESH_CONCURRENCY, queue.length) },
+        worker,
+      ),
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, BATCH_REFRESH_DEADLINE_MS);
+    }),
+  ]);
+  clearTimeout(timer);
+  expired = true;
+  deps.logger.info(
+    `Forecasts for ${locations.size} location(s) refreshed for a batch in ${elapsed(started)} ms${
+      pending > 0 ? `; ${pending} not done by the deadline, read stale` : ''
+    }`,
+  );
 }
