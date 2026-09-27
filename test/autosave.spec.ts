@@ -188,6 +188,56 @@ test("the garment form's properties: taps made while the type's presets load are
   expect(errors).toEqual([]);
 });
 
+test("the garment form's properties: a warmth tapped while a category change loads survives, and the presets catch up", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await signIn(page, 'autosave-preset-markers');
+  await page.goto('/wardrobe/new');
+  const category = page.locator('#garment-category');
+  const marker = (name: string) => page.locator(`input[name="${name}"]`);
+  await category.fill('tops');
+  await category.blur();
+  await radio(page, 'T-shirt').check();
+  await expect(marker('presetType')).toHaveValue('t-shirt');
+  await expect(radio(page, 'Light')).toBeChecked();
+
+  // The category's answer is held; the tap lands first and drops it, so the
+  // form keeps the tee's markers while it posts outerwear.
+  const saves = await slowSaves(page, /^\/wardrobe\/properties-fragment$/);
+  await category.fill('outerwear');
+  await category.blur();
+  await radio(page, 'Warm').check();
+  await saves.settled();
+
+  expect(saves.overlapped).toBe(false);
+  expect(saves.bodies).toHaveLength(2);
+  expect(Object.fromEntries(saves.bodies[1])).toMatchObject({
+    category: 'outerwear',
+    warmth: '4',
+    presetCategory: 'tops',
+    presetType: 't-shirt',
+  });
+  // The tap survives, and the markers now name what the chips on screen
+  // came from: outerwear, no type yet.
+  await expect(radio(page, 'Warm')).toBeChecked();
+  await expect(marker('presetCategory')).toHaveValue('outerwear');
+  await expect(marker('presetType')).toHaveValue('');
+
+  // The next answer builds on consistent markers: a parka brings its presets
+  // to what is unset and leaves the tapped warmth alone.
+  await radio(page, 'Parka').check();
+  await saves.settled();
+  await expect(marker('presetType')).toHaveValue('parka');
+  await expect(radio(page, 'Warm')).toBeChecked();
+  await page.getByText('More details').click();
+  await expect(radio(page, 'Casual')).toBeChecked();
+  await expect(
+    page.getByRole('checkbox', { name: 'Water-resistant' }),
+  ).toBeChecked();
+  expect(errors).toEqual([]);
+});
+
 test('condition: two quick chips and a note are all saved', async ({
   page,
 }) => {

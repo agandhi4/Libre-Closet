@@ -84,6 +84,16 @@ function PropertiesMainFields(props: PropertiesProps & { errors?: string[] }) {
     <>
       {/* The save writes properties only when this is posted (see GarmentBody.props). */}
       <input type="hidden" name="props" value="1" />
+      {/* Where the presets on screen came from (withPresets' `from`). They
+          are redrawn only with the chips they describe, so when autosave.js
+          drops an overtaken answer (a category change, then a quick warmth
+          tap) they stay a step behind the category and type the form now
+          posts: the markers of the chips still on screen. That is what
+          applyPresets needs: the next answer moves only the values still
+          equal to those presets (so a tap stays, unless it picked the
+          preset's own value, as without the lag), fills what is unset, and
+          carries markers for the category and type it drew, so the lag
+          lasts one answer. test/autosave.spec.ts locks it in. */}
       <input
         type="hidden"
         name="presetCategory"

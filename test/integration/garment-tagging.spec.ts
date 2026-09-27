@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { garment } from '../../src/db/schema';
-import { createTestApp, type TestApp } from './harness';
+import { createTestApp, recordQueries, type TestApp } from './harness';
 import {
   expectFragment,
   expectNativePostForms,
@@ -230,6 +230,43 @@ describe('tagging mode', () => {
         new RegExp(`^Garment ${ids.blank} tagged by user \\d+: formality$`),
       ),
     );
+  });
+
+  it('writes nothing for a card left alone: Next posts its checked chips, which change nothing', async () => {
+    // Type and warmth set, formality missing: on the card with two chips
+    // checked, which the form posts on Next as on every tap.
+    const id = await create({ name: 'Half tee', category: 'tops' });
+    await t.db
+      .update(garment)
+      .set({ type: 't-shirt', warmth: 3, formality: null })
+      .where(eq(garment.id, id));
+    const before = await row(id);
+    t.logs.clear();
+
+    let res!: Awaited<ReturnType<typeof tag>>;
+    const record = await recordQueries(async () => {
+      res = await tag(id, { type: 't-shirt', warmth: '3', next: '1' });
+    });
+    expect(record.sql.filter((sql) => /^\s*update\b/i.test(sql))).toEqual([]);
+    expect(await row(id)).toEqual(before);
+    // The same type again brings no presets: formality stays the person's.
+    expect((await row(id)).formality).toBeNull();
+    expect(t.logs.messages('info', 'Web')).not.toContainEqual(
+      expect.stringContaining(`Garment ${id} tagged`),
+    );
+    // The next card, all the same.
+    expect(res.headers['hx-retarget']).toBe('#tag-card');
+    expect(res.body).toContain('id="tag-card"');
+    expect(res.body).not.toContain('Half tee');
+
+    // A tap that changes one field writes that field alone.
+    t.logs.clear();
+    await tag(id, { type: 't-shirt', warmth: '3', formality: '4' });
+    expect(await row(id)).toEqual({ ...before, formality: 4 });
+    expect(t.logs.messages('info', 'Web')).toContainEqual(
+      `Garment ${id} tagged by user ${t.owner.id}: formality`,
+    );
+    await t.inject({ method: 'POST', url: `/wardrobe/${id}/archive` });
   });
 
   it('says so when every garment is tagged, and the prompt goes', async () => {

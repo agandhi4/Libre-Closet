@@ -619,10 +619,10 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   );
 
   // The tagging card's AutosaveForm (tag-page.tsx): a tap saves the chips
-  // and answers them as saved (the type's presets filled where nothing was
+  // and answers them as saved (a new type's presets filled where nothing was
   // set; readTags) with the count left; Next (`next=1`) saves the same way
-  // and answers the card after this garment instead. A post with nothing
-  // tapped writes nothing: Next on a garment left alone only moves on.
+  // and answers the card after this garment instead. A post that changes
+  // nothing writes nothing: Next on a card left alone only moves on.
   app.post(
     '/wardrobe/:id/tag',
     {
@@ -638,15 +638,17 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const { id } = request.params;
       const { next, ...tags } = request.body;
       const garment = await requireGarment(options, id, access.ownerId);
-      const tapped = Object.keys(tags);
-      if (tapped.length > 0) {
-        const fields = readTags(tags, garment);
-        if (!fields) throw new HttpError(400, 'Not a type of this category');
-        if (!(await updateGarmentProperties(db, id, access.ownerId, fields))) {
+      // Only what differs from the stored garment: the card posts its
+      // checked chips every time, Next included.
+      const changes = readTags(tags, garment);
+      if (!changes) throw new HttpError(400, 'Not a type of this category');
+      const changed = Object.keys(changes);
+      if (changed.length > 0) {
+        if (!(await updateGarmentProperties(db, id, access.ownerId, changes))) {
           throw notFound();
         }
         logger.info(
-          `Garment ${id} tagged by user ${sessionUserId(request)}: ${tapped.join(', ')}`,
+          `Garment ${id} tagged by user ${sessionUserId(request)}: ${changed.join(', ')}`,
         );
       }
       if (next) {
