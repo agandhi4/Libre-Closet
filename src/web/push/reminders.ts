@@ -10,6 +10,7 @@ import { TODAY_PATH } from '../today/urls';
 import { userWeather, type WeatherService } from '../weather/service';
 import { todayLine } from '../weather/summary';
 import { weatherLineText } from '../weather/views';
+import { type ReplanDeps, replanToday } from '../week-plan/replan';
 import type { PushPayload } from './payload';
 import {
   claimReminders,
@@ -36,6 +37,14 @@ import type { PushSender } from './sender';
  * taken before sending: a crash between the two loses that reminder rather
  * than sending it twice (the notification's tag would stack nothing, but a
  * reminder is not worth a second buzz).
+ *
+ * **The morning one describes the day after its re-plan** (#76): before
+ * composing it, the person's re-plan for today runs if nothing has run it
+ * yet (replanToday, src/web/week-plan/replan.ts, once a day per user
+ * whoever asks, the claim committed with the work). So a 05:00 reminder
+ * never names an outfit the day's own re-plan is about to swap, whatever
+ * the two minute timers' order, and with two servers the one that loses
+ * the claim waits for the other's re-plan to commit before reading.
  */
 
 /**
@@ -61,6 +70,8 @@ export interface ReminderDeps {
   timeZone: string;
   /** Context `Push`. */
   logger: Logger;
+  /** The week's re-plan, run for a person before their morning reminder. */
+  replan: ReplanDeps;
 }
 
 export interface ReminderRun {
@@ -114,6 +125,9 @@ export async function sendDueReminders(
       `Claimed the ${kind} reminder for user ${userId}, devices ${deviceIds.join(', ')}`,
     );
     try {
+      // Never throws: a failed re-plan is logged, and the reminder still
+      // names the plan as it stands.
+      if (kind === 'morning') await replanToday(deps.replan, userId, now);
       const payload = await reminderPayload(deps, userId, kind, now);
       if (!payload) {
         run.skipped += 1;

@@ -1032,7 +1032,13 @@
       "COLDER": "{slot} turned cold: swapped in {garments}",
       "WARMER": "{slot} warmed up: swapped in {garments}",
       "DRY": "{slot} is dry now: swapped in {garments}",
-      "SWING": "{slot} swings warm to cold: swapped in {garments}"
+      "SWING": "{slot} swings warm to cold: swapped in {garments}",
+      "LENT": "{garment} is lent out: swapped in {garments} on {slot}",
+      "REPAIR": "{garment} is at repair: swapped in {garments} on {slot}",
+      "ARCHIVED": "{garment} is archived: swapped in {garments} on {slot}",
+      "WISHLIST": "{garment} is not in your closet: swapped in {garments} on {slot}",
+      "DIRTY": "{garment} needs a wash: swapped in {garments} on {slot}",
+      "DELETED": "A garment of {slot}'s outfit was deleted: swapped in {garments}"
     }
   },
   "trips": {
