@@ -107,6 +107,12 @@ export async function sendDueReminders(
     groups.set(key, group);
   }
   for (const { userId, kind, deviceIds } of groups.values()) {
+    // Logged before sending: a claim is never retried (claim before send, so
+    // a crash loses a reminder rather than doubling it), and this line is
+    // what tells a lost reminder apart from one that was never due.
+    logger.info(
+      `Claimed the ${kind} reminder for user ${userId}, devices ${deviceIds.join(', ')}`,
+    );
     try {
       const payload = await reminderPayload(deps, userId, kind, now);
       if (!payload) {
