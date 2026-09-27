@@ -278,24 +278,60 @@ export async function removeAutoEntries(
       ),
     )
     .returning({ id: outfitCalendar.id });
-  const created = [
-    ...new Set(entries.filter((e) => e.outfitCreated).map((e) => e.outfitId)),
-  ];
-  const unused =
-    created.length === 0
-      ? []
-      : await tx
-          .select({ id: outfit.id })
-          .from(outfit)
-          .where(
-            and(
-              inArray(outfit.id, created),
-              eq(outfit.ownerId, ownerId),
-              sql`not exists (select 1 from ${outfitCalendar} where ${outfitCalendar.outfitId} = ${outfit.id})`,
-            ),
-          );
+  const outfits = await removeUnheldOutfits(
+    tx,
+    ownerId,
+    entries.filter((e) => e.outfitCreated).map((e) => e.outfitId),
+  );
+  return { entries: deleted.length, outfits };
+}
+
+/**
+ * Deletes each of `outfitIds` (outfits the planner created, which the
+ * caller has just taken off their entries) that no calendar entry holds
+ * any more, through deleteOutfit (its wears rule). One held elsewhere, or
+ * one the planner found already saved (never passed here), is the person's
+ * and stays. The one rule for Undo, the re-plan's swap (removeAutoEntries)
+ * and changing an auto entry's outfit (replaceEntryOutfit, #69). Returns
+ * how many went.
+ */
+export async function removeUnheldOutfits(
+  tx: Queryable,
+  ownerId: number,
+  outfitIds: readonly number[],
+): Promise<number> {
+  const candidates = [...new Set(outfitIds)];
+  if (candidates.length === 0) return 0;
+  const unused = await tx
+    .select({ id: outfit.id })
+    .from(outfit)
+    .where(
+      and(
+        inArray(outfit.id, candidates),
+        eq(outfit.ownerId, ownerId),
+        sql`not exists (select 1 from ${outfitCalendar} where ${outfitCalendar.outfitId} = ${outfit.id})`,
+      ),
+    );
   for (const { id } of unused) await deleteOutfit(tx, id, ownerId);
-  return { entries: deleted.length, outfits: unused.length };
+  return unused.length;
+}
+
+/**
+ * Whether the planner created the outfit of auto entry `entryId` ("Plan my
+ * week" found none saved of those garments): what makes it the planner's
+ * to remove once nothing holds it. Asked only of an entry still 'auto'
+ * (CLAUDE.md Gotchas: a taken-over entry's week_plan_entry row is
+ * provenance, not ownership); false for an entry the planner never wrote.
+ */
+export async function plannerCreatedOutfit(
+  tx: Queryable,
+  entryId: number,
+): Promise<boolean> {
+  const [row] = await tx
+    .select({ outfitCreated: weekPlanEntry.outfitCreated })
+    .from(weekPlanEntry)
+    .where(eq(weekPlanEntry.entryId, entryId));
+  return row?.outfitCreated ?? false;
 }
 
 /** Deletes batch `id` once none of its entries is left (all undone or deleted). */
