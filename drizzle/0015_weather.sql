@@ -7,7 +7,7 @@ CREATE TABLE "user_weather" (
 	"here_longitude" numeric(5, 2),
 	"here_located_at" timestamp with time zone,
 	"temperature_offset" numeric(2, 1) DEFAULT '0' NOT NULL,
-	"temperature_unit" text DEFAULT 'celsius' NOT NULL,
+	"temperature_unit" text DEFAULT 'fahrenheit' NOT NULL,
 	CONSTRAINT "user_weather_home_check" CHECK (("user_weather"."home_name" is null) = ("user_weather"."home_latitude" is null) and ("user_weather"."home_latitude" is null) = ("user_weather"."home_longitude" is null)),
 	CONSTRAINT "user_weather_here_check" CHECK (("user_weather"."here_latitude" is null) = ("user_weather"."here_longitude" is null) and ("user_weather"."here_latitude" is null) = ("user_weather"."here_located_at" is null)),
 	CONSTRAINT "user_weather_latitude_check" CHECK ("user_weather"."home_latitude" between -90 and 90 and "user_weather"."here_latitude" between -90 and 90),

@@ -31,7 +31,8 @@ const home = {
   source: 'home' as const,
   name: 'Fort Greene, New York, United States',
 };
-const settings: WeatherSettings = { ...NO_WEATHER_SETTINGS };
+// Pinned to °C so these expectations don't depend on the default unit.
+const settings: WeatherSettings = { ...NO_WEATHER_SETTINGS, unit: 'celsius' };
 
 function line(
   forecastDay: DayForecast,

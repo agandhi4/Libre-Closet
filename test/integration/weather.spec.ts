@@ -219,7 +219,8 @@ describe('weather', () => {
       const body = unescapeHtml(res.body);
       expect(body).toContain('id="weather-line"');
       expect(body).toContain(
-        `${displayTemperature(day.low, 'celsius')}–${displayTemperature(day.high, 'celsius')} °C`,
+        // No unit chosen: the default, °F.
+        `${displayTemperature(day.low, 'fahrenheit')}–${displayTemperature(day.high, 'fahrenheit')} °F`,
       );
       expect(body).toContain('Fort Greene · as of 8:30 PM');
 

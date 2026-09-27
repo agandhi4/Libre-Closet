@@ -7,8 +7,8 @@
 export const TEMPERATURE_UNITS = ['celsius', 'fahrenheit'] as const;
 export type TemperatureUnit = (typeof TEMPERATURE_UNITS)[number];
 
-/** A user who never chose: the plan's °C. */
-export const DEFAULT_TEMPERATURE_UNIT: TemperatureUnit = 'celsius';
+/** A user who never chose: °F, for the NYC household (owner, 2026-09-26). The migration's column default must match (drizzle/0015_weather.sql). */
+export const DEFAULT_TEMPERATURE_UNIT: TemperatureUnit = 'fahrenheit';
 
 export function isTemperatureUnit(value: string): value is TemperatureUnit {
   return (TEMPERATURE_UNITS as readonly string[]).includes(value);
