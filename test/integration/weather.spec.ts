@@ -641,6 +641,44 @@ describe('weather', () => {
     });
   });
 
+  it('limits how many locations one account can set a minute: each is a fetch and a cached row', async () => {
+    const cookie = await t.register('wanderer@example.com');
+    const here = (latitude: number) =>
+      t.inject({
+        method: 'POST',
+        url: '/weather/here',
+        ...form({ latitude: String(latitude), longitude: '-73.98' }),
+        headers: { ...form({}).headers, cookie },
+      });
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      statuses.push((await here(40 + i / 10)).statusCode);
+    }
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(200));
+    expect(statuses[10]).toBe(429);
+    expect(t.logs.messages('warn', 'RateLimit')).toContainEqual(
+      expect.stringMatching(
+        /^Rate limit reached: POST \/weather\/here for user \d+$/,
+      ),
+    );
+    // Home counts on its own, and someone else's count is their own.
+    const home = await t.inject({
+      method: 'POST',
+      url: '/weather/home',
+      ...form({ name: 'Fort Greene', ...PRECISE }),
+      headers: { ...form({}).headers, cookie },
+    });
+    expect(home.statusCode).toBe(200);
+    const neighbour = await t.register('stayer@example.com');
+    const theirs = await t.inject({
+      method: 'POST',
+      url: '/weather/here',
+      ...form({ latitude: '40.5', longitude: '-73.98' }),
+      headers: { ...form({}).headers, cookie: neighbour },
+    });
+    expect(theirs.statusCode).toBe(200);
+  });
+
   it('is the signed-in user’s own: another account starts with nothing', async () => {
     const cookie = await t.register('neighbour@example.com');
     const res = await t.inject({

@@ -61,6 +61,9 @@ function setup(row?: CacheRow<string>) {
       });
     },
     describe: (value) => `"${value}"`,
+    // An answer to another question (a zone or years no longer asked for).
+    mismatch: (value) =>
+      value.startsWith('other:') ? 'for Chicago, not New York' : null,
   });
 
   return {
@@ -206,6 +209,34 @@ describe('createLocationCache', () => {
     expect(s.logs.messages('info')[0]).toBe(
       'Forecast for 40.69,-73.98: refreshing; none kept, the ask waits',
     );
+  });
+
+  it('never serves an answer to another question, however young, and waits for the new one', async () => {
+    const fetchedAt = new Date(NOW.getTime() - MINUTE);
+    const s = setup({ value: 'other:days', fetchedAt, attemptedAt: fetchedAt });
+    const ask = s.cache.get(HERE);
+    await flush();
+    expect(s.calls.fetch).toBe(1);
+    s.pending[0].resolve('days');
+    await expect(ask).resolves.toEqual({ value: 'days', fetchedAt: NOW });
+    expect(s.logs.messages('info').slice(0, 2)).toEqual([
+      'Forecast for 40.69,-73.98: the one from 2026-09-27T11:59:00.000Z is for Chicago, not New York; not served',
+      'Forecast for 40.69,-73.98: refreshing; none kept, the ask waits',
+    ]);
+  });
+
+  it('never falls back to an answer to another question while the provider is down', async () => {
+    const fetchedAt = new Date(NOW.getTime() - 2 * HOUR);
+    const s = setup({ value: 'other:days', fetchedAt, attemptedAt: fetchedAt });
+    const ask = s.cache.get(HERE);
+    await flush();
+    s.pending[0].reject(new OutboundFetchError('timeout', 'timed out'));
+    await expect(ask).resolves.toBeNull();
+    // Kept in the row (the next good answer replaces it), never served.
+    expect(s.row()?.value).toBe('other:days');
+    s.at(MINUTE);
+    await expect(s.cache.get(HERE)).resolves.toBeNull();
+    expect(s.calls.fetch).toBe(1);
   });
 
   it('answers null on a cold miss the provider fails', async () => {

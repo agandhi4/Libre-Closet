@@ -7,6 +7,10 @@ import type { CacheRow } from './queries';
  * One cache of Open-Meteo answers keyed by rounded location, in a table
  * (service.ts: the forecast, weather_forecast; the climate normals,
  * weather_normals). The discipline both share, so it lives once:
+ * - a kept answer to another question than today's (`mismatch`: the
+ *   forecast grouped in a zone other than APP_TIMEZONE, the normals of
+ *   another run of years) is no answer at all: never served, however young,
+ *   and never the fallback while the provider is down;
  * - an answer younger than `freshForMs` is served from the row;
  * - an older one is served at once and refreshed in the background (#114):
  *   the first page after the hour must not wait for Open-Meteo. Only a cold
@@ -45,6 +49,11 @@ export interface LocationCacheOptions<T> {
   fetch(location: Location): Promise<T>;
   /** The answer's size for the log line: "16 days". */
   describe(value: T): string;
+  /**
+   * Why a kept answer no longer answers what is asked now ("for
+   * America/Chicago, not America/New_York"), or null when it does.
+   */
+  mismatch(value: T): string | null;
 }
 
 export interface LocationCache<T> {
@@ -83,7 +92,7 @@ export function createLocationCache<T>(
   async function lookup(location: Location): Promise<Cached<T> | null> {
     const row = await options.read(location);
     const at = now().getTime();
-    const kept = lastGood(row);
+    const kept = answering(location, lastGood(row));
     if (kept && at - kept.fetchedAt.getTime() < options.freshForMs) {
       return kept;
     }
@@ -97,6 +106,20 @@ export function createLocationCache<T>(
     }
     const { done } = startRefresh(location, kept);
     return kept ?? done;
+  }
+
+  /** The kept answer, unless it answers another question than today's. */
+  function answering(
+    location: Location,
+    kept: Cached<T> | null,
+  ): Cached<T> | null {
+    if (!kept) return null;
+    const reason = options.mismatch(kept.value);
+    if (reason === null) return kept;
+    logger.info(
+      `${name} for ${locationLabel(location)}: the one from ${kept.fetchedAt.toISOString()} is ${reason}; not served`,
+    );
+    return null;
   }
 
   function startRefresh(

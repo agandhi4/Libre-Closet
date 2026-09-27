@@ -99,6 +99,8 @@ export function createWeatherService(options: {
 }): WeatherService {
   const { db, client, logger, timeZone, now = () => new Date() } = options;
 
+  const currentYears = () => normalYears(todayIn(timeZone, now()));
+
   const forecasts = createLocationCache<Forecast>({
     name: 'Forecast',
     freshForMs: FRESH_FOR_MS,
@@ -110,6 +112,12 @@ export function createWeatherService(options: {
     recordFailure: (location, at) => recordFailedForecast(db, location, at),
     fetch: (location) => client.forecast(location),
     describe: (forecast) => `${forecast.days.length} days`,
+    // Its days and hours are the zone's it was requested in: after an
+    // APP_TIMEZONE change they are another household's days.
+    mismatch: (forecast) =>
+      forecast.timeZone === timeZone
+        ? null
+        : `for ${forecast.timeZone}, not ${timeZone}`,
   });
 
   const normals = createLocationCache<ClimateNormals>({
@@ -121,10 +129,17 @@ export function createWeatherService(options: {
     read: (location) => findNormalsRow(db, location),
     save: (location, value, at) => saveNormals(db, location, value, at),
     recordFailure: (location, at) => recordFailedNormals(db, location, at),
-    fetch: (location) =>
-      client.normals(location, normalYears(todayIn(timeZone, now()))),
+    fetch: (location) => client.normals(location, currentYears()),
     describe: ({ days, years }) =>
       `${Object.keys(days).length} days from ${years.first}-${years.last}`,
+    // The years move on New Year: January's normals are 2017-2026, not the
+    // December row's 2016-2025, however young that row is.
+    mismatch: ({ years }) => {
+      const wanted = currentYears();
+      return years.first === wanted.first && years.last === wanted.last
+        ? null
+        : `of ${years.first}-${years.last}, not ${wanted.first}-${wanted.last}`;
+    },
   });
 
   return {
