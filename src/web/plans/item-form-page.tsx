@@ -62,9 +62,7 @@ export function ItemFormPage(props: {
     <Layout ctx={ctx} title={title}>
       <AppBar ctx={ctx} title={title} back={back} />
       <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto">
-        <p class="text-sm text-muted truncate mb-2">
-          {model.planName}
-        </p>
+        <p class="text-sm text-muted truncate mb-2">{model.planName}</p>
         {model.proposed && (
           <p role="status" class="alert alert-info alert-soft text-sm my-3">
             {t('plans.PROPOSED_EDIT_HINT')}

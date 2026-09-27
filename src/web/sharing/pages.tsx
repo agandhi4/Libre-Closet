@@ -223,9 +223,7 @@ export function SharingSection(props: SharingModel) {
         </ShareList>
       )}
 
-      {empty && (
-        <p class="text-sm text-muted">{t('NO_SHARES_YET')}</p>
-      )}
+      {empty && <p class="text-sm text-muted">{t('NO_SHARES_YET')}</p>}
     </ProfileSection>
   );
 }
