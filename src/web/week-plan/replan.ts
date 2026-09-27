@@ -11,7 +11,7 @@ import {
   type Unwearable,
   unwearableOn,
 } from '../../wardrobe/week-planner';
-import { lockOwner } from '../auth/queries';
+import { ownerTransaction } from '../auth/queries';
 import {
   dayOfWeek,
   hourIn,
@@ -212,7 +212,9 @@ async function claimAfterFailure(
   now: Date,
 ): Promise<void> {
   try {
-    await claimReplan(deps.db, userId, today, now);
+    await ownerTransaction(deps.db, userId, (tx) =>
+      claimReplan(tx, userId, today, now),
+    );
   } catch (error) {
     deps.logger.error(
       { err: error },
@@ -223,8 +225,10 @@ async function claimAfterFailure(
 
 /**
  * Judges one user's auto entries and applies the verdicts, in one
- * transaction under lockOwner (a "Plan my week", a pick or an outfit edit
- * takes its turn) that also claims the day: undefined when there is no
+ * transaction under the owner lock (every calendar write takes it: a
+ * "Plan my week", a pick, scheduling, a worn tap, a delete or an outfit
+ * edit waits for the re-plan or the re-plan for it, so no entry turns the
+ * person's between the judgement and the swap) that also claims the day: undefined when there is no
  * auto entry (nothing claimed: a week planned later today is judged by a
  * later run) or the day was claimed already. A kept entry records its new
  * targets; a swap plans the new idea in the same batch, then removes the
@@ -238,8 +242,7 @@ async function replanUser(
 ): Promise<{ swaps: Swap[]; kept: number } | undefined> {
   const today = todayIn(deps.timeZone, now);
   const forecast = await weekForecast(deps, userId, now);
-  return deps.db.transaction(async (tx) => {
-    await lockOwner(tx, userId);
+  return ownerTransaction(deps.db, userId, async (tx) => {
     const auto = await autoEntries(tx, userId, today);
     if (auto.length === 0) return undefined;
     if (!(await claimReplan(tx, userId, today, now))) return undefined;
