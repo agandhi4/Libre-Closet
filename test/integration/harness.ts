@@ -21,6 +21,7 @@ import { insertUser } from '../../src/web/auth/queries';
 import { type IsoDate, todayIn } from '../../src/web/calendar/calendar-date';
 import type { Photos } from '../../src/web/files/photos';
 import type { PushSender } from '../../src/web/push/sender';
+import type { WeatherService } from '../../src/web/weather/service';
 import type { Metrics } from '../../src/metrics/metrics';
 import { LogCapture } from '../support/log-capture';
 import { createScratchDatabase } from '../support/scratch-database';
@@ -153,6 +154,12 @@ export interface TestApp {
    * them in the harness.
    */
   push: PushSender | undefined;
+  /**
+   * The app's weather service (WEATHER_ENABLED only). A spec that counts
+   * fetches or reads the row after a stale ask awaits `settled()`: the
+   * answer is served before its background refresh ends (#114).
+   */
+  weather: WeatherService | undefined;
   /** The app's metrics (what GET /metrics exposes with METRICS_ENABLED). */
   metrics: Metrics;
   /** The user registered at boot, whose session t.inject() sends by default. */
@@ -242,10 +249,11 @@ export async function createTestApp(
   let photos: Photos;
   let cutouts: CutoutQueue;
   let push: PushSender | undefined;
+  let weather: WeatherService | undefined;
   let metrics: Metrics;
   try {
     await options.beforeBoot?.(database.env);
-    ({ app, db, photos, cutouts, push, metrics } = await createApp(
+    ({ app, db, photos, cutouts, push, weather, metrics } = await createApp(
       config,
       logger,
       {
@@ -334,6 +342,7 @@ export async function createTestApp(
     photos,
     cutouts,
     push,
+    weather,
     metrics,
     owner,
     inject,
