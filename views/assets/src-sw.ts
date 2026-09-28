@@ -555,19 +555,42 @@ function answerFor(request: Request, response: Response): Response {
   return Response.redirect(response.url, 303);
 }
 
+/** Dropped before answering, so the redirect's next page cannot race it. */
+async function changeSession(
+  event: ExtendableEvent,
+  reason: string,
+  ended: boolean,
+): Promise<void> {
+  await dropSession(event, reason);
+  if (ended) event.waitUntil(dropPushSubscription());
+}
+
 const sessionBoundaryHandler = async ({
   request,
   url,
   event,
 }: RouteHandlerCallbackOptions) => {
-  const response = await fetchFollowingRedirects(request);
+  let response: Response;
+  try {
+    response = await fetchFollowingRedirects(request);
+  } catch (error) {
+    // No answer, but the server may have acted on the post: the connection
+    // can drop after it signed out (or in) and before the followed page
+    // arrived. Fail safe: a needless drop costs a refetch, a missed one
+    // leaves another session's pages and photos cached. Then the catch
+    // handler answers, as for any unreachable server (the offline page for
+    // a navigation, if the drop's re-warm has put it back; else an error).
+    console.warn(`[sw] ${url.pathname} got no answer`, error);
+    await changeSession(
+      event,
+      `${url.pathname} got no answer, the session may have changed`,
+      SESSION_ENDS.has(url.pathname),
+    );
+    throw error;
+  }
   const change = sessionChange(url, response);
-  // Dropped before answering, so the redirect's next page cannot race it.
   if (change) {
-    await dropSession(event, change);
-    if (change !== 'session started') {
-      event.waitUntil(dropPushSubscription());
-    }
+    await changeSession(event, change, change !== 'session started');
   }
   return answerFor(request, response);
 };
