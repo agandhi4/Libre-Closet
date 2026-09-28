@@ -31,9 +31,7 @@ import {
 import { hashPassword, setPassword, verifyPassword } from './passwords';
 import { listTokens } from './personal-tokens';
 import {
-  type AccountRow,
   findUserByEmail,
-  findUserById,
   insertUser,
   normalizeEmail,
   updateEmail,
@@ -42,7 +40,7 @@ import { USER_EMAIL_UNIQUE } from '../../db/schema';
 import { isUniqueViolation } from '../../db/errors';
 import { sessionUserId } from './require-session';
 import { findWeekTemplate } from '../week-plan/template';
-import { endSession, setSessionCookie } from './session';
+import { endSession, sessionAccount, setSessionCookie } from './session';
 import {
   ChangePasswordBody,
   DeleteAccountBody,
@@ -167,21 +165,17 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         );
 
       const errors = validateRegistration(body);
-      if (!hasErrors(errors) && (await findUserByEmail(db, email))) {
-        errors.email = [t('EMAIL_IN_USE')];
-      }
       if (hasErrors(errors)) return refuse(errors);
 
-      let account: AccountRow;
-      try {
-        account = await insertUser(
-          db,
-          email,
-          await hashPassword(body.password),
-        );
-      } catch (error) {
-        // Registered by someone else between the check and the insert.
-        if (!isUniqueViolation(error, USER_EMAIL_UNIQUE)) throw error;
+      // The insert is the check: no row back means the address is taken,
+      // however recently (insertUser).
+      const account = await insertUser(
+        db,
+        email,
+        await hashPassword(body.password),
+      );
+      if (!account) {
+        logger.info('Registration refused: the email is taken');
         return refuse({ email: [t('EMAIL_IN_USE')] });
       }
       setSessionCookie(reply, tokens.issue(account));
@@ -271,7 +265,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/update-email',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { rateLimit: ACCOUNT_LIMIT, checksPassword: true },
       schema: { body: UpdateEmailBody },
     },
     async (request, reply) => {
@@ -294,23 +288,21 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
 
       // The password before the clash check: whether an address is taken is
       // only answered to someone who proved they own this account.
-      const account = await findUserById(db, id);
-      if (!(await verifyPassword(body.currentPassword, account?.password))) {
+      const { password } = sessionAccount(request);
+      if (!(await verifyPassword(body.currentPassword, password))) {
         logger.info(
           `Email change refused for user ${id}: wrong current password`,
         );
         return refuse({ currentPassword: [t('WRONG_CURRENT_PASSWORD')] });
       }
 
-      const holder = await findUserByEmail(db, email);
-      if (holder && holder.id !== id) {
-        return refuse({ email: [t('EMAIL_IN_USE')] });
-      }
-
+      // The unique index is the clash check: another account's address
+      // fails the update (this account's own, in any case, is no clash).
       try {
         await updateEmail(db, id, email);
       } catch (error) {
         if (!isUniqueViolation(error, USER_EMAIL_UNIQUE)) throw error;
+        logger.info(`Email change refused for user ${id}: the email is taken`);
         return refuse({ email: [t('EMAIL_IN_USE')] });
       }
       logger.info(`User ${id} changed their email`);
@@ -325,7 +317,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/change-password',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { rateLimit: ACCOUNT_LIMIT, checksPassword: true },
       schema: { body: ChangePasswordBody },
     },
     async (request, reply) => {
@@ -341,8 +333,8 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const errors = validatePasswordChange(body);
       if (hasErrors(errors)) return refuse(errors);
 
-      const account = await findUserById(db, id);
-      if (!(await verifyPassword(body.currentPassword, account?.password))) {
+      const { password } = sessionAccount(request);
+      if (!(await verifyPassword(body.currentPassword, password))) {
         logger.info(
           `Password change refused for user ${id}: wrong current password`,
         );
@@ -376,19 +368,19 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/delete-account',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { rateLimit: ACCOUNT_LIMIT, checksPassword: true },
       schema: { body: DeleteAccountBody },
     },
     async (request, reply) => {
       const id = sessionUserId(request);
-      const account = await findUserById(db, id);
+      const account = sessionAccount(request);
       // The credentials must be this account's own, not any account's.
       const passwordMatches = await verifyPassword(
         request.body.password,
-        account?.password,
+        account.password,
       );
       const emailMatches =
-        account?.email != null &&
+        account.email != null &&
         normalizeEmail(account.email) === normalizeEmail(request.body.email);
       if (!passwordMatches || !emailMatches) {
         logger.warn(

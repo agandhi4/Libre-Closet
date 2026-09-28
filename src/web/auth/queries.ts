@@ -6,8 +6,9 @@ import { HttpError } from '../errors';
 import { t } from '../i18n';
 import { type StoredPhoto, unkeyedPhoto } from '../files/image-variant';
 import { STORED_PHOTO_COLUMNS } from '../files/queries';
-import { revokeDevices } from '../push/queries';
-import { revokeAllTokens } from './personal-tokens';
+import { revokeDevicesStatement } from '../push/queries';
+import { revokeAllTokensStatement } from './personal-tokens';
+import { PASSWORD_FINGERPRINT_LENGTH } from './tokens';
 
 /**
  * Account rows. Emails are stored as normalizeEmail writes them (trimmed,
@@ -34,12 +35,38 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export async function findUserById(
+/**
+ * The session's account as the resolver reads it on every request
+ * (createSessionResolver, session.ts): `fingerprint` is the hash's suffix a
+ * token carries as `pwf` (passwordFingerprint), cut in SQL so the 60
+ * characters of the hash stay in the database. Only a route that checks the
+ * current password (`config: { checksPassword: true }`) asks for the hash as
+ * well, which then saves that route a second read of the same row.
+ */
+export interface SessionAccount {
+  id: number;
+  email: string | null;
+  fingerprint: string;
+  password?: string;
+}
+
+const sessionColumns = {
+  id: user.id,
+  email: user.email,
+  fingerprint: sql<string>`right(${user.password}, ${PASSWORD_FINGERPRINT_LENGTH})`,
+};
+
+export async function findSessionAccount(
   db: Db,
   id: number,
-): Promise<AccountRow | undefined> {
+  withHash: boolean,
+): Promise<SessionAccount | undefined> {
   const [row] = await db
-    .select(accountColumns)
+    .select(
+      withHash
+        ? { ...sessionColumns, password: user.password }
+        : sessionColumns,
+    )
     .from(user)
     .where(eq(user.id, id));
   return row;
@@ -59,19 +86,27 @@ export async function findUserByEmail(
 }
 
 /**
- * `email` must already be normalized; the caller checked it is free.
- * Registration asks for no name; the seed's personas have one (the share
- * page says "Shared by" the first name).
+ * The new account, or undefined when `email` is taken: the unique index on
+ * lower(email) decides, in the insert's one statement, so registration
+ * needs no lookup first and a race between two sign-ups has the same answer
+ * as a plain clash. `email` must already be normalized. Registration asks
+ * for no name; the seed's personas have one (the share page says "Shared
+ * by" the first name).
  */
 export async function insertUser(
   db: Queryable,
   email: string,
   passwordHash: string,
   name: { firstName?: string; lastName?: string } = {},
-): Promise<AccountRow> {
+): Promise<AccountRow | undefined> {
   const [row] = await db
     .insert(user)
     .values({ email, password: passwordHash, ...name })
+    // No target: Drizzle names only columns, and the index is on
+    // lower(email). The table's one unique besides its serial key is that
+    // index (USER_EMAIL_UNIQUE), so any conflict here is the address; a new
+    // unique on `user` must revisit this.
+    .onConflictDoNothing()
     .returning(accountColumns);
   return row;
 }
@@ -85,28 +120,52 @@ export interface PasswordChange {
 
 /**
  * The one writer of a password. The new hash ends every session issued
- * before it (the fingerprint), and the same transaction revokes every
+ * before it (the fingerprint), and the same statement revokes every
  * personal access token and every push subscription but `keepEndpoint`'s
  * (the device making the change, if it has one): a new password is how an
  * account is taken back, and a device signed out by it must stop receiving
- * the account's notifications at once (revokeDevices).
+ * the account's notifications at once (revokeDevicesStatement).
+ *
+ * One statement, not a transaction of three (#171): the token revocation
+ * and the device removal are data-modifying CTEs beside the update, which
+ * Postgres runs to completion whether or not the outer select reads them,
+ * atomically with it. The three touch different tables, so none sees
+ * another's change (a CTE's writes are invisible to its siblings). A
+ * transaction cost five round trips to pgvault, this one.
  */
-export function updatePasswordHash(
-  db: Db,
+export async function updatePasswordHash(
+  db: Queryable,
   id: number,
   passwordHash: string,
   keepEndpoint?: string,
 ): Promise<PasswordChange> {
-  return db.transaction(async (tx) => {
-    const [account] = await tx
-      .update(user)
-      .set({ password: passwordHash })
-      .where(eq(user.id, id))
-      .returning(accountColumns);
-    const revokedTokens = await revokeAllTokens(tx, id);
-    const revokedDevices = await revokeDevices(tx, id, keepEndpoint);
-    return { account, revokedTokens, revokedDevices };
-  });
+  const account = db
+    .$with('account')
+    .as(
+      db
+        .update(user)
+        .set({ password: passwordHash })
+        .where(eq(user.id, id))
+        .returning(accountColumns),
+    );
+  const tokens = db
+    .$with('revoked_tokens')
+    .as(revokeAllTokensStatement(db, id));
+  const devices = db
+    .$with('revoked_devices')
+    .as(revokeDevicesStatement(db, id, keepEndpoint));
+  const [row] = await db
+    .with(account, tokens, devices)
+    .select({
+      id: account.id,
+      email: account.email,
+      password: account.password,
+      revokedTokens: sql`(select count(*) from ${tokens})`.mapWith(Number),
+      revokedDevices: sql`(select count(*) from ${devices})`.mapWith(Number),
+    })
+    .from(account);
+  const { revokedTokens, revokedDevices, ...changed } = row;
+  return { account: changed, revokedTokens, revokedDevices };
 }
 
 export async function updateEmail(
