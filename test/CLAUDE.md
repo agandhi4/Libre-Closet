@@ -21,6 +21,8 @@ The tiers and their commands are in the root `CLAUDE.md` (Commands, Test tiers).
                        jmap-stub.ts (Fastmail's JMAP stand-in on 127.0.0.2 as `jmap.test`: session, inbox
                        query, Email/get; createTestApp's `orderMail`, required with ORDER_MAIL_JMAP_TOKEN;
                        test-server.ts starts it when the token is set),
+                       order-mail-shop.ts (the forwarded order email and the shop its links reach:
+                       order-mail.spec.ts and the page audit),
                        sentry-stub.ts (Bugsink's stand-in: a local DSN the real Sentry transport posts to;
                        recordErrors, an in-memory ErrorTracker for unit specs),
                        static-assets-setup.ts (globalSetup: public/modules/ and the precompressed

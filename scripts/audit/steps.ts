@@ -1,6 +1,6 @@
 import { readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, ne } from 'drizzle-orm';
 import type { LightMyRequestResponse } from 'fastify';
 import { multipart } from '../../test/support/multipart';
 import {
@@ -849,6 +849,15 @@ const pages: Step[] = [
     kind: 'page',
     route: 'GET /auth/profile/style',
     request: () => get('/auth/profile/style'),
+    expect: 200,
+  }),
+  // The order mail's review list (#25), with the fixture's seeded order.
+  http({
+    ...PLANS,
+    name: 'From your orders',
+    kind: 'page',
+    route: 'GET /wardrobe/orders',
+    request: () => get('/wardrobe/orders'),
     expect: 200,
   }),
 
@@ -2249,6 +2258,27 @@ const writes: Step[] = [
       }),
     expect: 303,
   }),
+  http({
+    ...PLANS,
+    name: 'Add an order item to the closet',
+    kind: 'action',
+    route: 'POST /wardrobe/orders/:id/add',
+    // Its own LINK_IMPORT_LIMIT: 10 a minute. The form opens; nothing is
+    // saved, so the item stays pending for the next run.
+    runs: 8,
+    warmup: 1,
+    request: (f) => post(`/wardrobe/orders/${f.orders.addItemId}/add`),
+    expect: 200,
+  }),
+  http({
+    ...PLANS,
+    name: 'Dismiss an order item',
+    kind: 'action',
+    route: 'POST /wardrobe/orders/:id/dismiss',
+    prepare: (f) => newOrderItem(f),
+    request: (_f, id: number) => post(`/wardrobe/orders/${id}/dismiss`),
+    expect: 303,
+  }),
 
   // #168 Ideas
   http({
@@ -3073,6 +3103,42 @@ const jobs: Step[] = [
       });
     },
   }),
+  job({
+    ...JOBS,
+    name: 'Order mail poll (one new order email)',
+    kind: 'job',
+    target: 'job order_mail',
+    // The last run's products gone and a new email in the stand-in inbox,
+    // so every run reads one email and lists its two products.
+    prepare: async (f) => {
+      const s = f.build.schema;
+      await f.closet.db
+        .delete(s.orderItem)
+        .where(
+          and(
+            eq(s.orderItem.ownerId, f.theo.id),
+            ne(s.orderItem.orderEmailId, f.orders.emailId),
+          ),
+        );
+      f.orders.deliver();
+    },
+    run: async (f) => {
+      const { orderMail } = f.closet;
+      if (!orderMail) throw new Error('The order mail is off');
+      await f.build.orderPoll.pollOrderMail(orderMail);
+    },
+  }),
+  job({
+    ...JOBS,
+    name: 'Order mail poll, nothing new',
+    kind: 'job',
+    target: 'job order_mail',
+    run: async (f) => {
+      const { orderMail } = f.closet;
+      if (!orderMail) throw new Error('The order mail is off');
+      await f.build.orderPoll.pollOrderMail(orderMail);
+    },
+  }),
 ];
 
 // --- helpers used by the steps above --------------------------------------
@@ -3101,6 +3167,29 @@ function newSubscription() {
       auth: 'A'.repeat(22),
     },
   };
+}
+
+let orderItems = 0;
+/** A pending item on "From your orders", as the poll writes one; its id. */
+async function newOrderItem(f: Fixture): Promise<number> {
+  orderItems += 1;
+  const s = f.build.schema;
+  const [row] = await f.closet.db
+    .insert(s.orderItem)
+    .values({
+      ownerId: f.theo.id,
+      orderEmailId: f.orders.emailId,
+      productUrl: f.productUrl.replace(
+        '/products/tee',
+        `/products/dismissed-${orderItems}`,
+      ),
+      name: `Dismissed tee ${orderItems}`,
+      price: '20.00',
+      currency: 'USD',
+      orderedOn: f.today(),
+    })
+    .returning({ id: s.orderItem.id });
+  return row.id;
 }
 
 function newestPlanItem(f: Fixture): Promise<number> {

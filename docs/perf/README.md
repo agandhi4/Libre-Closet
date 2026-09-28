@@ -3,15 +3,16 @@
 `npm run audit:pages` (#157) measures every page, fragment, action, MCP tool
 and background job the page audits name (#158 to #174, epic #156), as the
 demo persona, on the production build. `baseline.md` and `baseline.json` in
-this directory are that run on `main`; every page PR shows its before and
-after against them.
+this directory are that run on `main` (last regenerated 2026-09-28 at
+`2d5ef82`, the order mail's steps added, load average 8.8 falling to 5.8);
+every page PR shows its before and after against them.
 
 ## What it does
 
 1. Builds (`npm run build`), then boots `dist/` **in process** with
    `createApp`, the way the integration harness boots `src/`, with
-   production's flags (`NODE_ENV=production`, PWA, weather, metrics and
-   error tracking on) on a throwaway database on the shared local Postgres
+   production's flags (`NODE_ENV=production`, PWA, weather, metrics,
+   error tracking and the order mail on) on a throwaway database on the shared local Postgres
    (`TEST_DATABASE_URL`, default pgvault-dev on :5432) and a temporary
    `DATA_PATH`. The database is dropped at the end, whatever happened.
 2. Seeds Theo (`demo`) and Dana (`sparse`, who shares her wardrobe with
@@ -49,9 +50,15 @@ the same wrapper). Nothing is added to the app or its request path, and no
 environment flag exists that could turn it on in production.
 
 **The outside world** is the tests' stand-ins: Open-Meteo
-(`test/support/weather-stub.ts`), a shop for the link import
-(`test/integration/link-sites.ts`), Bugsink (`test/support/sentry-stub.ts`),
-and web-push's send, which answers in process. Background removal is an
+(`test/support/weather-stub.ts`), a shop for the link import and the order
+mail's links (`test/integration/link-sites.ts`,
+`test/support/order-mail-shop.ts`), Fastmail's JMAP
+(`test/support/jmap-stub.ts`: the fixture's `ORDER_MAIL_*` are stand-ins and
+nothing reaches Fastmail), Bugsink (`test/support/sentry-stub.ts`), and
+web-push's send, which answers in process. The order mail's owner is Theo:
+"From your orders" starts with a seeded order of six items, written as the
+poll writes them, and each run of the poll step reads one new copy of the
+forwarded order email (`test/fixtures/order-mail/`). Background removal is an
 instant stand-in held behind a gate that only the cutout step opens, so an
 upload's cutout never runs while another step is measured.
 

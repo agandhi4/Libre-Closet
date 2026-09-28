@@ -23,6 +23,7 @@ import type * as ReconcileModule from '../../src/maintenance/reconcile';
 import type * as SchemaModule from '../../src/db/schema';
 import type * as SeedModule from '../../src/seed/seed';
 import type * as TokensModule from '../../src/web/auth/personal-tokens';
+import type * as OrderPollModule from '../../src/web/wardrobe/order-mail/poll';
 import type * as PushScheduleModule from '../../src/push/reminders';
 import type * as PushQueriesModule from '../../src/web/push/queries';
 import type * as RemindersModule from '../../src/web/push/reminders';
@@ -34,6 +35,11 @@ import {
   type LinkSites,
   startLinkSites,
 } from '../../test/integration/link-sites';
+import { startJmapStub } from '../../test/support/jmap-stub';
+import {
+  ORDER_SENDER,
+  serveForwardedOrder,
+} from '../../test/support/order-mail-shop';
 import { PWA_ENV } from '../../test/support/pwa-env';
 import { createScratchDatabase } from '../../test/support/scratch-database';
 import { startSentryStub } from '../../test/support/sentry-stub';
@@ -49,10 +55,11 @@ import {
  * local Postgres with the demo persona seeded, so every step runs the real
  * pages over Theo's closet and nothing it writes outlives the run. The
  * internet is the tests' stand-ins: Open-Meteo (weather-stub.ts), a shop
- * for the link import (link-sites.ts), Bugsink (sentry-stub.ts), and
- * web-push's send, which answers in process (the push services are never
- * called). The config is production's flags: PWA, weather, metrics and
- * error tracking on. Background removal runs
+ * for the link import and the order mail's links (link-sites.ts,
+ * order-mail-shop.ts), Fastmail's JMAP (jmap-stub.ts), Bugsink
+ * (sentry-stub.ts), and web-push's send, which answers in process (the push
+ * services are never called). The config is production's flags: PWA,
+ * weather, metrics, error tracking and the order mail (#25, for Theo) on. Background removal runs
  * an instant stand-in held behind a gate the cutout step opens, so no
  * upload's cutout runs while another step is being measured.
  */
@@ -64,6 +71,8 @@ const DIST = join(PROJECT_ROOT, 'dist');
 export const PERSONA_PASSWORD = 'Closet-demo-1';
 /** The password of every account newAccount() registers. */
 export const ACCOUNT_PASSWORD = 'Audit-pass-1';
+/** The demo persona's login: Theo, whom the walk signs in as. */
+const THEO_EMAIL = 'demo@closet.invalid';
 
 /** The dist modules the audit drives, typed from their sources. */
 export interface Build {
@@ -76,6 +85,7 @@ export interface Build {
   seed: typeof SeedModule;
   calendar: typeof CalendarDateModule;
   tokens: typeof TokensModule;
+  orderPoll: typeof OrderPollModule;
   pushQueries: typeof PushQueriesModule;
   pushSchedule: typeof PushScheduleModule;
   reminders: typeof RemindersModule;
@@ -98,6 +108,7 @@ async function loadBuild(): Promise<Build> {
     seed: await load('seed/seed.js'),
     calendar: await load('web/calendar/calendar-date.js'),
     tokens: await load('web/auth/personal-tokens.js'),
+    orderPoll: await load('web/wardrobe/order-mail/poll.js'),
     pushQueries: await load('web/push/queries.js'),
     pushSchedule: await load('push/reminders.js'),
     reminders: await load('web/push/reminders.js'),
@@ -183,6 +194,8 @@ export interface Fixture {
   today: () => string;
   /** The shop's product page, for the link import. */
   productUrl: string;
+  /** The order mail's review list (#25) and its poll's inbox. */
+  orders: OrderReview;
   /** A push endpoint of Theo's phone, subscribed, with both reminders on. */
   pushEndpoint: string;
   /** Opens the cutout stand-in's gate for `work`, then closes it. */
@@ -213,6 +226,10 @@ const ORIGIN = 'http://localhost';
 const UNSAFE = new Set(['POST', 'DELETE']);
 /** Tokens for the MCP steps; the seed made none, and a user may hold 20. */
 const MCP_TOKENS = 12;
+/** The JMAP stand-in's token (jmap-stub.ts refuses any other); never Fastmail's. */
+const ORDER_MAIL_TOKEN = 'fmu1-page-audit-stand-in';
+/** Items on "From your orders" at the start (seeded, as the poll writes them). */
+const ORDER_REVIEW_ITEMS = 6;
 /** The grid's page (GRID_PAGE_SIZE, src/web/wardrobe). */
 const GRID_PAGE_SIZE = 48;
 
@@ -314,6 +331,8 @@ export async function createFixture(options: {
   const weatherStub: WeatherStub = await startWeatherStub();
   const shop = await startShop(options.photo);
   const bugsink = await startSentryStub();
+  const jmap = await startJmapStub(ORDER_MAIL_TOKEN);
+  const forwardedOrder = await serveForwardedOrder(shop);
   const config = build.config.loadConfig({
     env: {
       ...database.env,
@@ -327,6 +346,9 @@ export async function createFixture(options: {
       WEATHER_ENABLED: 'true',
       METRICS_ENABLED: 'true',
       SENTRY_DSN: bugsink.dsn,
+      ORDER_MAIL_JMAP_TOKEN: ORDER_MAIL_TOKEN,
+      ORDER_MAIL_SENDERS: ORDER_SENDER,
+      ORDER_MAIL_OWNER: THEO_EMAIL,
     },
     envFiles: [],
   });
@@ -341,6 +363,7 @@ export async function createFixture(options: {
       weatherStub.close(),
       shop.close(),
       bugsink.close(),
+      jmap.close(),
       database.drop(),
       rm(dataPath, { recursive: true, force: true }),
     ]);
@@ -356,6 +379,7 @@ export async function createFixture(options: {
     closet = await build.app.createApp(config, logger, {
       weather: weatherStub.options,
       outboundFetch: shop.outboundFetch,
+      orderMail: jmap.options,
     });
     await closet.app.ready();
   } catch (error) {
@@ -469,16 +493,24 @@ export async function createFixture(options: {
 
   try {
     await seedPersonas(build, closet, logger, config.APP_TIMEZONE);
+    const theoId = await userId(THEO_EMAIL);
+    const review = await seedOrderReview(
+      build,
+      closet.db,
+      shop,
+      theoId,
+      today(),
+    );
     // Planner statistics now, as a production database has them: a fresh
     // database's first plans guess one row a table until autovacuum gets
     // to it, which would change plans (and times) partway through a walk.
     await closet.db.execute(sql`analyze`);
-    const email = 'demo@closet.invalid';
     theo = {
-      id: await userId(email),
-      email,
-      cookie: await login(email, PERSONA_PASSWORD),
+      id: theoId,
+      email: THEO_EMAIL,
+      cookie: await login(THEO_EMAIL, PERSONA_PASSWORD),
     };
+    let delivered = 0;
     const ids = await findSeedIds(build, closet.db, theo.id);
     const pushEndpoint = await subscribePhone(build, closet, send, theo.id);
     const mcpTokens: string[] = [];
@@ -503,6 +535,17 @@ export async function createFixture(options: {
       timeZone: config.APP_TIMEZONE,
       today,
       productUrl: shop.url('/products/tee'),
+      orders: {
+        ...review,
+        deliver: () => {
+          delivered += 1;
+          jmap.deliver({
+            ...forwardedOrder,
+            id: `${forwardedOrder.id}-audit-${delivered}`,
+            receivedAt: new Date().toISOString(),
+          });
+        },
+      },
       photo: options.photo,
       pushEndpoint,
       withCutouts: async (work) => {
@@ -543,6 +586,65 @@ export async function createFixture(options: {
     await close();
     throw error;
   }
+}
+
+export interface OrderReview {
+  /** The seeded order email the review list's items belong to. */
+  emailId: number;
+  /** A pending item whose product page the shop serves ("Add to closet" imports it). */
+  addItemId: number;
+  /**
+   * Puts the forwarded order (order-mail-shop.ts) in the stand-in inbox as
+   * a new email, arrived now: the poll's next run reads it.
+   */
+  deliver: () => void;
+}
+
+/**
+ * "From your orders" for Theo: one order email and its pending items,
+ * written as the poll writes them (test/order-review.spec.ts does the same),
+ * each linking to the shop's tee page under its own query, so "Add to
+ * closet" runs a real link import.
+ */
+async function seedOrderReview(
+  build: Build,
+  db: DbClientModule.Db,
+  shop: LinkSites,
+  theoId: number,
+  today: string,
+): Promise<Omit<OrderReview, 'deliver'>> {
+  const s = build.schema;
+  const [email] = await db
+    .insert(s.orderEmail)
+    .values({
+      accountId: 'page-audit',
+      emailId: 'page-audit-seeded',
+      receivedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      outcome: 'imported',
+      items: ORDER_REVIEW_ITEMS,
+    })
+    .returning({ id: s.orderEmail.id });
+  const page = html(productPage(shop.url('/img/tee.jpg')));
+  const items = await db
+    .insert(s.orderItem)
+    .values(
+      Array.from({ length: ORDER_REVIEW_ITEMS }, (_, i) => {
+        const path = `/products/tee?order=${i + 1}`;
+        shop.serve(path, page);
+        return {
+          ownerId: theoId,
+          orderEmailId: email.id,
+          productUrl: shop.url(path),
+          name: `Heavyweight Pocket Tee ${i + 1}`,
+          brand: 'Studio Knit',
+          price: '48.00',
+          currency: 'USD',
+          orderedOn: today,
+        };
+      }),
+    )
+    .returning({ id: s.orderItem.id });
+  return { emailId: email.id, addItemId: items[0].id };
 }
 
 /** Theo (demo) and Dana (sparse), who shares her wardrobe with him. */
