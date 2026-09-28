@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNotNull,
   or,
   type SQL,
