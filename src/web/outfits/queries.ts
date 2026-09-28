@@ -148,13 +148,67 @@ export function listOutfits(db: Db, ownerId: number): Promise<OutfitSummary[]> {
   return outfitsWithGarments(db, eq(outfit.ownerId, ownerId));
 }
 
-/** An outfit in the garment page's strip: what a thumb collage shows. */
+/**
+ * An outfit as a thumb collage or a saved-outfit button shows it: the
+ * garment page's strip, a trip's add page (savedOutfitsSql).
+ */
 export type GarmentOutfit = Pick<OutfitSummary, 'id' | 'name' | 'garments'>;
 
 /** The garment page's "In N outfits" (#84): how many, and the newest few. */
 export interface GarmentOutfits {
   count: number;
   outfits: GarmentOutfit[];
+}
+
+/**
+ * The chosen garments of the enclosing query's outfit row in slot order,
+ * as a JSON list (an empty slot shows nothing, as in outfitsWithGarments).
+ * Correlated with `"outfit"."id"`: the caller's FROM names the outfit
+ * table unaliased. The scalar subqueries below, and a trip's outfits
+ * (tripModel, src/web/trips/model.ts).
+ */
+export function outfitGarmentsSql(): SQL<OutfitGarment[]> {
+  return sql<OutfitGarment[]>`(
+    select coalesce(
+      json_agg(
+        json_build_object(
+          'id', ${garment.id},
+          'name', ${garment.name},
+          'category', ${garment.category},
+          'photo', ${photoRefJson}
+        )
+        order by ${outfitSlot.position}
+      ),
+      '[]'
+    )
+    from ${outfitSlot}
+    join ${garment} on ${eq(garment.id, outfitSlot.garmentId)}
+    left join ${file} on ${eq(file.id, garment.photoId)}
+    where ${eq(outfitSlot.outfitId, outfit.id)}
+  )`;
+}
+
+/**
+ * Every outfit of the owner's, newest first, as a saved-outfit button
+ * shows it (listOutfits' notes and shareable id feed nothing there), as
+ * one scalar subquery: a trip's add page reads it with the trip.
+ */
+export function savedOutfitsSql(ownerId: number): SQL<GarmentOutfit[]> {
+  return sql<GarmentOutfit[]>`(
+    select coalesce(
+      json_agg(
+        json_build_object(
+          'id', ${outfit.id},
+          'name', ${outfit.name},
+          'garments', ${outfitGarmentsSql()}
+        )
+        order by ${outfit.id} desc
+      ),
+      '[]'
+    )
+    from ${outfit}
+    where ${eq(outfit.ownerId, ownerId)}
+  )`;
 }
 
 /**
@@ -174,27 +228,8 @@ export function outfitsWithGarmentSql(
     eq(outfit.ownerId, ownerId),
     sql`${outfit.id} in (select ${outfitSlot.outfitId} from ${outfitSlot} where ${eq(outfitSlot.garmentId, garmentId)})`,
   );
-  // An empty slot shows nothing, as in outfitsWithGarments.
-  const garments = sql`(
-    select coalesce(
-      json_agg(
-        json_build_object(
-          'id', ${garment.id},
-          'name', ${garment.name},
-          'category', ${garment.category},
-          'photo', ${photoRefJson}
-        )
-        order by ${outfitSlot.position}
-      ),
-      '[]'
-    )
-    from ${outfitSlot}
-    join ${garment} on ${eq(garment.id, outfitSlot.garmentId)}
-    left join ${file} on ${eq(file.id, garment.photoId)}
-    where ${eq(outfitSlot.outfitId, outfit.id)}
-  )`;
   const newest = sql`(
-    select ${outfit.id}, ${outfit.name}, ${garments} as garments
+    select ${outfit.id}, ${outfit.name}, ${outfitGarmentsSql()} as garments
     from ${outfit}
     where ${holds}
     order by ${outfit.id} desc

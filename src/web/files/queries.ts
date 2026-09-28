@@ -80,6 +80,16 @@ export const PLINTH_PHOTO_COLUMNS = {
   cutoutStatus: file.cutoutStatus,
 };
 
+/**
+ * PLINTH_PHOTO_COLUMNS as a JSON object inside a json_agg (the capsule
+ * list's strips), for plinthPhoto; null when the join found no `file` row.
+ * Every field plinthPhoto reads is here: a JSON missing the variant key
+ * would sign `k=undefined`.
+ */
+export const plinthPhotoJson = sql<
+  Parameters<typeof plinthPhoto>[0]
+>`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}, 'variantKey', ${file.variantKey}, 'cutoutStatus', ${file.cutoutStatus}) end`;
+
 export function plinthPhoto(
   photo: {
     fileName: string;
