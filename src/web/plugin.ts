@@ -31,6 +31,7 @@ import { sharingRoutes } from './sharing/routes';
 import { todayRoutes } from './today/routes';
 import { tripRoutes } from './trips/routes';
 import { linkImportRoutes } from './wardrobe/link-import/routes';
+import { orderReviewRoutes } from './wardrobe/order-mail/routes';
 import { lookalikeRoutes } from './wardrobe/lookalike-routes';
 import { repairRoutes } from './wardrobe/repair-routes';
 import { wardrobeRoutes } from './wardrobe/routes';
@@ -50,6 +51,11 @@ export interface WebConfig {
   registrationDisabled: boolean;
   /** Web Push identity; set exactly when PWA_ENABLED (no /push routes otherwise). */
   vapid: VapidConfig | undefined;
+  /**
+   * ORDER_MAIL_OWNER, normalized, when the order mail is on (#25): the one
+   * account whose review list exists (/wardrobe/orders); no routes otherwise.
+   */
+  orderMailOwner: string | undefined;
 }
 
 export interface WebOptions {
@@ -145,6 +151,11 @@ export const webPlugin: FastifyPluginAsync<WebOptions> = async (
   await app.register(tokenRoutes, options);
   await app.register(sizesRoutes, options);
   await app.register(sharingRoutes, options);
+  // No ORDER_MAIL_JMAP_TOKEN: no review list (src/web/wardrobe/order-mail).
+  const { orderMailOwner } = options.config;
+  if (orderMailOwner) {
+    await app.register(orderReviewRoutes, { ...options, orderMailOwner });
+  }
   // WEATHER_ENABLED=false: no /weather route, so nothing stores a location.
   const { weather } = options;
   if (weather) await app.register(weatherRoutes, { ...options, weather });

@@ -15,6 +15,8 @@ The tiers and their commands are in the root `CLAUDE.md` (Commands, Test tiers).
                        log-capture.ts (LogCapture, captureLogs: the app's log lines as records),
                        weather-stub.ts (Open-Meteo's stand-in on 127.0.0.2: the seed's weather,
                        forecast and archive),
+                       jmap-stub.ts (Fastmail's JMAP stand-in on 127.0.0.2 as `jmap.test`: session, inbox
+                       query, Email/get; createTestApp's `orderMail`, required with ORDER_MAIL_JMAP_TOKEN),
                        sentry-stub.ts (Bugsink's stand-in: a local DSN the real Sentry transport posts to;
                        recordErrors, an in-memory ErrorTracker for unit specs),
                        static-assets-setup.ts (globalSetup: public/modules/ and the precompressed
