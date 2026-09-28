@@ -1618,6 +1618,19 @@ const writes: Step[] = [
   }),
   http({
     ...PHOTOS,
+    name: 'Rotate the photo',
+    kind: 'action',
+    route: 'POST /wardrobe/:id/photo/rotate',
+    // A quarter turn each run: every run rewrites the original and its
+    // variants, as a tap does.
+    request: (f) =>
+      post(`/wardrobe/${f.ids.otherGarmentId}/photo/rotate`, {
+        direction: 'right',
+      }),
+    expect: 303,
+  }),
+  http({
+    ...PHOTOS,
     name: 'Try the cutout again',
     kind: 'action',
     route: 'POST /wardrobe/:id/cutout/retry',

@@ -4,8 +4,9 @@
 and background job the page audits name (#158 to #174, epic #156), as the
 demo persona, on the production build. `baseline.md` and `baseline.json` in
 this directory are that run on `main` (last regenerated 2026-09-28 at
-`2d5ef82`, the order mail's steps added, load average 8.8 falling to 5.8);
-every page PR shows its before and after against them.
+`3c9aa94`, after merging main's photo rotate and garment page changes, load
+average 7.9 rising to 25.4 as other agents' runs started: times from it are
+rough, counts exact); every page PR shows its before and after against them.
 
 ## What it does
 
