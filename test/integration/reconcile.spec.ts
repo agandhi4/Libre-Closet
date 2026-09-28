@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq, inArray } from 'drizzle-orm';
 import { file, selfie } from '../../src/db/schema';
@@ -17,6 +18,7 @@ import {
   photoFileName,
   photoRow,
   photoRowCount,
+  pngCutout,
   uploadPhoto,
 } from './garments';
 import { createTestApp, TestApp } from './harness';
@@ -119,6 +121,7 @@ describe('storage reconciliation', () => {
       // Link imports have their own pass (link-import.spec.ts).
       pendingPhotosDeleted: 0,
       pendingRowsWithoutFiles: 0,
+      supersededVariantsDeleted: 0,
     };
 
     const dryRun = await reconcile({ dryRun: true });
@@ -156,6 +159,53 @@ describe('storage reconciliation', () => {
       orphanedRowsDeleted: 0,
       missingOriginals: 1,
     });
+  });
+
+  // #141: a cutout is stored under a variant key before its row points at
+  // it, so a write that died before its swap (or whose clean-up failed)
+  // leaves files the base name alone cannot tell from the live ones.
+  it("deletes a live photo's day-old variants under another key than its row's", async () => {
+    const garmentId = await createGarment(t, { name: 'Recut' });
+    await uploadPhoto(t, garmentId, await jpegPhoto());
+    const fileName = await photoFileName(t, garmentId);
+    await ageRow(fileName, 3 * DAY_MS);
+    await t.photos.saveEditedCutout(Readable.from(await pngCutout()), fileName);
+    const { variantKey } = (await photoRow(t, fileName))!;
+    const current = (['nobg', 'thumb'] as const).map((variant) =>
+      variantFileName(fileName, variant, variantKey),
+    );
+    // Old as they are, the row's own files stay.
+    const then = new Date(Date.now() - 2 * DAY_MS);
+    for (const name of current)
+      await utimes(join(t.dataPath, name), then, then);
+    const died = (['nobg', 'thumb'] as const).map((variant) =>
+      variantFileName(fileName, variant, '0123456789ab'),
+    );
+    for (const name of died) await writeAged(name, 2 * DAY_MS);
+    // A thumb backfilled for a request that raced the swap.
+    const unkeyedThumb = variantFileName(fileName, 'thumb');
+    await writeAged(unkeyedThumb, 2 * DAY_MS);
+    // A write between its files and its swap right now.
+    const inFlight = variantFileName(fileName, 'nobg', 'abcdefabcdef');
+    await writeAged(inFlight, 0);
+
+    const dryRun = await reconcile({ dryRun: true });
+    expect(dryRun.supersededVariantsDeleted).toBe(3);
+    expect(await storedFiles()).toEqual(
+      expect.arrayContaining([...died, unkeyedThumb]),
+    );
+
+    const report = await reconcile();
+    expect(report.refused).toBeUndefined();
+    expect(report.supersededVariantsDeleted).toBe(3);
+    const files = await storedFiles();
+    expect(files).toEqual(
+      expect.arrayContaining([fileName, ...current, inFlight]),
+    );
+    for (const name of [...died, unkeyedThumb]) {
+      expect(files).not.toContain(name);
+    }
+    expect((await reconcile()).supersededVariantsDeleted).toBe(0);
   });
 });
 

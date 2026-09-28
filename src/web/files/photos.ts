@@ -8,9 +8,10 @@ import type { Config } from '../../config';
 import {
   applyCutoutEvent,
   type CutoutOutcome,
+  type CutoutRow,
   lockCutoutRow,
 } from '../../cutout/queries';
-import type { CutoutEvent } from '../../cutout/state';
+import type { CutoutEvent, Transition } from '../../cutout/state';
 import type { Db } from '../../db/client';
 import { HttpError } from '../errors';
 import type { Logger } from '../../logger';
@@ -23,12 +24,18 @@ import {
   isHeicUpload,
 } from './heic';
 import {
-  IMAGE_VARIANTS,
   type ImageVariant,
+  newVariantKey,
   parseStoredName,
+  type StoredPhoto,
+  unkeyedPhoto,
   variantFileName,
 } from './image-variant';
-import { findPhotoByShareableId, type NewPhotoRow } from './queries';
+import {
+  findPhotoByShareableId,
+  findVariantKey,
+  type NewPhotoRow,
+} from './queries';
 import { PhotoStorage } from './storage';
 
 const IMAGE_MAX_PX = 1080;
@@ -156,11 +163,10 @@ export function createPhotos(
  * never does, CLAUDE.md Gotchas).
  */
 export class Photos {
-  // Pending thumb write per original file name. Writes are chained rather
-  // than deduplicated so that a cutout landing while a thumb of the original
-  // is still being written (a lazy backfill, a fresh upload's) always wins;
-  // lazy reads join the write already in flight instead of starting a
-  // duplicate.
+  // Pending thumb write per thumb file name. Writes are chained rather than
+  // deduplicated so that one started later always lands last; lazy reads
+  // join the write already in flight instead of starting a duplicate. A
+  // cutout's keyed thumb (writeCutout) is a new name no other write meets.
   private readonly thumbJobs = new Map<string, Promise<void>>();
   private watermark: Promise<Buffer> | undefined;
 
@@ -224,9 +230,9 @@ export class Photos {
     }
     try {
       if (art) await this.storeArtwork(art, fileName);
-      await this.regenerateThumb(fileName);
+      await this.regenerateThumb(unkeyedPhoto(fileName));
     } catch (error) {
-      await this.deleteVariants(fileName);
+      await this.deleteVariants(unkeyedPhoto(fileName));
       throw error;
     }
     this.logger.info(
@@ -336,8 +342,9 @@ export class Photos {
   }
 
   /**
-   * Byte-for-byte copy of the original and, when present, the cutout under a
-   * fresh name, with a new thumb; returns the row to insert, as storeUpload
+   * Byte-for-byte copy of the original and, when present, the cutout the
+   * source's row points at, under a fresh name (unkeyed: the copy has no
+   * row yet), with a new thumb; returns the row to insert, as storeUpload
    * does. Undefined when the source is gone from storage (a row can outlive
    * its bytes).
    */
@@ -345,39 +352,43 @@ export class Photos {
     sourceFileName: string,
     userId: number,
   ): Promise<NewPhotoRow | undefined> {
-    const source = await this.storage.get(sourceFileName);
-    if (!source) {
+    const original = await this.storage.get(sourceFileName);
+    if (!original) {
       this.logger.warn(`Photo copy: source ${sourceFileName} is missing`);
       return undefined;
     }
 
-    const newFileName = `${randomUUID()}.webp`;
+    const copied = unkeyedPhoto(`${randomUUID()}.webp`);
     try {
-      await this.storage.store(newFileName, source);
+      await this.storage.store(copied.fileName, original);
+      // Read right before the cutout is opened: a cutout swapped in since
+      // the caller read the row deletes the set it replaced. An open file
+      // streams whole even when it is deleted.
+      const sourceKey = await findVariantKey(this.db, sourceFileName);
       const nobgSource = await this.storage.get(
-        variantFileName(sourceFileName, 'nobg'),
+        variantFileName(sourceFileName, 'nobg', sourceKey ?? null),
       );
       if (nobgSource) {
         await this.storage.store(
-          variantFileName(newFileName, 'nobg'),
+          variantFileName(copied.fileName, 'nobg'),
           nobgSource,
         );
       }
-      await this.regenerateThumb(newFileName);
+      await this.regenerateThumb(copied);
     } catch (error) {
-      await this.deleteVariants(newFileName);
+      await this.deleteVariants(copied);
       throw error;
     }
-    this.logger.info(`Copied photo ${sourceFileName} to ${newFileName}`);
-    return newPhotoRow(newFileName, userId);
+    this.logger.info(`Copied photo ${sourceFileName} to ${copied.fileName}`);
+    return newPhotoRow(copied.fileName, userId);
   }
 
   /**
    * The mask editor's cutout replaces the stored one (the `edit` event: a
    * user's mask always wins, and no server job result replaces it after).
    * Returns the photo's new version; undefined when no row has that name.
-   * The upload is encoded before the row is locked, so a slow client never
-   * holds the lock.
+   * The upload is encoded and stored before the row is locked, so neither
+   * a slow client nor slow storage ever holds the lock.
    */
   async saveEditedCutout(
     stream: Readable,
@@ -386,7 +397,7 @@ export class Photos {
     const bytes = await this.encodeUpload(stream, this.imageTransformer());
     const outcome = await this.writeCutout(
       originalFileName,
-      { type: 'edit' },
+      (variantKey) => ({ type: 'edit', variantKey }),
       bytes,
     );
     if (!outcome.ok) {
@@ -429,7 +440,11 @@ export class Photos {
     jobVersion: number,
   ): Promise<CutoutOutcome> {
     const bytes = await this.composeCutout(fileName, mask, maskSize);
-    return this.writeCutout(fileName, { type: 'succeed', jobVersion }, bytes);
+    return this.writeCutout(
+      fileName,
+      (variantKey) => ({ type: 'succeed', jobVersion, variantKey }),
+      bytes,
+    );
   }
 
   // The original's pixels with the mask, stretched back to their size, as
@@ -481,87 +496,240 @@ export class Photos {
   }
 
   /**
-   * Writes cutout bytes under the photo's row lock, only if the state
-   * machine accepts `event` (src/cutout/state.ts): the nobg file, then the
-   * thumb, then the row with its new version, so no client can cache a
-   * stale thumb under the new version. Every writer of an existing photo's
-   * cutout (the mask editor, the server job) comes through here, so the
-   * lock orders them and a refused one writes no bytes: a job result never
-   * lands on a user's edit or on a replaced photo.
+   * Stores cutout bytes for an existing photo and points its row at them,
+   * only if the state machine accepts the event (src/cutout/state.ts).
+   * Every writer of an existing photo's cutout (the mask editor, the server
+   * job) comes through here.
+   *
+   * The nobg and its thumb are written first, under a fresh variant key and
+   * outside any transaction; the transaction only locks the row, asks the
+   * machine and swaps `variant_key` with the version (#141). Storage I/O
+   * under the row lock ran into the server pool's idle-in-transaction limit
+   * on a slow NFS mount, and a file renamed over the served name before a
+   * COMMIT that then failed left new bytes live under the old row. Until
+   * the swap commits nothing points at the new files, so a reader sees the
+   * old set or the new one whole, and the thumb a new version names exists
+   * before the version does. A refused event (a late job result over a
+   * user's mask, a replaced photo) or a rolled-back swap leaves its files
+   * unreferenced, and they are deleted here; so is the set a swap replaced,
+   * after its commit.
    */
-  private writeCutout(
+  private async writeCutout(
     originalFileName: string,
-    event: CutoutEvent,
+    eventFor: (variantKey: string) => CutoutEvent,
     bytes: Buffer,
   ): Promise<CutoutOutcome> {
-    const nobgName = variantFileName(originalFileName, 'nobg');
-    return this.db.transaction(async (tx) => {
-      const row = await lockCutoutRow(tx, originalFileName);
-      if (!row) return { ok: false, reason: 'gone' } as const;
-      const outcome = await applyCutoutEvent(tx, row, event, async () => {
-        await this.storage.store(nobgName, Readable.from(bytes));
-        await this.regenerateThumb(originalFileName);
+    const variantKey = newVariantKey();
+    const written: StoredPhoto = { fileName: originalFileName, variantKey };
+    const event = eventFor(variantKey);
+    await this.storeCutoutFiles(written, bytes);
+
+    // What the machine answered inside the transaction: settleFailedSwap
+    // needs it when the COMMIT landed but its answer was lost.
+    let decided: Transition | undefined;
+    let swap: { before: CutoutRow; outcome: Transition } | 'gone';
+    try {
+      swap = await this.db.transaction(async (tx) => {
+        const before = await lockCutoutRow(tx, originalFileName);
+        if (!before) return 'gone' as const;
+        decided = await applyCutoutEvent(tx, before, event);
+        return { before, outcome: decided };
       });
-      if (outcome.ok) {
-        this.logger.info(
-          `Cutout ${nobgName} stored (${event.type}): ${row.status} -> ${outcome.state.status}, version ${outcome.state.version}`,
-        );
-      }
+    } catch (error) {
+      return this.settleFailedSwap(written, event, decided, error);
+    }
+
+    if (swap === 'gone') {
+      await this.deleteCutoutFiles(written, 'its photo row is gone');
+      return { ok: false, reason: 'gone' };
+    }
+    const { before, outcome } = swap;
+    if (!outcome.ok) {
+      await this.deleteCutoutFiles(
+        written,
+        `${event.type} refused (${outcome.reason})`,
+      );
       return outcome;
-    });
+    }
+    this.logger.info(
+      `Cutout of ${originalFileName} stored (${event.type}) under key ${variantKey}: ${before.status} -> ${outcome.state.status}, version ${outcome.state.version}`,
+    );
+    await this.deleteCutoutFiles(
+      { fileName: originalFileName, variantKey: before.variantKey },
+      `replaced by key ${variantKey}`,
+    );
+    return outcome;
+  }
+
+  // The nobg and its thumb under `written`'s key, the thumb made from the
+  // bytes in hand; neither is left behind if either fails.
+  private async storeCutoutFiles(
+    written: StoredPhoto,
+    bytes: Buffer,
+  ): Promise<void> {
+    const { fileName, variantKey } = written;
+    try {
+      await this.storage.store(
+        variantFileName(fileName, 'nobg', variantKey),
+        Readable.from(bytes),
+      );
+      await this.transcode(
+        Readable.from(bytes),
+        thumbTransformer(),
+        variantFileName(fileName, 'thumb', variantKey),
+      );
+    } catch (error) {
+      await this.deleteCutoutFiles(
+        written,
+        `storing them failed (${String(error)})`,
+      );
+      throw error;
+    }
+  }
+
+  // The swap's transaction threw: a lock or statement timeout, the
+  // idle-in-transaction limit, a dropped connection. Usually it rolled back
+  // and the new files are orphans. But when the failure was COMMIT's lost
+  // answer the swap may have landed, so the row is asked before its files
+  // go, and a swap that landed is the outcome after all. When the row
+  // cannot be read either, the files stay (an unreferenced keyed file is
+  // reconciliation's, a day later) rather than risk a row pointing at
+  // nothing.
+  private async settleFailedSwap(
+    written: StoredPhoto,
+    event: CutoutEvent,
+    decided: Transition | undefined,
+    error: unknown,
+  ): Promise<CutoutOutcome> {
+    const { fileName, variantKey } = written;
+    let current: string | null | undefined;
+    try {
+      current = await findVariantKey(this.db, fileName);
+    } catch (lookupError) {
+      this.logger.error(
+        { err: error },
+        `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} failed and the row cannot be read (${String(lookupError)}); its files are left to reconciliation`,
+      );
+      throw error;
+    }
+    // Structured: a driver error's reason is often only in its `cause`
+    // (drizzle's "Failed query: commit").
+    if (current === variantKey && decided?.ok) {
+      this.logger.warn(
+        { err: error },
+        `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} committed although its transaction failed; version ${decided.state.version}`,
+      );
+      return decided;
+    }
+    this.logger.warn(
+      { err: error },
+      `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} rolled back`,
+    );
+    await this.deleteCutoutFiles(written, 'its swap rolled back');
+    throw error;
+  }
+
+  // A nobg and thumb that nothing points at (any more). Never throws: a
+  // file left behind is reconciliation's (a superseded variant, a day on).
+  private async deleteCutoutFiles(
+    set: StoredPhoto,
+    why: string,
+  ): Promise<void> {
+    const names = [
+      variantFileName(set.fileName, 'nobg', set.variantKey),
+      variantFileName(set.fileName, 'thumb', set.variantKey),
+    ];
+    await this.deleteFiles(names);
+    this.logger.info(`Deleted ${names.join(' and ')}: ${why}`);
   }
 
   /**
-   * Streams a variant, falling back gracefully: a missing cutout serves the
-   * original, a missing thumb is generated on first request (backfill for
-   * photos stored before thumbs existed). A 404 HttpError only when the
-   * original itself is gone.
+   * Streams a variant of the set the photo's row points at, falling back
+   * gracefully: a missing cutout serves the original, a missing thumb is
+   * generated on first request (backfill for photos stored before thumbs
+   * existed). A 404 HttpError only when the original itself is gone.
    */
-  async getVariant(fileName: string, variant: ImageVariant): Promise<Readable> {
+  async getVariant(
+    photo: StoredPhoto,
+    variant: ImageVariant,
+  ): Promise<Readable> {
+    const { fileName, variantKey } = photo;
     switch (variant) {
       case 'original':
         return this.getOrNotFound(fileName);
       case 'nobg':
         return (
-          (await this.storage.get(variantFileName(fileName, 'nobg'))) ??
-          this.getOrNotFound(fileName)
+          (await this.storage.get(
+            variantFileName(fileName, 'nobg', variantKey),
+          )) ?? this.getOrNotFound(fileName)
         );
       case 'thumb': {
-        const thumbName = variantFileName(fileName, 'thumb');
+        const thumbName = variantFileName(fileName, 'thumb', variantKey);
         const existing = await this.storage.get(thumbName);
         if (existing) return existing;
-        await (this.thumbJobs.get(fileName) ?? this.regenerateThumb(fileName));
+        await (this.thumbJobs.get(thumbName) ?? this.regenerateThumb(photo));
         return this.getOrNotFound(thumbName);
       }
     }
   }
 
-  /** Rewrites the thumb from the cutout if present, else from the original. */
-  regenerateThumb(fileName: string): Promise<void> {
-    const previous = this.thumbJobs.get(fileName) ?? Promise.resolve();
+  /** Rewrites the set's thumb from its cutout if present, else from the original. */
+  regenerateThumb(photo: StoredPhoto): Promise<void> {
+    const thumbName = variantFileName(
+      photo.fileName,
+      'thumb',
+      photo.variantKey,
+    );
+    const previous = this.thumbJobs.get(thumbName) ?? Promise.resolve();
     const job = previous
       .catch(() => undefined)
-      .then(() => this.writeThumb(fileName))
+      .then(() => this.writeThumb(photo, thumbName))
       .finally(() => {
-        if (this.thumbJobs.get(fileName) === job) {
-          this.thumbJobs.delete(fileName);
+        if (this.thumbJobs.get(thumbName) === job) {
+          this.thumbJobs.delete(thumbName);
         }
       });
-    this.thumbJobs.set(fileName, job);
+    this.thumbJobs.set(thumbName, job);
     return job;
   }
 
-  /** Removes every variant; a failure is logged, never thrown. */
-  async deleteVariants(fileName: string): Promise<void> {
-    for (const variant of IMAGE_VARIANTS) {
-      const name = variantFileName(fileName, variant);
+  /**
+   * Removes every file of the photo: the original, the nobg and thumb its
+   * row points at, and the unkeyed ones (a thumb backfilled for a request
+   * that raced a cutout's swap can land beside a keyed set). A failure is
+   * logged, never thrown.
+   */
+  async deleteVariants(photo: StoredPhoto): Promise<void> {
+    const { fileName, variantKey } = photo;
+    await this.deleteFiles([
+      fileName,
+      variantFileName(fileName, 'nobg'),
+      variantFileName(fileName, 'thumb'),
+      ...(variantKey === null
+        ? []
+        : [
+            variantFileName(fileName, 'nobg', variantKey),
+            variantFileName(fileName, 'thumb', variantKey),
+          ]),
+    ]);
+    this.logger.info(
+      `Deleted variants of ${fileName}${variantKey === null ? '' : ` (key ${variantKey})`}`,
+    );
+  }
+
+  /**
+   * Deletes stored files by name (reconciliation's findings: every file of
+   * an orphaned photo, a superseded variant). A missing file is not an
+   * error; a failure is logged, never thrown.
+   */
+  async deleteFiles(names: readonly string[]): Promise<void> {
+    for (const name of names) {
       await this.storage
         .delete(name)
         .catch((error: unknown) =>
           this.logger.warn(`Failed to delete ${name}: ${String(error)}`),
         );
     }
-    this.logger.info(`Deleted variants of ${fileName}`);
   }
 
   /**
@@ -727,22 +895,15 @@ export class Photos {
       .webp({ quality: IMAGE_QUALITY });
   }
 
-  private async writeThumb(fileName: string): Promise<void> {
+  private async writeThumb(
+    { fileName, variantKey }: StoredPhoto,
+    thumbName: string,
+  ): Promise<void> {
     const source =
-      (await this.storage.get(variantFileName(fileName, 'nobg'))) ??
+      (await this.storage.get(variantFileName(fileName, 'nobg', variantKey))) ??
       (await this.getOrNotFound(fileName));
-    const thumbName = variantFileName(fileName, 'thumb');
     const startedAt = Date.now();
-    await this.transcode(
-      source,
-      decoder()
-        .resize(THUMB_MAX_PX, THUMB_MAX_PX, {
-          fit: sharp.fit.inside,
-          withoutEnlargement: true,
-        })
-        .webp({ quality: THUMB_QUALITY }),
-      thumbName,
-    );
+    await this.transcode(source, thumbTransformer(), thumbName);
     this.logger.debug(`Wrote ${thumbName} in ${Date.now() - startedAt}ms`);
   }
 
@@ -772,6 +933,16 @@ export class Photos {
       throw error;
     }
   }
+}
+
+// Every thumb, from the cutout when there is one (writeThumb, writeCutout).
+function thumbTransformer(): Sharp {
+  return decoder()
+    .resize(THUMB_MAX_PX, THUMB_MAX_PX, {
+      fit: sharp.fit.inside,
+      withoutEnlargement: true,
+    })
+    .webp({ quality: THUMB_QUALITY });
 }
 
 // Bytes Photos cannot read as any image: a 400.
