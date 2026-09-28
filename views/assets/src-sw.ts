@@ -475,6 +475,14 @@ type SessionChange = 'session started' | 'session ended' | 'session revoked';
  * cleared it on this very answer (#131). The login form stays open to a
  * signed-in user, so this is a wrong password typed after the account's
  * password changed on another device.
+ *
+ * A sign-in keeps the push subscription even when its redirect also ended
+ * a dead session (X-Session-Ended beside the new cookie): the auth forms
+ * are native posts, so the worker sees an opaque redirect whose headers it
+ * cannot read, and it need not. The next signed-in page re-sends the
+ * subscription (syncSubscription, public/js/push.js), which moves the
+ * device's row to the new account with its reminders off (upsertDevice,
+ * src/web/push/queries.ts), so the previous account's notifications stop.
  */
 function sessionChange(url: URL, response: Response): SessionChange | null {
   if (response.type === 'opaqueredirect' || response.redirected) {

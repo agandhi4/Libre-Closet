@@ -117,7 +117,7 @@ test.describe('a session revoked elsewhere', () => {
     await other.close();
   });
 
-  test('a refused sign-in that clears the revoked cookie drops the worker’s page cache', async ({
+  test("a refused sign-in that clears the revoked cookie drops the worker's page cache", async ({
     page,
     browser,
   }) => {
