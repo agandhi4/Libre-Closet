@@ -6,6 +6,21 @@ import {
   serverTimingHeader,
 } from './request-timing';
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /**
+     * How long this route takes depends on a secret the request carries: a
+     * password (sign-in, registration, every step-up form), a personal
+     * access token or an invite token. Its answers carry no Server-Timing,
+     * whose `db` and `render` would hand a guesser the server's own time
+     * without the network's jitter (an existing account's lookup, a token
+     * that matched). Still timed into http_request_duration_seconds, where
+     * one request is lost among the rest.
+     */
+    timingSensitive?: boolean;
+  }
+}
+
 /** The route label of a request no route matched (the 404 page). */
 export const UNMATCHED_ROUTE = 'unmatched';
 
@@ -14,8 +29,9 @@ export const UNMATCHED_ROUTE = 'unmatched';
  * else (createApp): every route's template is noted as it is registered (the
  * device beacon may name only those), each request carries a RequestTiming
  * in async context, answers with `Server-Timing` (db, render, the route
- * template) and lands in http_request_duration_seconds under its route
- * template, never its URL, so ids never become series.
+ * template; not on a `timingSensitive` route) and lands in
+ * http_request_duration_seconds under its route template, never its URL, so
+ * ids never become series.
  *
  * Hooks, not a plugin: added to the root, they apply to every route
  * registered after them (CLAUDE.md Gotchas, plugin inheritance).
@@ -42,7 +58,7 @@ export function registerHttpMetrics(
     else done();
   });
   app.addHook('onSend', (request, reply, payload, done) => {
-    if (request.timing) {
+    if (request.timing && !request.routeOptions.config.timingSensitive) {
       reply.header(
         'Server-Timing',
         serverTimingHeader(request.timing, request.routeOptions.url),

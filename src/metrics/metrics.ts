@@ -4,14 +4,15 @@ import {
   Gauge,
   Histogram,
   Registry,
-} from 'prom-client';
+} from '@prometheus-io/client';
 import type { Logger } from '../logger';
 
 /**
  * The process's Prometheus metrics (#115), read by the homelab's vmagent
- * from GET /metrics (src/web/metrics/routes.ts). One registry per app, never
- * prom-client's global one, so the integration specs' apps never share a
- * series.
+ * from GET /metrics (src/web/metrics/routes.ts), through
+ * @prometheus-io/client (prom-client's successor, #136). One registry per
+ * app, never the library's global one, so the integration specs' apps never
+ * share a series.
  *
  * The contract with the homelab (its Grafana dashboards read these names):
  * `http_request_duration_seconds{route,method,status_class}` and

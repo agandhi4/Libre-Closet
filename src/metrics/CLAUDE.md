@@ -5,10 +5,10 @@ Prometheus metrics for the homelab's VictoriaMetrics (#115, homelab #39): vmagen
 ## Layout
 
 ```
-  metrics/             metrics.ts (Metrics: the per-app prom-client Registry and every metric; the label
+  metrics/             metrics.ts (Metrics: the per-app `@prometheus-io/client` Registry and every metric; the label
                        vocabularies JobName, JobOutcome, CLIENT_TIMING_KINDS, CLIENT_TIMING_METRICS),
                        http.ts (registerHttpMetrics: the root hooks for the request histogram, the route
-                       templates and Server-Timing), request-timing.ts (RequestTiming in async context:
+                       templates and Server-Timing; `timingSensitive` route config), request-timing.ts (RequestTiming in async context:
                        the db and render parts of Server-Timing)
   web/metrics/         routes.ts: GET /metrics and POST /metrics/vitals, registered only with METRICS_ENABLED
 public/js/vitals.js    the device's timings, loaded by the layout on signed-in pages with METRICS_ENABLED
@@ -26,9 +26,9 @@ public/js/vitals.js    the device's timings, loaded by the layout on signed-in p
 | `client_timing_seconds` (histogram) | `route`, `kind` (full, htmx, restore), `metric` (ttfb, lcp, inp, request, settle), `cache` (hit, miss: the service worker's page cache) | `POST /metrics/vitals` |
 | `client_timing_dropped_total` | `reason` (unknown_route) | the same, for a sample naming no route of the app |
 
-Plus prom-client's default process metrics (CPU, memory, event loop lag, GC) with METRICS_ENABLED.
+Plus the client library's default process metrics (CPU, memory, event loop lag and utilization, GC) with METRICS_ENABLED.
 
-**The homelab contract** (the owner's, 2026-09-27): the first two names and their labels are what the RED dashboard reads; **no metric has a `job` label** (the scraper sets it; `metrics.spec.ts` checks). `route` is always a template (`/wardrobe/:id`), so cardinality is bounded by the route table.
+**The homelab contract** (the owner's, 2026-09-27): the first two names and their labels are what the RED dashboard reads; **no metric has a `job` label** (the scraper sets it; `metrics.spec.ts` checks). `route` is always a template (`/wardrobe/:id`), so cardinality is bounded by the route table. `metrics.spec.ts` holds the contract as an inline snapshot of every family's type, and every series' name and label names (`le` values included), recorded under prom-client and passed unchanged by `@prometheus-io/client` (#136); a change there is a change to the homelab's dashboards, made with them. The default process families are checked as a superset.
 
 ## The device timings
 
@@ -47,8 +47,11 @@ Batches of up to 20 go out with `navigator.sendBeacon` 5 s after their first sam
 
 `db` is the time the request's queries held a pool connection, the wait for one included (`TimedPool`, `src/db/client.ts`: `connect()` reads the request's timing in the caller's async context, the pool's `release` event adds the time; concurrent queries add up), `render` the time in `renderToString` (`renderPage`/`renderFragment`, `src/web/render.ts`). The timing lives in `AsyncLocalStorage`, entered by the first root onRequest hook and again at the first preValidation hook (a body parser's stream events run in the socket's context, so a POST's handler would otherwise have none). Outside a request (timers, CLIs) nothing is recorded.
 
+**A route whose time depends on a secret answers without it**: `config: { timingSensitive: true }` (declared in `http.ts`), on sign-in, registration, every step-up form (change password, change email, delete account, create an access token), the invite landing, accept and decline, and `/mcp`. `db;dur` to a tenth of a millisecond is the server's own time without the network's jitter: whether an email's lookup found a row, whether a token matched (#136). Those requests still land in `http_request_duration_seconds`; the device timings skip them (no `route`, so vitals.js has nothing to name). A new route that checks a password or looks up a token the request carries sets it too; `test/integration/metrics.spec.ts` lists each one.
+
 ## Gotchas
 
 - **`/metrics` must never be public.** Caddy proxies every path of closet.box to the container, so the route answers only a direct request: one with `X-Forwarded-For` or `Forwarded` (Caddy and Pangolin add them) is a 404 with a warning (context `Web`). It is a static path (`static-prefixes.ts`), so a scrape costs no session lookup and writes no request line. Off (the default), the route does not exist: a 404, which is what the homelab's `expect_up` label turns into a TargetDown.
-- **One registry per app, never prom-client's global one.** The integration specs boot many apps in one process; the global registry would refuse the second `http_request_duration_seconds`. Metrics are recorded with METRICS_ENABLED off too (a few additions a request); only exposure is gated.
+- **One registry per app, never the library's global one.** The integration specs boot many apps in one process; the global registry would refuse the second `http_request_duration_seconds`. Metrics are recorded with METRICS_ENABLED off too (a few additions a request); only exposure is gated.
+- **`@prometheus-io/client` is prom-client renamed** (the Prometheus project took it over at 0.16; `prom-client@15` is deprecated). Same API; it needs Node 22 or later. Pre-1.0: read its changelog before a minor bump, and let the contract snapshot judge it.
 - **A new label value must come from a closed set.** A route template, a `JobName`, a tool name, an outcome: never a URL, id, email or user agent. A new timer in `server.ts` wraps its run in `metrics.timeJob(<JobName>, run)`.

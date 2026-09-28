@@ -75,7 +75,7 @@ export const mcpRoutes: FastifyPluginCallback<WebOptions> = (
   }
 
   const route = {
-    config: { bearer: true, secretPath: true },
+    config: { bearer: true, secretPath: true, timingSensitive: true },
     preValidation: requireToken,
   } as const;
 

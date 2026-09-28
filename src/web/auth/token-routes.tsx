@@ -66,7 +66,7 @@ export const tokenRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     TOKENS_PATH,
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { timingSensitive: true, rateLimit: ACCOUNT_LIMIT },
       schema: { body: CreateTokenBody },
     },
     async (request, reply) => {

@@ -94,7 +94,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/login',
     {
-      config: { public: true, rateLimit: SIGN_IN_LIMIT },
+      config: { public: true, timingSensitive: true, rateLimit: SIGN_IN_LIMIT },
       schema: { body: LoginBody },
     },
     async (request, reply) => {
@@ -148,7 +148,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/register',
     {
-      config: { public: true, rateLimit: SIGN_IN_LIMIT },
+      config: { public: true, timingSensitive: true, rateLimit: SIGN_IN_LIMIT },
       onRequest: registrationOpen,
       schema: { body: RegisterBody },
     },
@@ -271,7 +271,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/update-email',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { timingSensitive: true, rateLimit: ACCOUNT_LIMIT },
       schema: { body: UpdateEmailBody },
     },
     async (request, reply) => {
@@ -325,7 +325,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/change-password',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { timingSensitive: true, rateLimit: ACCOUNT_LIMIT },
       schema: { body: ChangePasswordBody },
     },
     async (request, reply) => {
@@ -376,7 +376,7 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/auth/delete-account',
     {
-      config: { rateLimit: ACCOUNT_LIMIT },
+      config: { timingSensitive: true, rateLimit: ACCOUNT_LIMIT },
       schema: { body: DeleteAccountBody },
     },
     async (request, reply) => {
