@@ -790,8 +790,9 @@ export function deleteOutfit(
 ): Promise<{ wearsKept: number } | undefined> {
   return ownerTransaction(db, ownerId, 'deleteOutfit', async (tx) => {
     // Locked like updateOutfit's: a save of this outfit takes its turn, and
-    // a trip adding it meanwhile commits first (the trips read below sees
-    // it) or waits and then fails on the deleted outfit's foreign key.
+    // a trip adding it meanwhile (addTripOutfit, #234) commits first, and
+    // the trips read below sees it, or waits on its FOR KEY SHARE lock of
+    // the outfit and then answers 'no-outfit'.
     const [found] = await tx
       .select({ id: outfit.id })
       .from(outfit)
