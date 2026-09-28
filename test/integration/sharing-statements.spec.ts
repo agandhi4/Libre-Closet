@@ -170,6 +170,36 @@ describe('sharing: statements per request', () => {
       );
     });
 
+    it('never reads ahead for a repeated ?ownerId=, whatever each names', async () => {
+      // The viewer holds a share of each wardrobe named, so a read-ahead of
+      // either would open it; the query parser answers an array, which is
+      // no plain id, and the schema refuses it before any wardrobe is read.
+      const second = await signUp('second-grantor');
+      const token = /\/wardrobe-share\/invite\/([0-9a-f-]{36})/.exec(
+        (
+          await t.inject({
+            method: 'POST',
+            url: '/wardrobe-share/create-invite-link',
+            payload: { permission: 'VIEW' },
+            headers: { cookie: second.cookie, 'hx-request': 'true' },
+          })
+        ).body,
+      )![1];
+      await post(`/wardrobe-share/invite/${token}/accept`, viewer);
+      for (const query of [
+        `ownerId=${owner.id}&ownerId=${second.id}`,
+        `ownerId=${second.id}&ownerId=${owner.id}`,
+        `ownerId=${owner.id}&ownerId=${owner.id}`,
+      ]) {
+        const record = await recordQueries(async () => {
+          const res = await get(`/wardrobe?${query}`, viewer);
+          expect(res.statusCode).toBe(400);
+        });
+        expect(record.sql[0]).not.toContain('"wardrobe_share"');
+        expect(record.statements).toBe(1);
+      }
+    });
+
     it('a revoked share stops access on the next request', async () => {
       const leaver = await signUp('leaver');
       await shareWith(leaver, 'VIEW');
