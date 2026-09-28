@@ -521,7 +521,7 @@
   "drafts": {
     "QUEUE_TITLE": "{count} photos to add",
     "QUEUE_TITLE_ONE": "Last photo to add",
-    "QUEUE_HINT": "Save each one to move on to the next. Photos wait here for a day.",
+    "QUEUE_HINT": "Save each one to move on to the next. Photos wait here for a week.",
     "QUEUE_LABEL": "Photos waiting to be added",
     "THUMB": "Photo {position}",
     "SKIP": "Skip for now",

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
+import { readdir, utimes } from 'node:fs/promises';
+import { join } from 'node:path';
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -8,11 +9,16 @@ import {
   pendingPhoto,
   wardrobeShare,
 } from '../../src/db/schema';
+import { reconcileStorage } from '../../src/maintenance/reconcile';
+import { variantFileName } from '../../src/web/files/image-variant';
 import {
+  DRAFT_LIFETIME_MS,
   MAX_DRAFTS_PER_USER,
   MAX_PENDING_PER_USER,
 } from '../../src/web/files/pending-photos';
 import { t as text } from '../../src/web/i18n';
+import { readGarmentForm } from '../../src/web/wardrobe/validation';
+import { createGarmentWithPendingPhoto } from '../../src/web/wardrobe/writes';
 import { jpegPhoto } from './garments';
 import {
   createTestApp,
@@ -22,7 +28,10 @@ import {
   unescapeHtml,
   userIdOf,
 } from './harness';
+import { silentLogger } from './logger';
 import { expectNativePostForms, expectNoRawI18nKeys } from './pages';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Adding several garments from photos at once (#200;
@@ -362,6 +371,65 @@ describe('a batch of drafts', () => {
     expect(await storedOriginals()).toEqual(originals);
   });
 
+  it('waits a week for its drafts where a single pending photo waits a day', async () => {
+    expect(DRAFT_LIFETIME_MS).toBe(7 * DAY_MS);
+    const { cookie, id } = await signUp('slow-batch@example.com');
+    await upload(photos(3), { cookie });
+    const [young, old, older] = (await draftsOf(id)).map(
+      (draft) => draft.fileName,
+    ) as [string, string, string];
+    const single = location(
+      await upload([jpeg('single.jpg')], { cookie }),
+    ).searchParams.get('photo')!;
+    const age = async (name: string, days: number) => {
+      const when = new Date(Date.now() - days * DAY_MS);
+      await t.db
+        .update(pendingPhoto)
+        .set({ createdAt: when })
+        .where(eq(pendingPhoto.fileName, name));
+      for (const variant of ['original', 'thumb'] as const) {
+        await utimes(
+          join(t.dataPath, variantFileName(name, variant)),
+          when,
+          when,
+        );
+      }
+    };
+    // Two days: past a single photo's day, well inside a draft's week.
+    await age(young, 2);
+    await age(single, 2);
+    // Six days and a half, then eight: either side of the week.
+    await age(old, 6.5);
+    await age(older, 8);
+
+    const reconcile = (dryRun: boolean) =>
+      reconcileStorage(
+        { db: t.db, photos: t.photos, logger: silentLogger },
+        { dryRun },
+      );
+    // The dry run applies the same rule as the real one.
+    expect((await reconcile(true)).pendingPhotosDeleted).toBe(2);
+    const report = await reconcile(false);
+    expect(report.refused).toBeUndefined();
+    expect(report.pendingPhotosDeleted).toBe(2);
+    expect((await draftsOf(id)).map((draft) => draft.fileName)).toEqual([
+      young,
+      old,
+    ]);
+    expect(await unbatchedOf(id)).toEqual([]);
+    const stored = await storedOriginals();
+    expect(stored).toEqual(expect.arrayContaining([young, old]));
+    expect(stored).not.toContain(older);
+    expect(stored).not.toContain(single);
+
+    // The queue says how long they wait.
+    const html = unescapeHtml(
+      (await page(`/wardrobe/new?photo=${young}`, cookie)).body,
+    );
+    expect(html).toContain(text('drafts.QUEUE_HINT'));
+    expect(text('drafts.QUEUE_HINT')).toContain('a week');
+  });
+
   it(`refuses a batch past ${MAX_DRAFTS_PER_USER} drafts whole, keeping nothing, and still takes one photo`, async () => {
     const { cookie, id } = await signUp('full@example.com');
     expect((await upload(photos(15), { cookie })).statusCode).toBe(303);
@@ -447,5 +515,114 @@ describe('a batch of drafts', () => {
       .innerJoin(file, eq(file.id, garment.photoId))
       .where(eq(file.fileName, drafts[0].fileName));
     expect(row?.ownerId).toBe(owner.id);
+  });
+  it("never saves or discards one wardrobe's draft through another's (MANAGE on both)", async () => {
+    const a = await signUp('wardrobe-a@example.com');
+    const b = await signUp('wardrobe-b@example.com');
+    const manager = await signUp('two-wardrobes@example.com');
+    for (const grantor of [a, b]) {
+      await t.db.insert(wardrobeShare).values({
+        grantorId: grantor.id,
+        granteeId: manager.id,
+        permission: 'MANAGE',
+        inviteToken: randomUUID(),
+        createdAt: new Date(),
+        acceptedAt: new Date(),
+      });
+    }
+    const cookie = manager.cookie;
+    expect(
+      (await upload(photos(2), { cookie, ownerId: b.id })).statusCode,
+    ).toBe(303);
+    const drafts = await draftsOf(manager.id);
+    const [first, second] = drafts.map((draft) => draft.fileName) as [
+      string,
+      string,
+    ];
+    expect(drafts.every((draft) => draft.batchOwnerId === b.id)).toBe(true);
+    const garments = await t.db.$count(garment);
+    const files = await t.db.$count(file);
+    const originals = await storedOriginals();
+
+    // Through A: the form, the save and the discard are all 404s.
+    const page404 = await page(
+      `/wardrobe/new?photo=${first}&ownerId=${a.id}`,
+      cookie,
+    );
+    expect(page404.statusCode).toBe(404);
+    const save = await t.inject({
+      method: 'POST',
+      url: `/wardrobe?ownerId=${a.id}`,
+      headers: { cookie },
+      payload: { category: 'tops', name: 'Wrong closet', linkPhoto: first },
+    });
+    expect(save.statusCode).toBe(404);
+    const discard = await t.inject({
+      method: 'POST',
+      url: `/wardrobe/new/drafts/discard?ownerId=${a.id}`,
+      headers: { cookie },
+      payload: { photo: second, saved: '' },
+    });
+    expect(discard.statusCode).toBe(404);
+    // Nor through their own wardrobe.
+    const own = await t.inject({
+      method: 'POST',
+      url: '/wardrobe',
+      headers: { cookie },
+      payload: { category: 'tops', name: 'Own closet', linkPhoto: first },
+    });
+    expect(own.statusCode).toBe(404);
+
+    // Nothing was written, claimed or deleted.
+    expect(await t.db.$count(garment)).toBe(garments);
+    expect(await t.db.$count(file)).toBe(files);
+    expect((await draftsOf(manager.id)).map((draft) => draft.fileName)).toEqual(
+      [first, second],
+    );
+    expect(await storedOriginals()).toEqual(originals);
+    expect(
+      unescapeHtml((await page(`/wardrobe?ownerId=${a.id}`, cookie)).body),
+    ).not.toContain(text('drafts.WAITING', { count: 2 }));
+
+    // The claim itself is scoped too, not only the routes' lookup.
+    const form = readGarmentForm({ category: 'tops' }, { owner: false });
+    if (!form.ok) throw new Error('the fixture form must read');
+    const direct = await createGarmentWithPendingPhoto(
+      {
+        db: t.db,
+        photos: t.photos,
+        logger: silentLogger,
+        cutouts: { wake: () => undefined },
+      },
+      a.id,
+      manager.id,
+      form.fields,
+      first,
+      'closet',
+    );
+    expect(direct).toBeUndefined();
+    expect(await t.db.$count(garment)).toBe(garments);
+
+    // Through B, where the batch was uploaded, both work.
+    const saved = await t.inject({
+      method: 'POST',
+      url: `/wardrobe?ownerId=${b.id}`,
+      headers: { cookie },
+      payload: { category: 'tops', name: 'Right closet', linkPhoto: first },
+    });
+    expect(saved.statusCode).toBe(303);
+    const [row] = await t.db
+      .select({ ownerId: garment.ownerId })
+      .from(garment)
+      .where(eq(garment.name, 'Right closet'));
+    expect(row?.ownerId).toBe(b.id);
+    const discarded = await t.inject({
+      method: 'POST',
+      url: `/wardrobe/new/drafts/discard?ownerId=${b.id}`,
+      headers: { cookie },
+      payload: { photo: second, saved: '' },
+    });
+    expect(discarded.statusCode).toBe(303);
+    expect(await draftsOf(manager.id)).toEqual([]);
   });
 });

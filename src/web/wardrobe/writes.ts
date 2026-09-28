@@ -12,6 +12,7 @@ import {
   draftsHeld,
   MAX_DRAFTS_PER_USER,
   MAX_PENDING_PER_USER,
+  type PendingScope,
   recordDraftBatch,
   recordPendingPhoto,
   takePendingPhoto,
@@ -293,8 +294,9 @@ function draftsFull(held: number): HttpError {
  * for its cutout) and the garment with it, so nothing reaches `garment` or
  * `file` until the form is saved.
  *
- * Undefined when `userId` cannot claim the name: no pending row of theirs
- * (someone else's, or claimed, discarded, evicted or reconciled already),
+ * Undefined when `userId` cannot claim the name for `ownerId`'s wardrobe:
+ * no pending row of theirs in that scope (someone else's, a draft uploaded
+ * for another wardrobe, or claimed, discarded, evicted or reconciled already),
  * its bytes gone, or already a `file` row. Nothing is written then, and no
  * bytes are ever deleted here: the name came from the client.
  */
@@ -319,7 +321,9 @@ export async function createGarmentWithPendingPhoto(
     (await db.transaction(async (tx) => {
       await lockPhotoName(tx, fileName);
       if (await photoRowExists(tx, fileName)) return undefined;
-      if (!(await takePendingPhoto(tx, fileName, userId))) return undefined;
+      if (!(await takePendingPhoto(tx, fileName, { userId, ownerId }))) {
+        return undefined;
+      }
       const photoId = await insertPhotoRow(tx, {
         ...photo,
         ...initialCutoutState('pending'),
@@ -349,31 +353,32 @@ export async function createGarmentWithPendingPhoto(
 
 /**
  * Deletes a pending photo the form no longer shows (link import: another
- * photo was picked, or none). False, deleting nothing, unless `userId` fetched it and
- * it is still pending (no `file` row): only an import of theirs that no
- * garment was saved with goes. Under the name's lock, so a save claiming it
- * at the same moment either wins (nothing is deleted) or finds it gone. The
- * bytes go after the commit.
+ * photo was picked, or none; a draft's Discard, #200). False, deleting
+ * nothing, unless it is still pending in `scope` (takePendingPhoto: the
+ * user's own, a draft only from its batch's wardrobe) with no `file` row:
+ * only a photo of theirs that no garment was saved with goes. Under the
+ * name's lock, so a save claiming it at the same moment either wins
+ * (nothing is deleted) or finds it gone. The bytes go after the commit.
  */
 export async function discardPendingPhoto(
   { db, photos, logger }: WardrobeDeps,
   fileName: string,
-  userId: number,
+  scope: PendingScope,
 ): Promise<boolean> {
   if (parseStoredName(fileName)?.variant !== 'original') return false;
   const discarded = await db.transaction(async (tx) => {
     await lockPhotoName(tx, fileName);
     if (await photoRowExists(tx, fileName)) return false;
-    return takePendingPhoto(tx, fileName, userId);
+    return takePendingPhoto(tx, fileName, scope);
   });
   if (!discarded) {
     logger.warn(
-      `Pending photo ${fileName} not discarded: not pending for user ${userId}`,
+      `Pending photo ${fileName} not discarded: not pending for user ${scope.userId} in wardrobe ${scope.ownerId}`,
     );
     return false;
   }
   await photos.deleteVariants(unkeyedPhoto(fileName));
-  logger.info(`Discarded pending photo ${fileName} of user ${userId}`);
+  logger.info(`Discarded pending photo ${fileName} of user ${scope.userId}`);
   return true;
 }
 

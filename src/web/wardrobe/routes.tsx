@@ -27,6 +27,7 @@ import {
   draftsWaiting,
   MAX_DRAFTS_PER_USER,
   pendingPhotoOf,
+  type PendingScope,
 } from '../files/pending-photos';
 import { t } from '../i18n';
 import type { WebOptions } from '../plugin';
@@ -173,6 +174,14 @@ function resolve(
 }
 
 const GARMENT_NOT_FOUND = 'Garment not found';
+
+/**
+ * The requester's draft addressed through another wardrobe than its
+ * batch's (#200): not found there, like a garment outside the wardrobe.
+ */
+function draftNotFound(): HttpError {
+  return new HttpError(404, 'Photo not found');
+}
 
 function notFound(): HttpError {
   return new HttpError(404, GARMENT_NOT_FOUND);
@@ -328,6 +337,35 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     return { garment, left, viewOwner };
   }
 
+  /**
+   * What GET /wardrobe/new shows for `?photo=`: the pending photo while it
+   * is still in `scope` (else "no longer available"), and a draft's queue
+   * (#200). The requester's draft for another wardrobe is a 404.
+   */
+  async function formPhoto(
+    scope: PendingScope,
+    photo: string,
+    query: { saved?: string; leftOut?: string[] },
+  ): Promise<Pick<GarmentFormRequest, 'link' | 'errors' | 'draft'>> {
+    const pending = await pendingPhotoOf(db, photo, scope);
+    if (pending === 'otherWardrobe') throw draftNotFound();
+    if (!pending) {
+      return {
+        link: pendingPhotoView(undefined),
+        errors: { linkPhoto: [t('add.PHOTO_GONE')] },
+      };
+    }
+    return {
+      link: pendingPhotoView(photo),
+      draft:
+        pending.draft &&
+        (await draftQueue(scope.userId, photo, pending.draft.batchId, {
+          saved: readIdList(query.saved),
+          leftOut: query.leftOut ?? [],
+        })),
+    };
+  }
+
   /** A draft's queue (#200): its batch's drafts still waiting, in picked order. */
   async function draftQueue(
     userId: number,
@@ -351,13 +389,18 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
    * batch checked.
    */
   async function postedDraft(
-    userId: number,
+    scope: PendingScope,
     body: { linkPhoto?: string; draftsSaved?: string },
     viewOwner: number | undefined,
   ) {
     const photo = body.linkPhoto;
     if (!photo) return undefined;
-    const draft = (await pendingPhotoOf(db, photo, userId))?.draft;
+    const { userId } = scope;
+    const pending = await pendingPhotoOf(db, photo, scope);
+    // Never saved into another wardrobe than its batch's (#200); the claim
+    // is scoped the same way, so this is the answer, not the guard.
+    if (pending === 'otherWardrobe') throw draftNotFound();
+    const draft = pending?.draft;
     if (!draft) return undefined;
     const saved = readIdList(body.draftsSaved);
     return {
@@ -555,27 +598,18 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         access,
       );
       const { photo } = request.query;
-      const userId = sessionUserId(request);
-      const pending = photo
-        ? await pendingPhotoOf(db, photo, userId)
-        : undefined;
-      const draft =
-        photo && pending?.draft
-          ? await draftQueue(userId, photo, pending.draft.batchId, {
-              saved: readIdList(request.query.saved),
-              leftOut: request.query.leftOut ?? [],
-            })
-          : undefined;
       return renderGarmentForm(reply, db, {
         mode: { kind: 'new', destination },
         suggestionsFrom: access.ownerId,
         viewOwner,
         values: destinationValues(destination, replaced),
-        link: photo ? pendingPhotoView(pending ? photo : undefined) : undefined,
-        errors:
-          photo && !pending ? { linkPhoto: [t('add.PHOTO_GONE')] } : undefined,
         candidateFor,
-        draft,
+        ...(photo &&
+          (await formPhoto(
+            { userId: sessionUserId(request), ownerId: access.ownerId },
+            photo,
+            request.query,
+          ))),
       });
     },
   );
@@ -618,25 +652,29 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   );
 
   // A draft's Discard (#200): the photo goes (discardPendingPhoto: only the
-  // requester's own, still pending) and the queue moves on to the next
-  // draft after it, or ends as a save of the last one would. Nothing to
-  // discard (saved or discarded already, a second tap) ends the queue the
-  // same way.
+  // requester's own, still pending, in the wardrobe its batch was uploaded
+  // for) and the queue moves on to the next draft after it, or ends as a
+  // save of the last one would. Nothing to discard (saved or discarded
+  // already, a second tap) ends the queue the same way; the requester's
+  // draft for another wardrobe is a 404, as on the form and the save.
   app.post(
     DRAFT_DISCARD_PATH,
     { schema: { querystring: OwnerQuery, body: DiscardDraftBody } },
     async (request, reply) => {
-      const { viewOwner } = await resolve(
+      const { access, viewOwner } = await resolve(
         options,
         request,
         request.query.ownerId,
         'manage',
       );
       const userId = sessionUserId(request);
+      const scope = { userId, ownerId: access.ownerId };
       const { photo } = request.body;
       const saved = readIdList(request.body.saved);
-      const draft = (await pendingPhotoOf(db, photo, userId))?.draft;
-      if (draft) await discardPendingPhoto(deps, photo, userId);
+      const pending = await pendingPhotoOf(db, photo, scope);
+      if (pending === 'otherWardrobe') throw draftNotFound();
+      const draft = pending?.draft;
+      if (draft) await discardPendingPhoto(deps, photo, scope);
       const next =
         draft &&
         nextDraft(
@@ -688,7 +726,11 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const userId = sessionUserId(request);
       // A draft of a batch (#200) is read before the save claims it: the
       // queue moves on to the batch's next draft afterwards.
-      const draft = await postedDraft(userId, request.body, viewOwner);
+      const draft = await postedDraft(
+        { userId, ownerId: access.ownerId },
+        request.body,
+        viewOwner,
+      );
       // A plan item's "Add a candidate" (34b) is checked before anything is
       // read or stored, and linked in the garment's transaction.
       const { destination, candidateFor, withGarment } =

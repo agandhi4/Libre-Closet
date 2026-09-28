@@ -6,11 +6,11 @@ Two features from the upstream triage of 2026-09-28: choosing several photos fro
 
 ### Drafts are pending photos in a batch
 
-A draft is a pending photo (`pending_photo`, `src/web/files/pending-photos.ts`): bytes stored, no `file` or `garment` row until its form is saved, removed by reconciliation after a day. The batch reuses that storage and adds three nullable columns in `drizzle/0030_pending_photo_batch.sql`:
+A draft is a pending photo (`pending_photo`, `src/web/files/pending-photos.ts`): bytes stored, no `file` or `garment` row until its form is saved, removed by reconciliation after a week (a single pending photo keeps its day: owner, 2026-09-28, since a 30-photo batch takes more than an evening). The batch reuses that storage and adds three nullable columns in `drizzle/0030_pending_photo_batch.sql`:
 
 - `batch_id` (uuid): the upload the photo came in.
 - `batch_position` (smallint): its place in that upload, so the queue keeps the order the photos were picked in. A batch's rows share one `created_at` (one transaction), so the timestamp cannot order them.
-- `batch_owner_id`: the wardrobe the batch adds to, so a grantee's drafts for a shared wardrobe resume there and not in their own. `on delete set null`: a draft whose wardrobe is gone shows nowhere and is reconciled after a day like any pending photo, with its bytes.
+- `batch_owner_id`: the wardrobe the batch adds to, so a grantee's drafts for a shared wardrobe resume there and not in their own. `on delete set null`: a draft whose wardrobe is gone shows nowhere and is reconciled after a week like any draft, with its bytes.
 
 A check keeps `batch_id` and `batch_position` null together.
 
@@ -21,7 +21,7 @@ Decision: **an explicit allowance for batched drafts, refused rather than evicte
 - `MAX_PENDING_PER_USER` (10) and its oldest-first eviction apply only to unbatched pending photos (link import, the camera, a one-photo library pick). They are one-at-a-time and the eviction is what keeps a browsing session from piling up bytes.
 - Batched drafts count against `MAX_DRAFTS_PER_USER` (30), and are never evicted. An upload that would take a user past 30 is refused whole with a 409 naming how many are waiting. Nothing from it is kept. The check runs twice: before the body is read, which leaves room for at least one photo (the upload's `files` limit is the room left, so the parser stops at the first photo past it); and under the per-user advisory lock when the rows are written.
 - Why not raise the cap for a batch: an eviction would still silently take the oldest drafts when the next batch or a single upload arrives. Why not chunk: the user picked 15 photos once, and chunking means either several uploads they must start themselves or client code that splits and sequences posts. Both lose drafts when one chunk fails.
-- 30 is two full batches of 15. At about 400 KB a prepared photo, that is 12 MB of drafts a user can hold for at most a day, which the nightly pass removes.
+- 30 is two full batches of 15. At about 400 KB a prepared photo, that is 12 MB of drafts a user can hold for at most a week, which the nightly pass then removes.
 
 A photo in the batch that cannot be read (not an image, a HEIC over its cap, too many pixels) is left out. The others are kept, and the queue names the ones left out, so nothing is lost silently. A batch in which no photo could be read is the error page. A one-photo pick keeps today's path and today's errors.
 
@@ -30,11 +30,11 @@ A photo in the batch that cannot be read (not an image, a HEIC over its cap, too
 - The library row's input is `multiple`, and `photo-input.js`'s `preparePhoto` prepares every chosen file (a 1600 px JPEG each, HEIC left for the server). It still returns the first, so the handler string cached pages carry keeps working. The camera stays single.
 - `POST /wardrobe/new/photo` with two or more photos stores each through `storeUpload` in turn (awaited, so at most one HEIC is buffered at a time), records the batch, and answers 303 to the first draft: `GET /wardrobe/new?photo=<name>`. That URL is the same new garment form a single upload opens, so the duplicate check (#20, `addsToCloset`) runs on every draft, as do the properties' presets and the owner-only fields.
 - A draft's form differs in three ways:
-  1. **The queue above the form**: "N photos to add", a strip of the remaining drafts' thumbs (each a link to that draft, the current one marked), **Skip** (the next draft after this one, wrapping around) and **Discard** (a `PostForm` to `POST /wardrobe/new/drafts/discard`, which reuses `discardPendingPhoto`). It also says that waiting photos are kept for a day, and lists any photos the upload left out.
+  1. **The queue above the form**: "N photos to add", a strip of the remaining drafts' thumbs (each a link to that draft, the current one marked), **Skip** (the next draft after this one, wrapping around) and **Discard** (a `PostForm` to `POST /wardrobe/new/drafts/discard`, which reuses `discardPendingPhoto`). It also says that waiting photos are kept for a week, and lists any photos the upload left out.
   2. **Category first**, above Name, so the category's properties (its types, warmth, weight) come next as the form already redraws them.
   3. **Save goes to the next draft**, not to the garment page: `POST /wardrobe` sees that the claimed photo was a draft (it reads the batch before the claim), and answers 303 to the next draft after it in picked order, wrapping round, so a skipped draft comes back once the rest are done.
 - The saved garments' ids travel with the queue: a hidden `draftsSaved` in the form, `saved=` on Skip, Discard and the thumbs. It is navigation state, never stored. Malformed ids are dropped, and ids outside the wardrobe select nothing. When no draft is left, the save lands on **select mode with the batch checked** (`/wardrobe?select=1&checked=<ids>`), saying how many were added, so the bulk edit (#12b, "Set…") tags them together. The batch's garments are the newest, so they are on the first page.
-- **Resuming**: the closet grid shows a slim prompt, "N photos waiting to be added · Continue", to anyone who can add, for their own drafts in that wardrobe (`batch_owner_id`). Closing the app mid-queue loses nothing for a day.
+- **Resuming**: the closet grid shows a slim prompt, "N photos waiting to be added · Continue", to anyone who can add, for their own drafts in that wardrobe (`batch_owner_id`). Closing the app mid-queue loses nothing for a week.
 
 ## Export
 
