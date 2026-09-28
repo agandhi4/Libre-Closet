@@ -170,7 +170,22 @@ export async function deleteUserAndFileRows(
  * foreign key halfway, a 500.
  */
 export async function lockOwner(tx: Queryable, ownerId: number): Promise<void> {
-  const [locked] = await tx
+  const [locked] = await lockOwnerQuery(tx, ownerId);
+  if (!locked) throw new HttpError(404, 'Wardrobe not found');
+}
+
+/**
+ * lockOwner's statement, exported for owner-lock.spec.ts, which EXPLAINs it.
+ *
+ * Keep set_config in the base scan's select list. It bounds the lock wait
+ * only because Postgres computes that list in the scan, below LockRows,
+ * before the row lock is taken. Moved elsewhere (a CTE, a subquery, a
+ * second statement's order), it may run after the wait or not at all. Any
+ * change here is verified with EXPLAIN (VERBOSE): the scan's Output must
+ * hold set_config. The spec asserts exactly that.
+ */
+export function lockOwnerQuery(tx: Queryable, ownerId: number) {
+  return tx
     .select({
       id: user.id,
       lockTimeout: sql`set_config('lock_timeout', ${`${OWNER_LOCK_TIMEOUT_MS}ms`}, true)`,
@@ -178,7 +193,6 @@ export async function lockOwner(tx: Queryable, ownerId: number): Promise<void> {
     .from(user)
     .where(eq(user.id, ownerId))
     .for('no key update');
-  if (!locked) throw new HttpError(404, 'Wardrobe not found');
 }
 
 /**
@@ -251,8 +265,10 @@ export async function ownerTransaction<T>(
   writer: string,
   work: (tx: Queryable) => Promise<T>,
 ): Promise<T> {
-  if (lockedFor.get(db) === ownerId) return work(db);
   try {
+    // Joined, the wait is still this writer's: mapped here, so the 503's
+    // log names it (pickIdea's garments inside wearIdea), not the caller.
+    if (lockedFor.get(db) === ownerId) return await work(db);
     return await db.transaction(async (tx) => {
       await lockOwner(tx, ownerId);
       lockedFor.set(tx, ownerId);
@@ -263,7 +279,7 @@ export async function ownerTransaction<T>(
       }
     });
   } catch (error) {
-    // A nested ownerTransaction already mapped it (and is not a pg error).
+    // The innermost ownerTransaction maps it; the callers pass it on.
     if (!(error instanceof OwnerLockTimeout) && isLockTimeout(error)) {
       throw new OwnerLockTimeout(ownerId, writer);
     }
