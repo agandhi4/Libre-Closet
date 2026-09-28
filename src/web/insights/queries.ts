@@ -79,8 +79,9 @@ export function insightGarments(
       .from(garment)
       .leftJoin(file, eq(file.id, garment.photoId))
       // No wear after the window's last day is read: a past year's recap
-      // stops at its December 31. For insights `to` is today, and nothing
-      // is worn after today.
+      // stops at its December 31. For insights `to` is today, and this caps
+      // nothing only because setEntryWorn (src/web/calendar/queries.ts)
+      // refuses a future day.
       .leftJoin(
         garmentWear,
         and(

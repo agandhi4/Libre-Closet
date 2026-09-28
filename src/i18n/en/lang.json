@@ -1016,7 +1016,7 @@
     "NEW_PIECES": "New pieces",
     "SAVE_IMAGE": "Save image",
     "SAVE_IMAGE_NOTE": "A picture of your year, to keep or send. The app shares nothing itself.",
-    "SAVE_IMAGE_FAILED": "The image could not be drawn. Reload the page and try again.",
+    "SAVE_IMAGE_FAILED": "The image could not be drawn. Tap Save image to try again.",
     "MOST_WORN": "Most worn",
     "ADDITIONS": "New this year",
     "ADDED": "Added {when}",

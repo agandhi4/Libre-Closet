@@ -15,7 +15,9 @@
  * exists: WebKit's navigator.share needs the tap's user activation, which an
  * image load awaited inside the tap could outlive. A refused share (the
  * activation lapsed) falls back to the download; a cancelled one does
- * nothing.
+ * nothing. A card that could not be drawn says so in the note under the
+ * button (aria-live, so it is read out) and leaves the button enabled: a tap
+ * draws it again, and once it exists the next tap shares it.
  *
  * Evaluated once per document: the page's inline module calls
  * prepareRecapExport on every visit a boosted navigation brings, and
@@ -39,27 +41,54 @@ export function prepareRecapExport(button) {
   if (!island) return;
   prepared.add(button);
   const data = JSON.parse(island.textContent ?? '{}');
-  button.disabled = true;
+  const note = document.getElementById('recap-export-note');
+  const hint = note?.textContent ?? '';
 
   /** @type {File | null} */
   let file = null;
-  const started = performance.now();
-  drawCard(data)
-    .then((blob) => {
-      file = new File([blob], data.fileName, { type: 'image/png' });
-      button.disabled = false;
-      console.info(
-        `Recap: image drawn (${Math.round(blob.size / 1024)} KB) in ${Math.round(performance.now() - started)} ms`,
-      );
-    })
-    .catch((err) => {
-      button.title = data.failed;
-      console.error('Recap: the image could not be drawn', err);
-    });
+  let drawing = false;
+
+  const draw = () => {
+    drawing = true;
+    button.disabled = true;
+    const started = performance.now();
+    drawCard(data)
+      .then((blob) => {
+        file = new File([blob], data.fileName, { type: 'image/png' });
+        showNote(note, hint, false);
+        console.info(
+          `Recap: image drawn (${Math.round(blob.size / 1024)} KB) in ${Math.round(performance.now() - started)} ms`,
+        );
+      })
+      .catch((err) => {
+        showNote(note, data.failed, true);
+        console.error('Recap: the image could not be drawn', err);
+      })
+      .finally(() => {
+        drawing = false;
+        button.disabled = false;
+      });
+  };
 
   button.addEventListener('click', () => {
     if (file) void deliver(file, data.title);
+    else if (!drawing) draw();
   });
+  draw();
+}
+
+/**
+ * The note under the button: its hint, or why the card could not be drawn
+ * (in the error colour). The note is aria-live, so the change is read out.
+ * @param {HTMLElement | null} note
+ * @param {string} text
+ * @param {boolean} failed
+ */
+function showNote(note, text, failed) {
+  if (!note) return;
+  note.textContent = text;
+  note.classList.toggle('text-error', failed);
+  note.classList.toggle('text-muted', !failed);
 }
 
 /**
@@ -151,11 +180,15 @@ async function loadImage(src) {
 /** @returns {Promise<Blob>} */
 async function drawCard(data) {
   const colours = theme();
+  // A font that will not load draws in its fallback (the stacks end in
+  // Georgia and system-ui), not a failed card.
   await Promise.all([
     document.fonts.load(`600 88px ${colours.serif}`),
     document.fonts.load(`400 30px ${colours.sans}`),
     document.fonts.load(`600 30px ${colours.sans}`),
-  ]);
+  ]).catch((err) => {
+    console.warn('Recap: fonts did not load, drawing with fallbacks', err);
+  });
   const garments = [
     ...data.mostWorn.garments,
     ...(data.bestValue ? [data.bestValue.garment] : []),

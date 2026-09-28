@@ -296,7 +296,7 @@ function Export(props: { recap: YearRecap; appName: string }) {
       >
         {t('recap.SAVE_IMAGE')}
       </button>
-      <p class="text-xs text-muted" id="recap-export-note">
+      <p class="text-xs text-muted" id="recap-export-note" aria-live="polite">
         {t('recap.SAVE_IMAGE_NOTE')}
       </p>
       <div data-theme="closet-light" data-recap-theme="" hidden />

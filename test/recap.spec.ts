@@ -140,3 +140,56 @@ test.describe('in dark mode', () => {
     await expectLightCard(await readFile(await download.path()));
   });
 });
+
+test('a card that cannot be drawn says so, and a tap tries again', async ({
+  page,
+}) => {
+  // The canvas refuses to encode (toBlob answers null) until the flag drops.
+  await page.addInitScript(() => {
+    const flags = window as unknown as { failRecapPng: boolean };
+    flags.failRecapPng = true;
+    // The descriptor's value, called with the canvas as `this` below.
+    const toBlob = Object.getOwnPropertyDescriptor(
+      HTMLCanvasElement.prototype,
+      'toBlob',
+    )!.value as HTMLCanvasElement['toBlob'];
+    HTMLCanvasElement.prototype.toBlob = function (callback, ...rest) {
+      if (flags.failRecapPng) callback(null);
+      else toBlob.call(this, callback, ...rest);
+    };
+  });
+  await signIn(page, 'recap-fail');
+  for (let i = 0; i < 10; i += 1) {
+    const id = await createGarment(page, `Failing piece ${i + 1}`, 'tops');
+    const wore = await page.request.post(`/wardrobe/${id}/wear`, {
+      form: { worn: '1' },
+      headers: SAME_ORIGIN,
+    });
+    expect(wore.ok()).toBe(true);
+  }
+  await page.goto('/wardrobe/recap');
+
+  // The failure is on screen (not a title, which a phone never shows), read
+  // out, and the button stays usable.
+  const note = page.locator('#recap-export-note');
+  await expect(note).toHaveText(
+    'The image could not be drawn. Tap Save image to try again.',
+  );
+  await expect(note).toHaveAttribute('aria-live', 'polite');
+  await expect(note).toHaveClass(/text-error/);
+  const save = page.locator('#recap-export');
+  await expect(save).toBeEnabled();
+
+  // Once drawing works, a tap draws the card again and the next one saves it.
+  await page.evaluate(() => {
+    (window as unknown as { failRecapPng: boolean }).failRecapPng = false;
+  });
+  await save.click();
+  await expect(note).not.toHaveClass(/text-error/);
+  await expect(save).toBeEnabled();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    save.click(),
+  ]);
+  await expectLightCard(await readFile(await download.path()));
+});
