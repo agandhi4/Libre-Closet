@@ -9,6 +9,8 @@ The tiers and their commands are in the root `CLAUDE.md` (Commands, Test tiers).
 ```
   support/             scratch-database.ts (integration tier + page audit), e2e-session.ts (Playwright signIn),
                        e2e-data.ts (Playwright's garments, outfits, capsules through the app's POSTs),
+                       server-db.ts (withServerDb: the server's database, a pool per call, never per
+                       file; seedGarments: dozens in one transaction, as posting 49 timed out, #247),
                        test-server.ts (`npm run start:test`: the build served with a stubbed cutout runner,
                        for Playwright and Lighthouse),
                        query-recorder.ts (recordStatements: every SQL statement this process sends
