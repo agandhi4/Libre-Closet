@@ -36,7 +36,6 @@ import {
   type ClosetGarment,
   closetGarments,
   ideaPool,
-  outfitOfGarments,
   pickedGarments,
   type PoolGarment,
   savedOutfits,
@@ -379,9 +378,12 @@ export function pickIdea(
 ): Promise<PickResult | 'not-found'> {
   const wanted = [...new Set(input.garmentIds)];
   return ownerTransaction(db, ownerId, 'pickIdea', async (tx) => {
-    const found = await pickedGarments(tx, ownerId, wanted);
+    const { garments: found, existing } = await pickedGarments(
+      tx,
+      ownerId,
+      wanted,
+    );
     if (found.length !== wanted.length) return 'not-found';
-    const existing = await outfitOfGarments(tx, ownerId, wanted);
     if (existing) return reusePicked(tx, ownerId, existing, input.plan);
     const byId = new Map(found.map((g) => [g.id, g]));
     const garments = topToToe(wanted.map((id) => byId.get(id)!));

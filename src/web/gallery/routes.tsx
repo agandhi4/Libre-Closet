@@ -157,7 +157,6 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       `Ideas for user ${ownerId}: ${result.ideas.length} on page ${page} (seed ${state.seed}, ${planning.day} ${planning.occasion}${trip ? `, trip ${trip.id}` : ''}${capsule ? `, capsule ${capsule.id}` : ''}${styled ? `, with garment ${styled.id}` : ''}${weatherNote(result.weather)}) in ${Math.round(performance.now() - started)} ms`,
     );
     return {
-      ownerId,
       state,
       planning,
       trip: trip && { id: trip.id, name: trip.name },
@@ -171,8 +170,13 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     IDEAS_PATH,
     { schema: { querystring: GalleryQuery } },
     async (request, reply) => {
-      const gallery = await galleryFor(sessionUserId(request), request.query);
-      const capsules = await capsuleNames(db, gallery.ownerId);
+      const ownerId = sessionUserId(request);
+      // The menu's capsules alongside the ideas' reads, not after them: a
+      // round trip less on the page's critical path (#168).
+      const [gallery, capsules] = await Promise.all([
+        galleryFor(ownerId, request.query),
+        capsuleNames(db, ownerId),
+      ]);
       return renderPage(
         reply,
         <IdeasPage

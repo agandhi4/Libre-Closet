@@ -330,38 +330,47 @@ export type AvoidOutcome = 'added' | 'already' | 'not-found';
  * 'not-found' and writes nothing. Stored once, smaller id first, so asking
  * twice (either way round) is 'already'. Takes a Queryable: the seed writes
  * a persona's pairs inside its transaction.
+ *
+ * One statement (#168; it was a transaction of four: begin, the check, the
+ * insert, commit): the check locks both garments FOR SHARE, in id order, and
+ * the insert runs only when it found both, so a delete of either waits for
+ * the pair (then cascades it away) and never leaves it naming a missing
+ * garment. The outcome is read from what the statement saw.
  */
-export function avoidPair(
+export async function avoidPair(
   db: Queryable,
   ownerId: number,
   first: number,
   second: number,
 ): Promise<AvoidOutcome> {
   const [a, b] = first < second ? [first, second] : [second, first];
-  if (a === b) return Promise.resolve('not-found');
-  return db.transaction(async (tx) => {
-    // FOR SHARE: a delete of either garment waits for this insert (or
-    // cascades it away after), never leaving it to name a missing garment.
-    const owned = await tx
-      .select({ id: garment.id })
-      .from(garment)
-      .where(
-        and(
-          eq(garment.ownerId, ownerId),
-          inArray(garment.id, [a, b]),
-          ownedGarment(),
-        ),
-      )
-      .orderBy(garment.id)
-      .for('share');
-    if (owned.length !== 2) return 'not-found';
-    const inserted = await tx
-      .insert(generatorAvoid)
-      .values({ ownerId, garmentAId: a, garmentBId: b })
-      .onConflictDoNothing()
-      .returning({ ownerId: generatorAvoid.ownerId });
-    return inserted.length > 0 ? 'added' : 'already';
-  });
+  if (a === b) return 'not-found';
+  const owned = db
+    .select({ id: garment.id })
+    .from(garment)
+    .where(
+      and(
+        eq(garment.ownerId, ownerId),
+        inArray(garment.id, [a, b]),
+        ownedGarment(),
+      ),
+    )
+    .orderBy(garment.id)
+    .for('share');
+  const { rows } = await db.execute<{ owned: number; added: number }>(sql`
+    with owned as (${owned}),
+    added as (
+      insert into ${generatorAvoid} (owner_id, garment_a_id, garment_b_id)
+      select ${ownerId}::int, ${a}::int, ${b}::int
+      where (select count(*) from owned) = 2
+      on conflict do nothing
+      returning 1
+    )
+    select (select count(*) from owned)::int as owned,
+      (select count(*) from added)::int as added`);
+  const [{ owned: found, added }] = rows;
+  if (found !== 2) return 'not-found';
+  return added > 0 ? 'added' : 'already';
 }
 
 /** Undo from the garment page: the pair may be combined again. False when there was no such pair of the owner's. */
@@ -418,19 +427,19 @@ export async function avoidedWith(
 /**
  * The owner's outfit whose chosen garments are exactly `garmentIds` (empty
  * slots aside), the oldest if several: what a pick of those garments is
- * already saved as. One statement over the owner's slots.
+ * already saved as. A subquery of pickedGarments.
  */
-export async function outfitOfGarments(
+function outfitOfGarments(
   db: Queryable,
   ownerId: number,
   garmentIds: readonly number[],
-): Promise<{ id: number; name: string | null } | undefined> {
+) {
   const sorted = [...new Set(garmentIds)].sort((a, b) => a - b);
   const wanted = sql`array[${sql.join(
     sorted.map((id) => sql`${id}`),
     sql`, `,
   )}]::int[]`;
-  const [found] = await db
+  return db
     .select({ id: outfit.id, name: outfit.name })
     .from(outfit)
     .innerJoin(outfitSlot, eq(outfitSlot.outfitId, outfit.id))
@@ -440,13 +449,19 @@ export async function outfitOfGarments(
       sql`array_agg(distinct ${outfitSlot.garmentId} order by ${outfitSlot.garmentId}) = ${wanted}`,
     )
     .orderBy(outfit.id)
-    .limit(1);
-  return found;
+    .limit(1)
+    .as('existing');
+}
+
+/** A pick's garments, and the outfit they already are, if any. */
+export interface PickedGarments {
+  garments: { id: number; name: string | null; category: string }[];
+  existing: { id: number; name: string | null } | undefined;
 }
 
 /**
  * A pick's garments: the owner's, in the closet, with what a slot and a
- * name need. Fewer rows than ids when any is not (a card from before the
+ * name need. Fewer than ids when any is not (a card from before the
  * garment was archived or deleted). Locked FOR SHARE until the pick
  * commits: an archive or a delete (setGarmentStatus, deleteGarment: FOR
  * UPDATE) waits for the outfit to be saved, and one that got there first
@@ -454,16 +469,26 @@ export async function outfitOfGarments(
  * locked row again as that transaction committed it), so a pick never
  * saves an archived garment or a slot emptied by a delete (#122). In id
  * order, as bulkSetProperty locks them, so two such lockers cannot
- * deadlock.
+ * deadlock. With them, in the same statement (#168: a round trip less on
+ * every pick), the outfit they already are (outfitOfGarments), joined to
+ * each row; only the garments are locked (FOR SHARE OF garment).
  */
 export async function pickedGarments(
   db: Queryable,
   ownerId: number,
   garmentIds: readonly number[],
-): Promise<{ id: number; name: string | null; category: string }[]> {
-  return db
-    .select({ id: garment.id, name: garment.name, category: garment.category })
+): Promise<PickedGarments> {
+  const existing = outfitOfGarments(db, ownerId, garmentIds);
+  const rows = await db
+    .select({
+      id: garment.id,
+      name: garment.name,
+      category: garment.category,
+      existingId: existing.id,
+      existingName: existing.name,
+    })
     .from(garment)
+    .leftJoin(existing, sql`true`)
     .where(
       and(
         eq(garment.ownerId, ownerId),
@@ -472,5 +497,14 @@ export async function pickedGarments(
       ),
     )
     .orderBy(garment.id)
-    .for('share');
+    .for('share', { of: garment });
+  // The outfit is the same on every row; none when no garment was found.
+  const [first] = rows;
+  return {
+    garments: rows.map(({ id, name, category }) => ({ id, name, category })),
+    existing:
+      first === undefined || first.existingId === null
+        ? undefined
+        : { id: first.existingId, name: first.existingName },
+  };
 }

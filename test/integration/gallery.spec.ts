@@ -11,7 +11,13 @@ import { addDays } from '../../src/web/calendar/calendar-date';
 import { pickIdea } from '../../src/web/gallery/ideas';
 import { startWeatherStub, type WeatherStub } from '../support/weather-stub';
 import { createWishlistItem } from './garments';
-import { createTestApp, type TestApp, unescapeHtml, userIdOf } from './harness';
+import {
+  createTestApp,
+  recordQueries,
+  type TestApp,
+  unescapeHtml,
+  userIdOf,
+} from './harness';
 import { callTool, createAccessToken } from './mcp';
 import { expectFragment, expectFullPage, HX_FRAGMENT } from './pages';
 
@@ -815,6 +821,89 @@ describe('outfit gallery', () => {
       expect(page).toContain('With Tops');
       expect(page).toMatch(/>\s*Tops \+ Bottom \d\s*</);
       expect(page).not.toMatch(/>\s*\+ /);
+    });
+  });
+
+  // Production reaches Postgres over a link where each statement is a round
+  // trip (#156), so each route's count is pinned: a new read shows up here.
+  // Every request's first statement is the session's user.
+  describe('statements per request (#168)', () => {
+    it('the page: the pool, saved outfits, clashes and the capsule menu', async () => {
+      const read = await recordQueries(() => get('/outfits/ideas'));
+      expect(read.statements).toBe(5);
+      const more = await recordQueries(() =>
+        t.inject({
+          method: 'GET',
+          url: '/outfits/ideas/more?seed=7&page=2',
+          headers: HX_FRAGMENT,
+        }),
+      );
+      // No capsule menu on a fragment.
+      expect(more.statements).toBe(4);
+    });
+
+    it('a clash is one statement, and refuses a wishlist item in it', async () => {
+      const [a, b] = [tops[2], shoes[0]];
+      const clash = (ids: number[]) =>
+        t.inject({
+          method: 'POST',
+          url: '/outfits/ideas/avoid',
+          ...form({ garmentId: ids.map(String) }),
+        });
+      const added = await recordQueries(() => clash([a, b]));
+      expect(added.statements).toBe(2);
+      const again = await recordQueries(() => clash([b, a]));
+      expect(again.statements).toBe(2);
+      expect((await clash([a, wishlistTee])).statusCode).toBe(404);
+      // An archived garment is still owned: it may come back.
+      expect((await clash([a, archivedTee])).statusCode).toBe(303);
+      const pairs = await t.db
+        .select({ b: generatorAvoid.garmentBId })
+        .from(generatorAvoid)
+        .where(eq(generatorAvoid.garmentAId, Math.min(a, b)));
+      expect(pairs.map((pair) => pair.b).sort()).toEqual(
+        [Math.max(a, b), archivedTee].sort(),
+      );
+      for (const pair of [
+        [a, b],
+        [a, archivedTee],
+      ]) {
+        const allowed = await t.inject({
+          method: 'POST',
+          url: '/outfits/ideas/allow',
+          ...form({ garmentId: pair.map(String) }),
+        });
+        expect(allowed.statusCode).toBe(303);
+      }
+    });
+
+    it('a pick reads its garments and the outfit they already are in one statement', async () => {
+      const garments = [tops[0], bottoms[1], shoes[1]].map(String);
+      const pick = () =>
+        t.inject({
+          method: 'POST',
+          url: '/outfits/ideas/pick',
+          ...form({ garmentId: garments }),
+        });
+      const first = await recordQueries(pick);
+      const again = await recordQueries(pick);
+      const reads = (sql: string[]) =>
+        sql.filter((q) => /^select .* from "garment"/.test(q));
+      // One read of the garments (FOR SHARE) with the outfit they already
+      // are; the slots check their garments in their own insert.
+      for (const record of [first, again]) {
+        expect(reads(record.sql)).toHaveLength(1);
+        expect(reads(record.sql)[0]).toMatch(/for share of "garment"$/);
+      }
+      // The session; begin, lock timeout and the owner lock; the read; the
+      // outfit within createOutfit's savepoint (savepoint, outfit, slots,
+      // release; #213); commit.
+      expect(first.statements).toBe(10);
+      expect(again.sql.some((q) => q.startsWith('insert into "outfit"'))).toBe(
+        false,
+      );
+      // Already saved: the read, then the planner's take-over, nothing else.
+      expect(again.statements).toBe(7);
     });
   });
 });
