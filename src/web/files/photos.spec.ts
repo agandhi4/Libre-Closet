@@ -229,7 +229,7 @@ describe('Photos.saveEditedCutout', () => {
 
     await expect(
       photos.saveEditedCutout(Readable.from(await png(300)), 'a.webp'),
-    ).resolves.toBe(2);
+    ).resolves.toMatchObject({ fileName: 'a.webp', version: 2 });
     const key = writtenKey();
     expect(key).toMatch(/^[0-9a-f]{12}$/);
     expect(
@@ -263,7 +263,7 @@ describe('Photos.saveEditedCutout', () => {
 
     await expect(
       photos.saveEditedCutout(Readable.from(await png(300)), 'a.webp'),
-    ).resolves.toBe(2);
+    ).resolves.toMatchObject({ fileName: 'a.webp', version: 2 });
     const key = writtenKey();
     expect(photoFiles().sort()).toEqual(
       [
@@ -338,7 +338,7 @@ describe('Photos.saveEditedCutout', () => {
 
     await expect(
       photos.saveEditedCutout(Readable.from(await png(300)), 'a.webp'),
-    ).resolves.toBe(2);
+    ).resolves.toMatchObject({ fileName: 'a.webp', version: 2 });
     const key = writtenKey();
     expect(photoFiles().sort()).toEqual(
       [

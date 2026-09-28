@@ -1,6 +1,7 @@
 import { asc, eq, isNotNull } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { garment, outfit, outfitSlot } from '../../db/schema';
+import { PHOTO_REF_RELATION } from '../files/queries';
 
 /**
  * The public share page's reads: a garment or an outfit by its share id,
@@ -14,7 +15,7 @@ import { garment, outfit, outfitSlot } from '../../db/schema';
 const OWNER_COLUMNS = { columns: { firstName: true } } as const;
 
 const PHOTO_COLUMNS = {
-  columns: { fileName: true, version: true, shareableId: true },
+  columns: { ...PHOTO_REF_RELATION.columns, shareableId: true },
 } as const;
 
 export async function findSharedGarment(db: Db, shareableId: string) {

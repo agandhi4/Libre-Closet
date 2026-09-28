@@ -6,6 +6,7 @@ import { selectScalars } from '../../db/select-scalars';
 import type { Condition } from '../../wardrobe/properties';
 import type { GarmentStatus } from '../../wardrobe/status';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS } from '../files/queries';
 import { inCloset, onWishlist, ownedGarment } from '../wardrobe/status';
 
 /**
@@ -55,7 +56,7 @@ export async function wishlistItems(
       category: garment.category,
       price: garment.price,
       sourceUrl: garment.sourceUrl,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
       replaces: {
         id: replacedGarment.id,
         name: replacedGarment.name,

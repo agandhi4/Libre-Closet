@@ -18,6 +18,7 @@ import {
 import { isUniqueViolation } from '../../db/errors';
 import { ownerTransaction } from '../auth/queries';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS } from '../files/queries';
 import { inCloset } from '../wardrobe/status';
 import {
   PLAN_NAME_MAX,
@@ -239,7 +240,7 @@ export async function closetPieces(
       quantity: garment.quantity,
       condition: garment.condition,
       price: garment.price,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))

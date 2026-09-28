@@ -27,6 +27,7 @@ import { inCapsule } from '../capsules/queries';
 import type { ImageRef, PlinthPhoto } from '../files/image-url';
 import type { StoredPhoto } from '../files/image-variant';
 import {
+  PHOTO_REF_COLUMNS,
   PLINTH_PHOTO_COLUMNS,
   plinthPhoto,
   STORED_PHOTO_COLUMNS,
@@ -475,11 +476,7 @@ const detailColumns = {
   lastWashedOn: garment.lastWashedOn,
   away: garment.away,
   awayNote: garment.awayNote,
-  photo: {
-    fileName: file.fileName,
-    version: file.version,
-    cutoutStatus: file.cutoutStatus,
-  },
+  photo: { ...PHOTO_REF_COLUMNS, cutoutStatus: file.cutoutStatus },
 };
 
 /** The garment in `ownerId`'s wardrobe, or undefined. */

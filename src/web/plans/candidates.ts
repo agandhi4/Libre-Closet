@@ -17,6 +17,7 @@ import {
 import { ownerTransaction } from '../auth/queries';
 import { HttpError } from '../errors';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS } from '../files/queries';
 import { t } from '../i18n';
 import { onWishlist } from '../wardrobe/status';
 import { itemNotFound } from './validation';
@@ -347,7 +348,7 @@ function candidateRows(db: Queryable, ownerId: number, which: SQL) {
       formality: garment.formality,
       price: garment.price,
       sourceUrl: garment.sourceUrl,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(planItemCandidate)
     .innerJoin(planItem, eq(planItem.id, planItemCandidate.planItemId))

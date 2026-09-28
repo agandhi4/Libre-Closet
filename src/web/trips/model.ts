@@ -12,6 +12,7 @@ import {
 } from '../../wardrobe/packing';
 import type { IsoDate } from '../calendar/calendar-date';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS, PHOTO_REF_RELATION } from '../files/queries';
 import type { CollageGarment } from '../outfits/collage';
 import { wearsSinceWashSql } from '../wears/queries';
 import {
@@ -100,7 +101,7 @@ async function tripOutfitViews(
             with: {
               garment: {
                 columns: { id: true, name: true, category: true },
-                with: { photo: { columns: { fileName: true, version: true } } },
+                with: { photo: PHOTO_REF_RELATION },
               },
             },
           },
@@ -141,7 +142,7 @@ async function packingGarments(
       washAfterWears: garment.washAfterWears,
       status: garment.status,
       away: garment.away,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
       wearsSinceWash: wearsSinceWashSql(),
       packed: sql<boolean>`exists (select 1 from ${tripGarmentPacked} where ${tripGarmentPacked.tripId} = ${tripId} and ${tripGarmentPacked.garmentId} = ${garment.id})`,
     })

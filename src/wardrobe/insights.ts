@@ -82,7 +82,12 @@ export interface InsightGarment {
    */
   repairCost: string | null;
   condition: Condition;
-  photo: { fileName: string; version: number } | null;
+  /** Its URL's parts (an ImageRef, src/web/files/image-url.ts). */
+  photo: {
+    fileName: string;
+    version: number;
+    variantKey: string | null;
+  } | null;
   /** 'YYYY-MM-DD', null without a date (a recap's new additions). */
   acquiredOn: string | null;
   /** Distinct days worn, ever (up to the window's last day). */

@@ -24,6 +24,7 @@ import type { Occasion } from '../../wardrobe/occasions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_RELATION, photoRefJson } from '../files/queries';
 import type { IsoDate } from '../calendar/calendar-date';
 import { insertEntry, type ScheduleOutcome } from '../calendar/queries';
 import type { SelfieRef } from '../selfies/queries';
@@ -124,7 +125,7 @@ async function outfitsWithGarments(
         with: {
           garment: {
             columns: { id: true, name: true, category: true },
-            with: { photo: { columns: { fileName: true, version: true } } },
+            with: { photo: PHOTO_REF_RELATION },
           },
         },
       },
@@ -175,9 +176,7 @@ export function outfitsWithGarmentSql(
           'id', ${garment.id},
           'name', ${garment.name},
           'category', ${garment.category},
-          'photo', case when ${file.id} is null then null else json_build_object(
-            'fileName', ${file.fileName}, 'version', ${file.version}
-          ) end
+          'photo', ${photoRefJson}
         )
         order by ${outfitSlot.position}
       ),

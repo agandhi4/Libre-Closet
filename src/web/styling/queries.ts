@@ -11,6 +11,7 @@ import {
 } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { file, garment, outfit, outfitSlot } from '../../db/schema';
+import { PHOTO_REF_COLUMNS, PHOTO_REF_RELATION } from '../files/queries';
 import {
   builtInCategoriesOf,
   categoryRole,
@@ -56,8 +57,6 @@ function cycleOf(ownerId: number, capsuleId: number | undefined): SQL {
     capsuleId === undefined ? undefined : inCapsule(capsuleId),
   )!;
 }
-
-const photoColumns = { fileName: file.fileName, version: file.version };
 
 /**
  * Every role the wardrobe (or the capsule) has closet garments of, each
@@ -121,7 +120,7 @@ export async function roleWindows(
       status: deepest.status,
       role: deepest.role,
       count: deepest.count,
-      photo: photoColumns,
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(deepest)
     .leftJoin(file, eq(file.id, deepest.photoId))
@@ -153,7 +152,7 @@ export async function roleGarmentsBefore(
       name: garment.name,
       category: garment.category,
       status: garment.status,
-      photo: photoColumns,
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))
@@ -196,7 +195,7 @@ export async function ownGarments(
       name: garment.name,
       category: garment.category,
       status: garment.status,
-      photo: photoColumns,
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))
@@ -233,7 +232,7 @@ export async function savedGarments(
         with: {
           garment: {
             columns: { id: true, name: true, category: true, status: true },
-            with: { photo: { columns: { fileName: true, version: true } } },
+            with: { photo: PHOTO_REF_RELATION },
           },
         },
       },

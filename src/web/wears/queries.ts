@@ -16,6 +16,7 @@ import {
 import { ownerTransaction } from '../auth/queries';
 import type { IsoDate } from '../calendar/calendar-date';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS } from '../files/queries';
 import type { GarmentDetail } from '../wardrobe/queries';
 import { repairCostSql } from '../wardrobe/repairs';
 import { inCloset, onWishlist, ownedGarment } from '../wardrobe/status';
@@ -213,7 +214,7 @@ export async function laundryList(
       id: garment.id,
       name: garment.name,
       category: garment.category,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
       quantity: garment.quantity,
       dirty: dirtyCopiesSql(),
     })

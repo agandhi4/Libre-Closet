@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { notifyCutoutQueued } from '../../cutout/queries';
+import { CUTOUT_QUEUED_NOTIFY } from '../../cutout/queries';
 import {
   type CutoutStatus,
   type InitialCutoutColumns,
@@ -10,13 +10,37 @@ import { file, garment } from '../../db/schema';
 import type { PlinthPhoto } from './image-url';
 
 /**
+ * A `file` row's columns for imageUrl (an ImageRef): the name, the version
+ * and the variant key its URL signs, so /file/** serves it without a
+ * statement. Every query that feeds a photo to imageUrl selects these (as a
+ * left join's `photo`) or builds photoRefJson; an outfit selfie's never
+ * does (selfieUrl).
+ */
+export const PHOTO_REF_COLUMNS = {
+  fileName: file.fileName,
+  version: file.version,
+  variantKey: file.variantKey,
+};
+
+/** PHOTO_REF_COLUMNS for a relational query's `with: { photo: ... }`. */
+export const PHOTO_REF_RELATION = {
+  columns: { fileName: true, version: true, variantKey: true },
+} as const;
+
+/**
+ * PHOTO_REF_COLUMNS as a JSON object, for a photo inside a json_agg or a
+ * json_build_object; null when the left join found no `file` row (a garment
+ * without a photo).
+ */
+export const photoRefJson = sql`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}, 'variantKey', ${file.variantKey}) end`;
+
+/**
  * A left-joined `file` row's columns for a photo the plinth draws (the
  * wardrobe grid's tiles, the capsule strips): select them as the row's
  * `photo`, then map it through plinthPhoto.
  */
 export const PLINTH_PHOTO_COLUMNS = {
-  fileName: file.fileName,
-  version: file.version,
+  ...PHOTO_REF_COLUMNS,
   cutoutStatus: file.cutoutStatus,
 };
 
@@ -24,6 +48,7 @@ export function plinthPhoto(
   photo: {
     fileName: string;
     version: number;
+    variantKey: string | null;
     cutoutStatus: CutoutStatus;
   } | null,
 ): PlinthPhoto | null {
@@ -80,8 +105,10 @@ export async function insertPhotoRow(
   const [inserted] = await q
     .insert(file)
     .values(row)
-    .returning({ id: file.id });
-  if (row.cutoutStatus === 'pending') await notifyCutoutQueued(q);
+    .returning({
+      id: file.id,
+      ...(row.cutoutStatus === 'pending' && { notified: CUTOUT_QUEUED_NOTIFY }),
+    });
   return inserted.id;
 }
 

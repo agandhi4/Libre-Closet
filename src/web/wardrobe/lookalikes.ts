@@ -11,6 +11,7 @@ import {
 } from '../../wardrobe/properties';
 import { ownerTransaction } from '../auth/queries';
 import type { ImageRef } from '../files/image-url';
+import { PHOTO_REF_COLUMNS } from '../files/queries';
 import { normalizeCategory } from './garment';
 import { inCloset } from './status';
 import {
@@ -81,7 +82,7 @@ export async function closetLookalikes(
       colors: garment.colors,
       brand: garment.brand,
       quantity: garment.quantity,
-      photo: { fileName: file.fileName, version: file.version },
+      photo: PHOTO_REF_COLUMNS,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))

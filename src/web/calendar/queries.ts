@@ -11,6 +11,7 @@ import { selectScalars } from '../../db/select-scalars';
 import type { Occasion } from '../../wardrobe/occasions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
+import { photoRefJson } from '../files/queries';
 import { deleteEntrySelfie, entrySelfieSql } from '../selfies/queries';
 import { type EntryWornOutcome, setEntryWorn } from '../wears/queries';
 import type { IsoDate } from './calendar-date';
@@ -47,8 +48,6 @@ export function entriesSql(
   first: IsoDate,
   last: IsoDate,
 ): SQL<CalendarEntry[]> {
-  const photo = sql`case when ${file.id} is null then null
-    else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}) end`;
   return sql<CalendarEntry[]>`(
     select coalesce(json_agg(json_build_object(
       'id', ${outfitCalendar.id},
@@ -65,7 +64,7 @@ export function entriesSql(
             'id', ${garment.id},
             'name', ${garment.name},
             'category', ${garment.category},
-            'photo', ${photo}
+            'photo', ${photoRefJson}
           ) order by ${outfitSlot.position}), '[]')
           from ${outfitSlot}
           inner join ${garment} on ${garment.id} = ${outfitSlot.garmentId}

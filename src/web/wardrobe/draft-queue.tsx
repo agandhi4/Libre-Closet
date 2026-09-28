@@ -1,5 +1,6 @@
 import { PostForm } from '../auth/form';
 import { imageUrl } from '../files/image-url';
+import { unkeyedPhoto } from '../files/image-variant';
 import { t } from '../i18n';
 import { DRAFT_DISCARD_PATH, draftUrl, wardrobeUrl } from './urls';
 import { idListValue } from './validation';
@@ -96,7 +97,7 @@ export function DraftQueueSection(props: {
                   class={`block rounded-box ${isCurrent ? 'ring-2 ring-primary' : ''}`}
                 >
                   <img
-                    src={imageUrl({ fileName: draft.fileName }, 'thumb')}
+                    src={imageUrl(unkeyedPhoto(draft.fileName), 'thumb')}
                     alt=""
                     width="48"
                     height="48"
