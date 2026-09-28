@@ -243,6 +243,40 @@ describe('storage reconciliation', () => {
     );
   });
 
+  // A thumb backfilled across a swap: a request that resolved the old key
+  // regenerates its thumb after the swap deleted it. Derived, never the one
+  // copy of anything, so no restore warning keeps it.
+  it("deletes a lone superseded thumb newer than the row's set, without a restore warning", async () => {
+    const { fileName, current } = await keyedPhoto('Backfilled', 4 * DAY_MS);
+    const loneThumb = variantFileName(fileName, 'thumb', 'aaaaaaaaaaaa');
+    await writeAged(loneThumb, 2 * DAY_MS);
+    t.logs.clear();
+
+    const report = await reconcileLogged();
+
+    expect(report.supersededVariantsDeleted).toBe(1);
+    const files = await storedFiles();
+    expect(files).not.toContain(loneThumb);
+    expect(files).toEqual(expect.arrayContaining(current));
+    expect(
+      t.logs.messages('warn').filter((message) => message.includes(fileName)),
+    ).toEqual([]);
+  });
+
+  it("keeps a lone superseded cutout newer than the row's set, with the warning", async () => {
+    const { fileName, variantKey } = await keyedPhoto('Lone cut', 4 * DAY_MS);
+    const loneNobg = variantFileName(fileName, 'nobg', 'bbbbbbbbbbbb');
+    await writeAged(loneNobg, 2 * DAY_MS);
+    t.logs.clear();
+
+    await reconcileLogged();
+
+    expect(await storedFiles()).toContain(loneNobg);
+    expect(t.logs.messages('warn')).toContainEqual(
+      `Keeping variant key bbbbbbbbbbbb of ${fileName}: newer than the row's variant (key ${variantKey}): database restored behind storage?`,
+    );
+  });
+
   it("deletes nothing of a photo whose row's own set is missing", async () => {
     const { fileName, variantKey, current } = await keyedPhoto(
       'Lost cut',

@@ -334,9 +334,10 @@ function holdsOriginal(
  * write replaced. A set goes only when every file of it is older than the
  * cutoff (a younger one may be a write between its files and its swap,
  * Photos.writeCutout) and older than every file of the set the row points
- * at. Fails safe, never destroying the newest bytes: a set newer than the
- * row's is what a database restored behind its storage looks like (the
- * row names an older key), so it is kept and logged; a row whose own files
+ * at. Fails safe, never destroying the newest bytes: a set with a cutout
+ * newer than the row's is what a database restored behind its storage
+ * looks like (the row names an older key), so it is kept and logged (a
+ * lone thumb is not: it is derived, and goes by the cutoff alone); a row whose own files
  * are not in storage deletes nothing, since nothing then says which set is
  * the older one.
  */
@@ -382,7 +383,14 @@ function staleVariantsOf(
   const stale: string[] = [];
   for (const [key, files] of others) {
     if (files.some((object) => object.lastModified >= cutoff)) continue;
+    // Only a set with a cutout can be the one copy of anything; a lone
+    // thumb is derived (and regenerable) and is what a thumb backfilled
+    // across a swap leaves under the old key, newer than the row's set.
+    const hasCutout = files.some(
+      (object) => parseStoredName(object.name)?.variant === 'nobg',
+    );
     if (
+      hasCutout &&
       files.some((object) => object.lastModified.getTime() >= currentOldest)
     ) {
       logger.warn(
