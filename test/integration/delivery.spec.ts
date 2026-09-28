@@ -100,6 +100,8 @@ describe('delivery (PWA_ENABLED=true)', () => {
       expect(res.headers['cache-control']).toBe(
         'public, max-age=31536000, immutable',
       );
+      // The request metrics' onSend adds a header and leaves the body alone.
+      expect(res.headers['server-timing']).toBeDefined();
       // The variant on disk, byte for byte: not compressed again on the way.
       expect(res.rawPayload.equals(file(`${path}.br`))).toBe(true);
       expect(brotliDecompressSync(res.rawPayload).equals(file(path))).toBe(

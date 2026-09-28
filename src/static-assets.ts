@@ -9,7 +9,8 @@ import { PROJECT_ROOT } from './project-root';
 
 // Everything served from disk lives here, the build's output included:
 // bundle.css, sw.js and vendor/ are generated, and modules/ holds the client
-// libraries copied out of node_modules (scripts/static-assets.ts).
+// libraries copied out of node_modules (scripts/static-assets.ts). The
+// design: src/web/shell/static-delivery.md.
 export const PUBLIC_DIR = join(PROJECT_ROOT, 'public');
 
 // The encodings the build writes next to a file (`bundle.css.br`,
