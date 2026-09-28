@@ -1,6 +1,7 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
 import type { Queryable } from '../../db/client';
 import { userWeather, weatherForecast, weatherNormals } from '../../db/schema';
+import { selectScalars } from '../../db/select-scalars';
 import type { Forecast } from '../../weather/forecast';
 import type { Location } from '../../weather/location';
 import type { ClimateNormals } from '../../weather/normals';
@@ -82,41 +83,158 @@ export async function findWeatherSettings(
   return row ? settingsOf(row) : NO_WEATHER_SETTINGS;
 }
 
-/** A user's settings and their active location's forecast row, read together. */
+/** The user's settings, and the active location's forecast cache row. */
 export interface WeatherWithForecast {
   settings: WeatherSettings;
-  /**
-   * The row of the location activeLocation picks; null when none is active
-   * (or the statement joined another place); `row` undefined when that
-   * location has no cache row yet.
-   */
   forecast: { row: CacheRow<Forecast> | undefined } | null;
 }
 
 /**
- * The user's settings and, in the same statement, the forecast cache row
- * of the location they make active at `now` (activeLocation's rule in SQL:
- * the phone's location while younger than HERE_FRESH_HOURS, else home),
- * for userWeather (service.ts). One round trip where settings then row
- * were two, on every page's weather line, Today and its ideas (#158).
- * `forecast` is null unless the location the statement joined is the one
- * activeLocation picks, so the two rules can never serve one place's
+ * weatherWithForecastSql's value, as JSON has it: numerics are numbers,
+ * timestamps ISO strings (readWeatherWithForecast makes them Dates).
+ */
+export interface WeatherWithForecastJson {
+  settings: Omit<typeof userWeather.$inferSelect, 'hereLocatedAt'> & {
+    hereLocatedAt: string | null;
+  };
+  joinedLatitude: number | null;
+  joinedLongitude: number | null;
+  value: Forecast | null;
+  fetchedAt: string | null;
+  attemptedAt: string | null;
+}
+
+/**
+ * The user's settings and the forecast cache row of the location they make
+ * active at `now` (activeLocation's rule in SQL: the phone's location while
+ * younger than HERE_FRESH_HOURS, else home), as a scalar subquery, so a page
+ * reads it in one statement with its other reads (selectScalars: the
+ * outfit gallery's ideasFor, #168). Null when the user never set anything.
+ * findWeatherWithForecast reads it on its own.
+ */
+export function weatherWithForecastSql(
+  userId: number,
+  now: Date,
+): SQL<WeatherWithForecastJson | null> {
+  const { json, from } = weatherWithForecastParts(now);
+  return sql<WeatherWithForecastJson | null>`(
+    select ${json} ${from} where ${eq(userWeather.userId, userId)})`;
+}
+
+/**
+ * weatherWithForecastSql for several users, as one scalar subquery (a JSON
+ * list, one element per user with a settings row): a batch job's read
+ * (findWeathersWithForecast, #165), where a read per user was an N+1.
+ */
+export function weathersWithForecastSql(
+  userIds: readonly number[],
+  now: Date,
+): SQL<WeatherWithForecastJson[]> {
+  const { json, from } = weatherWithForecastParts(now);
+  return sql<WeatherWithForecastJson[]>`(
+    select coalesce(json_agg(${json}), '[]') ${from}
+    where ${inArray(userWeather.userId, [...userIds])})`;
+}
+
+// The one definition of a user's weather-with-forecast value and the join
+// it is read from; the two subqueries above differ only in their WHERE.
+function weatherWithForecastParts(now: Date): { json: SQL; from: SQL } {
+  const hereSince = new Date(now.getTime() - HERE_FRESH_HOURS * 3_600_000);
+  const hereFresh = sql`${userWeather.hereLocatedAt} > ${hereSince}`;
+  const latitude = sql`case when ${hereFresh}
+    then ${userWeather.hereLatitude} else ${userWeather.homeLatitude} end`;
+  const longitude = sql`case when ${hereFresh}
+    then ${userWeather.hereLongitude} else ${userWeather.homeLongitude} end`;
+  return {
+    json: sql`json_build_object(
+      'settings', json_build_object(
+        'userId', ${userWeather.userId},
+        'homeName', ${userWeather.homeName},
+        'homeLatitude', ${userWeather.homeLatitude},
+        'homeLongitude', ${userWeather.homeLongitude},
+        'hereLatitude', ${userWeather.hereLatitude},
+        'hereLongitude', ${userWeather.hereLongitude},
+        'hereLocatedAt', ${userWeather.hereLocatedAt},
+        'temperatureOffset', ${userWeather.temperatureOffset},
+        'temperatureUnit', ${userWeather.temperatureUnit}
+      ),
+      'joinedLatitude', ${latitude},
+      'joinedLongitude', ${longitude},
+      'value', ${weatherForecast.forecast},
+      'fetchedAt', ${weatherForecast.fetchedAt},
+      'attemptedAt', ${weatherForecast.attemptedAt}
+    )`,
+    from: sql`from ${userWeather}
+    left join ${weatherForecast}
+      on ${weatherForecast.latitude} = ${latitude}
+      and ${weatherForecast.longitude} = ${longitude}`,
+  };
+}
+
+/**
+ * weatherWithForecastSql's value as userWeather (service.ts) decides from
+ * it. `forecast` is null unless the location the statement joined is the
+ * one activeLocation picks, so the two rules can never serve one place's
  * forecast for another; its `row` is undefined when that location has no
  * cache row yet.
+ */
+export function readWeatherWithForecast(
+  json: WeatherWithForecastJson | null,
+  now: Date,
+): WeatherWithForecast {
+  if (!json) return { settings: NO_WEATHER_SETTINGS, forecast: null };
+  const { hereLocatedAt } = json.settings;
+  const settings = settingsOf({
+    ...json.settings,
+    hereLocatedAt: hereLocatedAt === null ? null : new Date(hereLocatedAt),
+  });
+  const active = activeLocation(settings, now);
+  const joined = json.joinedLatitude !== null &&
+    json.joinedLongitude !== null && {
+      latitude: json.joinedLatitude,
+      longitude: json.joinedLongitude,
+    };
+  if (!active || !joined || !sameLocation(joined, active.location)) {
+    return { settings, forecast: null };
+  }
+  const { value, fetchedAt, attemptedAt } = json;
+  return {
+    settings,
+    forecast: {
+      // attempted_at is never null in a row: null is "none joined".
+      row:
+        attemptedAt === null
+          ? undefined
+          : {
+              value,
+              fetchedAt: fetchedAt === null ? null : new Date(fetchedAt),
+              attemptedAt: new Date(attemptedAt),
+            },
+    },
+  };
+}
+
+/**
+ * The user's settings and their active location's forecast cache row, in
+ * one statement (weatherWithForecastSql), for userWeather (service.ts): one
+ * round trip where settings then row were two, on every page's weather
+ * line, Today and its ideas (#158).
  */
 export async function findWeatherWithForecast(
   db: Queryable,
   userId: number,
   now: Date,
 ): Promise<WeatherWithForecast> {
-  const found = await findWeathersWithForecast(db, [userId], now);
-  return found.get(userId) ?? { settings: NO_WEATHER_SETTINGS, forecast: null };
+  const { weather } = await selectScalars(db, {
+    weather: weatherWithForecastSql(userId, now),
+  });
+  return readWeatherWithForecast(weather, now);
 }
 
 /**
- * findWeatherWithForecast for several users in one statement: a batch
- * job's (refreshForecastsFor), where a read per user was an N+1 (#165). A
- * user without a settings row is absent from the map.
+ * findWeatherWithForecast for several users in one statement
+ * (weathersWithForecastSql): the batch job's (refreshForecastsFor). A user
+ * without a settings row is absent from the map.
  */
 export async function findWeathersWithForecast(
   db: Queryable,
@@ -125,57 +243,11 @@ export async function findWeathersWithForecast(
 ): Promise<Map<number, WeatherWithForecast>> {
   const found = new Map<number, WeatherWithForecast>();
   if (userIds.length === 0) return found;
-  const hereSince = new Date(now.getTime() - HERE_FRESH_HOURS * 3_600_000);
-  const hereFresh = sql`${userWeather.hereLocatedAt} > ${hereSince}`;
-  // numeric arrives as text unless mapped, like the columns' own mode.
-  const latitude = sql<number | null>`case when ${hereFresh}
-    then ${userWeather.hereLatitude} else ${userWeather.homeLatitude} end`.mapWith(
-    Number,
-  );
-  const longitude = sql<number | null>`case when ${hereFresh}
-    then ${userWeather.hereLongitude} else ${userWeather.homeLongitude} end`.mapWith(
-    Number,
-  );
-  const rows = await db
-    .select({
-      settings: userWeather,
-      joinedLatitude: latitude,
-      joinedLongitude: longitude,
-      value: weatherForecast.forecast,
-      fetchedAt: weatherForecast.fetchedAt,
-      attemptedAt: weatherForecast.attemptedAt,
-    })
-    .from(userWeather)
-    .leftJoin(
-      weatherForecast,
-      and(
-        eq(weatherForecast.latitude, latitude),
-        eq(weatherForecast.longitude, longitude),
-      ),
-    )
-    .where(inArray(userWeather.userId, [...new Set(userIds)]));
-  for (const row of rows) {
-    const settings = settingsOf(row.settings);
-    const active = activeLocation(settings, now);
-    const joined = row.joinedLatitude !== null &&
-      row.joinedLongitude !== null && {
-        latitude: row.joinedLatitude,
-        longitude: row.joinedLongitude,
-      };
-    const { value, fetchedAt, attemptedAt } = row;
-    found.set(row.settings.userId, {
-      settings,
-      forecast:
-        !active || !joined || !sameLocation(joined, active.location)
-          ? null
-          : {
-              // attempted_at is never null in a row: null is "none joined".
-              row:
-                attemptedAt === null
-                  ? undefined
-                  : { value, fetchedAt, attemptedAt },
-            },
-    });
+  const { weathers } = await selectScalars(db, {
+    weathers: weathersWithForecastSql([...new Set(userIds)], now),
+  });
+  for (const json of weathers) {
+    found.set(json.settings.userId, readWeatherWithForecast(json, now));
   }
   return found;
 }
