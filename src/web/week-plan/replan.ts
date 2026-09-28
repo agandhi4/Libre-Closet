@@ -25,7 +25,7 @@ import { t, type StringKey } from '../i18n';
 import type { PushPayload } from '../push/payload';
 import { morningReminderDevices } from '../push/queries';
 import type { PushSender } from '../push/sender';
-import type { WeatherService } from '../weather/service';
+import { refreshForecastsFor, type WeatherService } from '../weather/service';
 import { readWeek, weekForecast, writeAutoPick } from './plan';
 import {
   autoEntries,
@@ -134,7 +134,15 @@ export async function replanWeeks(
   };
   if (hourIn(deps.timeZone, now) < REPLAN_HOUR) return run;
   const today = todayIn(deps.timeZone, now);
-  for (const userId of await replanCandidates(deps.db, today)) {
+  const candidates = await replanCandidates(deps.db, today);
+  if (deps.weather && candidates.length > 0) {
+    await refreshForecastsFor(
+      { db: deps.db, weather: deps.weather, logger: deps.logger },
+      candidates,
+      now,
+    );
+  }
+  for (const userId of candidates) {
     const outcome = await replanToday(deps, userId, now);
     if (outcome.kind === 'skipped') continue;
     run.claimed += 1;
@@ -228,9 +236,9 @@ async function claimAfterFailure(
  * transaction under the owner lock (every calendar write takes it: a
  * "Plan my week", a pick, scheduling, a worn tap, a delete or an outfit
  * edit waits for the re-plan or the re-plan for it, so no entry turns the
- * person's between the judgement and the swap) that also claims the day: undefined when there is no
- * auto entry (nothing claimed: a week planned later today is judged by a
- * later run) or the day was claimed already. A kept entry records its new
+ * person's between the judgement and the swap) that also claims the day:
+ * undefined when there is no auto entry (nothing claimed: a week planned
+ * later today is judged by a later run) or the day was claimed already. A kept entry records its new
  * targets; a swap plans the new idea in the same batch, then removes the
  * old entry (and the outfit the planner made for it, if nothing else holds
  * it). Its forecast is read first, outside the lock.
@@ -241,7 +249,10 @@ async function replanUser(
   now: Date,
 ): Promise<{ swaps: Swap[]; kept: number } | undefined> {
   const today = todayIn(deps.timeZone, now);
-  const forecast = await weekForecast(deps, userId, now);
+  // Not `fresh`: its callers (the minutely run, the morning reminder)
+  // refreshed their batch's forecasts together first (refreshForecastsFor).
+  // Read before the owner lock: a network wait must never hold it.
+  const forecast = await weekForecast(deps, userId, now, {});
   return ownerTransaction(deps.db, userId, async (tx) => {
     const auto = await autoEntries(tx, userId, today);
     if (auto.length === 0) return undefined;
