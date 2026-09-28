@@ -16,7 +16,8 @@ import type { PlannerGarment } from '../../wardrobe/week-planner';
 import { matchGarment } from '../../weather/match';
 import type { IsoDate } from '../calendar/calendar-date';
 import { inCapsule } from '../capsules/queries';
-import type { ImageRef } from '../files/image-url';
+import type { SignablePhotoRef } from '../files/image-url';
+import { photoRefJson, readPhotoRef } from '../files/queries';
 import { sameGarmentsOutfit } from '../outfits/queries';
 import { inCloset, onWishlist, ownedGarment } from '../wardrobe/status';
 import { availableGarment, wearsSinceWashSql } from '../wears/queries';
@@ -32,7 +33,7 @@ import { availableGarment, wearsSinceWashSql } from '../wears/queries';
 export interface PoolGarment extends IdeaGarment {
   name: string | null;
   category: string;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
 }
 
 /** What the generator judges a garment by, and what a card names. */
@@ -52,7 +53,7 @@ const garmentColumns = {
 /** garmentColumns and the card's photo. */
 const drawnColumns = {
   ...garmentColumns,
-  photo: { fileName: file.fileName, version: file.version },
+  photo: photoRefJson,
 };
 
 /** Days since the last day worn (wears count by day); null when never. */
@@ -68,15 +69,14 @@ const poolColumns = (today: IsoDate) => ({
   idleDays: idleDaysSql(today),
 });
 
-function poolQuery(db: Queryable, today: IsoDate, where: SQL | undefined) {
-  return db
-    .select(poolColumns(today))
-    .from(garment)
-    .leftJoin(file, eq(file.id, garment.photoId))
-    .where(where);
-}
-
-export type PoolRow = Awaited<ReturnType<typeof poolQuery>>[number];
+/** A row of poolColumns: weekPool's, and poolJsonSql's JSON (the same keys). */
+export type PoolRow = Pick<
+  typeof garment.$inferSelect,
+  keyof typeof garmentColumns
+> & {
+  photo: SignablePhotoRef | null;
+  idleDays: number | null;
+};
 
 function poolGarment(row: PoolRow): PoolGarment {
   return {
@@ -93,47 +93,52 @@ function poolGarment(row: PoolRow): PoolGarment {
   };
 }
 
-async function selectPool(
-  db: Db,
-  today: IsoDate,
+/**
+ * Garments `where` names as a scalar subquery: a JSON array of
+ * poolColumns' rows (the same keys), read back with readPool. `today`
+ * null reads no last-worn day (idleDays null): for a grantee, who never
+ * learns the owner's wears.
+ */
+function poolJsonSql(
   where: SQL | undefined,
-): Promise<PoolGarment[]> {
-  return (await poolQuery(db, today, where)).map(poolGarment);
+  today: IsoDate | null,
+): SQL<PoolRow[]> {
+  const fields = Object.entries({
+    ...garmentColumns,
+    idleDays: today === null ? sql`null` : idleDaysSql(today),
+  }).map(([key, column]) => sql`${sql.raw(`'${key}'`)}, ${column}`);
+  return sql<PoolRow[]>`(
+    select coalesce(json_agg(json_build_object(
+      ${sql.join(fields, sql`, `)}, 'photo', ${photoRefJson}
+    )), '[]')
+    from ${garment}
+    left join ${file} on ${eq(file.id, garment.photoId)}
+    where ${where}
+  )`;
 }
 
 /**
  * What the generator may draw: the owner's garments that are available
  * (availableGarment: in the closet, not away, a clean copy left), within
- * the capsule when one is given, as a scalar subquery (a JSON array of
- * poolColumns' rows, the same keys), so ideasFor reads it in one statement
- * with the rest of what the generator needs (selectScalars, #168). The
- * last-worn day is a correlated subquery per garment (the garment_wear
- * (garment_id, day) index). Read it with readPool.
+ * the capsule when one is given, as a scalar subquery (poolJsonSql), so
+ * ideasFor reads it in one statement with the rest of what the generator
+ * needs (selectScalars, #168). The last-worn day is a correlated subquery
+ * per garment (the garment_wear (garment_id, day) index).
  */
 export function ideaPoolSql(
   ownerId: number,
   options: { today: IsoDate; capsuleId?: number },
 ): SQL<PoolRow[]> {
-  const fields = Object.entries({
-    ...garmentColumns,
-    idleDays: idleDaysSql(options.today),
-  }).map(([key, column]) => sql`${sql.raw(`'${key}'`)}, ${column}`);
-  // A garment without a photo has none, as drizzle's left join answers it.
-  const photo = sql`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}) end`;
-  return sql<PoolRow[]>`(
-    select coalesce(json_agg(json_build_object(
-      ${sql.join(fields, sql`, `)}, 'photo', ${photo}
-    )), '[]')
-    from ${garment}
-    left join ${file} on ${eq(file.id, garment.photoId)}
-    where ${and(
+  return poolJsonSql(
+    and(
       eq(garment.ownerId, ownerId),
       availableGarment(),
       options.capsuleId === undefined
         ? undefined
         : inCapsule(options.capsuleId),
-    )}
-  )`;
+    ),
+    options.today,
+  );
 }
 
 /** ideaPoolSql's value as the generator's garments. */
@@ -181,24 +186,36 @@ export async function weekPool(
  * person chose them): `?with=`'s garment, Styling's locked rows (#42). The
  * owner's, in the closet; fewer than asked for any that is not (archived,
  * a wishlist item, someone else's, gone). A wishlist item is only ever
- * locked by "Goes with my closet" (goesWithInputsSql).
+ * locked by "Goes with my closet" (goesWithInputsSql). As a scalar
+ * subquery (poolJsonSql), so Styling reads them in the statement that
+ * reads the pool (#163); `today` null for a shared wardrobe's (no wears).
  */
-export function styledGarments(
-  db: Db,
+export function styledGarmentsSql(
   ownerId: number,
   garmentIds: readonly number[],
-  today: IsoDate,
-): Promise<PoolGarment[]> {
-  if (garmentIds.length === 0) return Promise.resolve([]);
-  return selectPool(
-    db,
-    today,
+  today: IsoDate | null,
+): SQL<PoolRow[]> {
+  return poolJsonSql(
     and(
       inArray(garment.id, [...garmentIds]),
       eq(garment.ownerId, ownerId),
       inCloset(),
     ),
+    today,
   );
+}
+
+/** styledGarmentsSql alone, in one statement: the gallery's `?with=`. */
+async function styledGarments(
+  db: Db,
+  ownerId: number,
+  garmentIds: readonly number[],
+  today: IsoDate,
+): Promise<PoolGarment[]> {
+  const { styled } = await selectScalars(db, {
+    styled: styledGarmentsSql(ownerId, garmentIds, today),
+  });
+  return readPool(styled);
 }
 
 /** `?with=`'s garment (styledGarments), or undefined. */
@@ -236,7 +253,7 @@ type DrawnRow = Omit<PoolRow, 'idleDays'>;
  * (goesWithInputsSql) and carries no key per garment. Null photo fields
  * for a garment without one (the left join).
  */
-type DrawnJson = [
+export type DrawnJson = [
   id: DrawnRow['id'],
   name: DrawnRow['name'],
   category: DrawnRow['category'],
@@ -249,13 +266,14 @@ type DrawnJson = [
   waterResistant: DrawnRow['waterResistant'],
   fileName: string | null,
   version: number | null,
+  variantKey: string | null,
 ];
 
 const drawnJson = sql<DrawnJson>`json_build_array(
   ${garment.id}, ${garment.name}, ${garment.category}, ${garment.colors},
   ${garment.pattern}, ${garment.formality}, ${garment.warmth}, ${garment.type},
   ${garment.fabricWeight}, ${garment.waterResistant},
-  ${file.fileName}, ${file.version}
+  ${file.fileName}, ${file.version}, ${file.variantKey}
 )`;
 
 /** A drawnJson array as a garment that is never rotated. */
@@ -272,9 +290,12 @@ function drawnGarment([
   waterResistant,
   fileName,
   version,
+  variantKey,
 ]: DrawnJson): ClosetGarment {
   const photo =
-    fileName === null || version === null ? null : { fileName, version };
+    fileName === null || version === null
+      ? null
+      : readPhotoRef({ fileName, version, variantKey });
   return {
     ...poolGarment({
       ...{ id, name, category, colors, pattern, formality, warmth, type },
@@ -290,13 +311,14 @@ function drawnGarment([
  * capsule when given, as a scalar subquery: "Goes with my closet" judges a
  * purchase against what the owner has, not against what is clean today,
  * so the answer does not move on laundry day; Styling's Shuffle over a
- * shared wardrobe (#42, browseIdea) draws from it because a grantee never
- * learns the owner's wash and away state. Never the owner's own gallery
+ * shared wardrobe (#42, browseIdea; read with the rows in Styling's
+ * statement, #163) draws from it because a grantee never learns the
+ * owner's wash and away state. Never the owner's own gallery
  * pool: ideas draw from ideaPoolSql. Without the pool's last-worn
  * subquery: both readers draw uniformly, so it fed nothing (#167: one
  * garment_wear lookup per closet garment on every wishlist item's page).
  */
-function closetGarmentsSql(
+export function closetGarmentsSql(
   ownerId: number,
   capsuleId?: number,
 ): SQL<DrawnJson[]> {
@@ -312,16 +334,9 @@ function closetGarmentsSql(
   )`;
 }
 
-/** closetGarmentsSql alone: browseIdea's pool (ideas.ts). */
-export async function closetGarments(
-  db: Queryable,
-  ownerId: number,
-  capsuleId?: number,
-): Promise<ClosetGarment[]> {
-  const { closet } = await selectScalars(db, {
-    closet: closetGarmentsSql(ownerId, capsuleId),
-  });
-  return closet.map(drawnGarment);
+/** closetGarmentsSql's value as garments: browseIdea's pool (ideas.ts). */
+export function readCloset(rows: readonly DrawnJson[]): ClosetGarment[] {
+  return rows.map(drawnGarment);
 }
 
 /**
