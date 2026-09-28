@@ -1,7 +1,15 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { file } from '../../src/db/schema';
 import {
   parseStoredName,
@@ -71,6 +79,37 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
       payload: { direction },
       headers: cookie ? { cookie } : {},
     });
+
+  /** POST /wardrobe/:id/nobg, as the mask editor saves: an opaque width x height PNG. */
+  const saveMask = async (id: number, width: number, height: number) => {
+    const mask = await sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: 200, g: 30, b: 30, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const body = await multipart(
+      {},
+      {
+        nobgPhoto: {
+          data: mask,
+          filename: 'cutout.png',
+          contentType: 'image/png',
+        },
+      },
+    );
+    const res = await t.inject({
+      method: 'POST',
+      url: `/wardrobe/${id}/nobg`,
+      payload: body.payload,
+      headers: body.headers,
+    });
+    expect(res.statusCode).toBe(200);
+  };
 
   const dimensions = async (path: string) => {
     const { width, height } = await sharp(await readFile(path)).metadata();
@@ -184,32 +223,7 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
     await uploadPhoto(t, id, await twoTone());
     const before = await photoFileName(t, id);
     // A 600x400 mask edit: its turn is 400x600.
-    const mask = await sharp({
-      create: {
-        width: 600,
-        height: 400,
-        channels: 4,
-        background: { r: 200, g: 30, b: 30, alpha: 1 },
-      },
-    })
-      .png()
-      .toBuffer();
-    const body = await multipart(
-      {},
-      {
-        nobgPhoto: {
-          data: mask,
-          filename: 'cutout.png',
-          contentType: 'image/png',
-        },
-      },
-    );
-    await t.inject({
-      method: 'POST',
-      url: `/wardrobe/${id}/nobg`,
-      payload: body.payload,
-      headers: body.headers,
-    });
+    await saveMask(id, 600, 400);
     expect(await photoRow(t, before)).toMatchObject({ cutoutStatus: 'edited' });
 
     expect((await rotate(id, 'right')).statusCode).toBe(303);
@@ -233,6 +247,58 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
     expect(t.logs.messages('info', 'Web')).not.toContain(
       `Garment ${id} photo ${after} queued for background removal`,
     );
+    await expectNoOrphans();
+  });
+
+  it('refuses with a 409 when a second mask is saved while the first is turned, and keeps the second', async () => {
+    const id = await createGarment(t, { name: 'Two masks shirt' });
+    await uploadPhoto(t, id, await twoTone());
+    const fileName = await photoFileName(t, id);
+    await saveMask(id, 600, 400); // mask A
+    const maskA = await photoRow(t, fileName);
+    expect(maskA).toMatchObject({ cutoutStatus: 'edited' });
+
+    // The interleaving, in order: the rotate reads its source and turns
+    // mask A; mask B is saved and commits (still `edited`, a new key);
+    // only then does the rotate's swap run.
+    const rotateStored = t.photos.rotateStored.bind(t.photos);
+    let turned: string | undefined;
+    const spy = vi
+      .spyOn(t.photos, 'rotateStored')
+      .mockImplementation(async (...args) => {
+        const result = await rotateStored(...args);
+        turned = result.row.fileName;
+        expect(result.cutoutKept).toBe(true);
+        await saveMask(id, 500, 400); // mask B
+        return result;
+      });
+    try {
+      const res = await rotate(id, 'right');
+      expect(res.statusCode).toBe(409);
+      expect(res.body).toContain('The photo changed meanwhile');
+    } finally {
+      spy.mockRestore();
+    }
+
+    // Mask B is the photo's, on the row and on disk; the turned copy of
+    // mask A is gone.
+    expect(await photoFileName(t, id)).toBe(fileName);
+    const maskB = await photoRow(t, fileName);
+    expect(maskB).toMatchObject({
+      cutoutStatus: 'edited',
+      version: maskA!.version + 1,
+    });
+    expect(maskB!.variantKey).not.toBe(maskA!.variantKey);
+    expect(await dimensions(await variantPath(t, fileName, 'nobg'))).toEqual([
+      500, 400,
+    ]);
+    expect(turned).toBeDefined();
+    expect(await photoRow(t, turned!)).toBeUndefined();
+    expect(
+      (await readdir(t.dataPath)).filter((name) =>
+        name.startsWith(turned!.replace('.webp', '')),
+      ),
+    ).toEqual([]);
     await expectNoOrphans();
   });
 

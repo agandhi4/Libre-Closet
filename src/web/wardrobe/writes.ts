@@ -303,9 +303,10 @@ export type RotateDirection = keyof typeof ROTATIONS;
  * replaces it as an upload does (swapPhoto). An edited cutout (a mask)
  * turns with it and stays edited; any other is queued again for the
  * turned photo, as a new upload's is. A 409 when the photo changed after
- * it was read (another rotate or upload landed first, or a mask was saved
- * on it): the turned copy is deleted and nothing else is written, so two
- * quick taps never turn a stale photo over a newer one.
+ * it was read (another rotate or upload landed first, or its cutout moved:
+ * a mask saved, a job's result; the row's version says which): the turned
+ * copy is deleted and nothing else is written, so two quick taps never
+ * turn a stale photo over a newer one and no saved mask is lost.
  */
 export async function rotateGarmentPhoto(
   deps: WardrobeDeps,
@@ -343,11 +344,14 @@ export async function rotateGarmentPhoto(
     row,
     cutoutKept ? 'edited' : 'pending',
     async (tx, currentPhotoId) => {
-      // After the garment's lock, as every garment write takes them.
+      // After the garment's lock, as every garment write takes them. The
+      // version, not the status: every new cutout bumps it, so a second
+      // mask saved while this one was turned (still `edited`) is caught
+      // here instead of deleted with the row this swap replaces.
       const current = await lockCutoutRow(tx, source.fileName);
       if (
         current?.id !== currentPhotoId ||
-        (current.status === 'edited') !== keepMask
+        current.version !== source.version
       ) {
         throw photoChanged();
       }
