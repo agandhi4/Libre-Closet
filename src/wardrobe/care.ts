@@ -221,8 +221,9 @@ export type RepairKind = (typeof REPAIR_KINDS)[number];
 
 /**
  * What a garment's repairs cost in all, summed in cents: null when no entry
- * gives a cost (nothing to say), never a sum of floats. Shown on the garment
- * page beside the log; not added to cost per wear (section 17).
+ * gives a cost (nothing to say), never a sum of floats. The log's "Spent on
+ * it" on the garment page; cost per wear reads the same sum from SQL
+ * (repairCostSql, #151), in the statement that reads the wears.
  */
 export function repairTotal(costs: readonly (string | null)[]): string | null {
   const given = costs.filter((cost) => cost !== null);
