@@ -68,6 +68,18 @@ describe('who may sign a photo URL', () => {
     ]);
   });
 
+  // A positional JSON (json_build_array, decoded by readPhotoRef: the
+  // gallery's and Styling's tuples) carries the variant key right after the
+  // version, or its URL is signed without it.
+  it('never reads a photo tuple without its variant key', () => {
+    const tuple =
+      /\$\{file\.fileName\},\s*\$\{file\.version\}(?!,\s*\$\{file\.variantKey\})/;
+    const found = sources(SRC)
+      .filter((path) => tuple.test(read(path)))
+      .map(name);
+    expect(found).toEqual([]);
+  });
+
   it('only files/queries.ts asserts the brand', () => {
     // A cast (`as ... SignablePhotoRef`) or a typed sql<...SignablePhotoRef>
     // is how a plain object becomes signable.
