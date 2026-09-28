@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { garmentWear, wardrobeShare } from '../../src/db/schema';
+import { garmentRepair, garmentWear, wardrobeShare } from '../../src/db/schema';
 import {
   createTestApp,
   recordQueries,
@@ -153,6 +153,36 @@ describe('repair costs in cost per wear', () => {
       // Without a price a repair makes no cost per wear.
       const scarf = await get(`/wardrobe/${g.scarf}`);
       expect(section(scarf, 'garment-wear')).not.toContain('a wear');
+    });
+
+    it('“Spent on it” and the wear line add the one same sum', async () => {
+      // A hat, 10.00, worn twice, mended today for 10.00. A row dated
+      // tomorrow (no form writes one: readRepairDay refuses it) proves both
+      // figures read wearSummary's repairCost, bounded by today, rather
+      // than the log's entries summed apart. Another user's, so the
+      // owner's insights figures stay as the tests below pin them.
+      const cookie = await t.register('hatter@example.com');
+      const hat = await newGarment(
+        { name: 'Hat', category: 'accessories', price: '10' },
+        cookie,
+      );
+      await wear(
+        hat,
+        ['2026-09-20', '2026-09-21'],
+        await userIdOf(t, 'hatter@example.com'),
+      );
+      await repair(hat, '2026-09-27', '10', cookie);
+      await t.db.insert(garmentRepair).values({
+        garmentId: hat,
+        day: '2026-09-28',
+        kind: 'repair',
+        note: 'Not done yet',
+        cost: '100.00',
+      });
+      const html = await get(`/wardrobe/${hat}`, cookie);
+      // (10 + 10) / 2, and the 10.00 it adds.
+      expect(section(html, 'garment-wear')).toContain('$10.00 a wear');
+      expect(section(html, 'garment-repairs')).toContain('Spent on it: $10.00');
     });
 
     it('sees them in the wear line “Wore today” answers', async () => {

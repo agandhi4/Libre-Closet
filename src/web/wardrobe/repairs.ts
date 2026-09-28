@@ -58,6 +58,16 @@ export function blankRepair(today: IsoDate): RepairFormValues {
 
 export type NewRepair = Omit<RepairEntry, 'id'>;
 
+/**
+ * The garment page's log: its entries, and what they cost in all. `total`
+ * is wearSummary's `repairCost` (repairCostSql), the very sum cost per wear
+ * adds, so "Spent on it" and the wear line never disagree.
+ */
+export interface RepairLog {
+  entries: RepairEntry[];
+  total: string | null;
+}
+
 /** The edit page's log: what is logged (each removable), and the form to log another. */
 export interface RepairPanel {
   garmentId: number;

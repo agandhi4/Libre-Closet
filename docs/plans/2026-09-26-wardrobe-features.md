@@ -702,7 +702,7 @@ altered, kept with the garment so the laundry pile and the tailor's ticket have 
 - **Cost per wear stayed the price's here; #151 folded the repairs in.** What a garment cost is now
   `totalCost` (price × copies plus its repairs' costs, null without a price), which every cost per wear
   surface divides; the insights statement and the wear summary each sum the repairs in a scalar
-  subquery (`repairCostSql`), dated up to the window's last day. The log still shows its own total.
+  subquery (`repairCostSql`), dated up to the window's last day; the log's "Spent on it" shows that same sum.
 - **Seed.** Theo's garments carry their materials' care, a Care labels table where the label differs
   (the blazer, the wool coat and the flannels dry clean only) and a Repairs table (the blazer's and
   flannels' alterations, the raw denim's chain-stitch hem, the Bean Boots' laces, the oxford's button).
