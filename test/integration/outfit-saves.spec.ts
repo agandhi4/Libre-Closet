@@ -9,6 +9,11 @@ import {
   weekPlanEntry,
 } from '../../src/db/schema';
 import { addDays } from '../../src/web/calendar/calendar-date';
+import {
+  isRefused,
+  replaceEntryOutfit,
+  replaceRefusal,
+} from '../../src/web/calendar/replace';
 import { pickIdea } from '../../src/web/gallery/ideas';
 import { createOutfit } from '../../src/web/outfits/queries';
 import { deleteGarment } from '../../src/web/wardrobe/queries';
@@ -374,6 +379,46 @@ describe('outfit saves', () => {
         ),
       ).toBe(true);
       expect(await outfits()).toEqual([]);
+    });
+
+    it('a replace with an idea holding an archived garment is the named 409 through replaceRefusal, every caller’s', async () => {
+      const day = addDays(t.today(), 4);
+      const planned = await createOutfit(t.db, t.owner.id, {
+        name: 'On the day',
+        slots: [{ category: 'bottoms', garmentId: bottom }],
+        plan: { day, occasion: 'work' },
+      });
+      const [entry] = await t.db
+        .select({ id: outfitCalendar.id })
+        .from(outfitCalendar)
+        .where(eq(outfitCalendar.outfitId, planned.id));
+      await setGarmentStatus(t.db, top, t.owner.id, { event: 'archive' });
+      const target = { entryId: entry.id, day, occasion: 'work' as const };
+      const outcome = await replaceEntryOutfit(t.db, t.owner.id, target, {
+        garmentIds: look(),
+      });
+      expect(outcome).toEqual({
+        outcome: 'garments-not-found',
+        gone: [
+          { id: top, garment: { name: 'Linen shirt', status: 'archived' } },
+        ],
+      });
+      if (!isRefused(outcome)) throw new Error('the replace went through');
+      const refusal = replaceRefusal(outcome);
+      expect(refusal.statusCode).toBe(409);
+      expect(refusal.message).toBe('Not saved: Linen shirt is archived.');
+      // A garment not theirs stays the unnamed 404.
+      const foreign = await replaceEntryOutfit(t.db, t.owner.id, target, {
+        garmentIds: [bottom, 2147483000],
+      });
+      if (!isRefused(foreign)) throw new Error('the replace went through');
+      const unnamed = replaceRefusal(foreign);
+      expect(unnamed.statusCode).toBe(404);
+      expect(unnamed.message).toBe(
+        'Not saved: a garment you chose is no longer in your wardrobe.',
+      );
+      // Nothing changed: the entry keeps its outfit, no outfit was made.
+      expect(await outfits()).toEqual([{ id: planned.id, name: 'On the day' }]);
     });
 
     it('create_outfit and pick_outfit refuse the same way, naming what they can', async () => {

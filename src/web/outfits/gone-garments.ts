@@ -105,10 +105,19 @@ export function describeGone(gone: readonly GoneGarment[]): string {
 }
 
 /**
+ * The refusal for garments a pick or a save could not hold, as goneGarments
+ * read them. Should none be gone by then (restored between the refusal and
+ * the lookup), the plain 404 a pick has always answered.
+ */
+export function garmentsGoneRefusal(gone: readonly GoneGarment[]): HttpError {
+  return gone.length > 0
+    ? new OutfitGarmentsGone(gone)
+    : new HttpError(404, 'Garment not found');
+}
+
+/**
  * The refusal of a pick or a save that found garments it cannot hold,
- * named as they are now. Should they all be holdable again by the time
- * this reads (restored between the refusal and the lookup), the plain
- * 404 a pick has always answered.
+ * named as they are now (garmentsGoneRefusal over goneGarments).
  */
 export async function garmentsGoneError(
   db: Queryable,
@@ -116,8 +125,7 @@ export async function garmentsGoneError(
   garmentIds: readonly number[],
   holdable: Holdable,
 ): Promise<HttpError> {
-  const gone = await goneGarments(db, ownerId, garmentIds, holdable);
-  return gone.length > 0
-    ? new OutfitGarmentsGone(gone)
-    : new HttpError(404, 'Garment not found');
+  return garmentsGoneRefusal(
+    await goneGarments(db, ownerId, garmentIds, holdable),
+  );
 }

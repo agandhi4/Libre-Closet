@@ -109,9 +109,6 @@ async function pickInPlace(
     name: options.name,
   });
   logger.info(replaceMessage(ownerId, target, replaced));
-  if (replaced.outcome === 'garments-not-found') {
-    throw await garmentsGoneError(db, ownerId, garmentIds, 'closet');
-  }
   if (isRefused(replaced)) throw replaceRefusal(replaced);
   const flag = replaced.alreadySaved ? `&${ALREADY_SAVED_FLAG}=1` : '';
   return reply.redirect(`/calendar?week=${target.day}${flag}`, 303);
