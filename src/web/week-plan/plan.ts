@@ -21,15 +21,19 @@ import {
   type WeekPoolGarment,
 } from '../gallery/queries';
 import type { ReadOptions } from '../weather/location-cache';
-import { userWeather, type WeatherService } from '../weather/service';
 import {
-  batchAutoEntries,
+  type UserWeather,
+  userWeather,
+  type WeatherService,
+} from '../weather/service';
+import {
   batchEntries,
   type BatchEntry,
   createWeekPlan,
   deleteEmptyWeekPlan,
   recordAutoEntry,
-  removeAutoEntries,
+  removeBatchAutoEntries,
+  removeUnheldOutfits,
   weekPlanOf,
   windowEntries,
 } from './queries';
@@ -64,9 +68,11 @@ export const NO_FORECAST: WeekForecast = { days: new Map(), offset: 0 };
  * without WEATHER_ENABLED or a location). Read before any transaction: a
  * plan never holds the owner lock while Open-Meteo answers. A plan is a
  * decision made once, so "Plan my week" reads `{ fresh: true }` (a stale
- * forecast's refresh awaited, not served around); the daily re-plan reads
- * `{}` after its batch refreshed every candidate's forecast together
- * (refreshForecastsFor), so one slow location never holds up the rest.
+ * forecast's refresh awaited, not served around); the daily re-plan takes
+ * what its batch's refresh of every candidate's forecast answered
+ * (refreshForecastsFor, forecastOf), so one slow location never holds up
+ * the rest, and reads `{}` only for a user the batch left out (a failed
+ * or overrun refresh) or when the morning reminder runs it.
  */
 export async function weekForecast(
   deps: { db: Db; weather: WeatherService | undefined },
@@ -75,13 +81,13 @@ export async function weekForecast(
   read: ReadOptions,
 ): Promise<WeekForecast> {
   if (!deps.weather) return NO_FORECAST;
-  const { settings, cached } = await userWeather(
-    deps.db,
-    deps.weather,
-    userId,
-    now,
-    read,
+  return forecastOf(
+    await userWeather(deps.db, deps.weather, userId, now, read),
   );
+}
+
+/** A user's weather as the week is planned with it. */
+export function forecastOf({ settings, cached }: UserWeather): WeekForecast {
   return {
     days: new Map((cached?.forecast.days ?? []).map((day) => [day.day, day])),
     offset: settings.offset,
@@ -143,16 +149,21 @@ export function planMyWeek(
         unfilled: [],
       };
     }
-    const week = await readWeek(
-      tx,
-      ownerId,
-      input.today,
-      input.days[input.days.length - 1],
-    );
+    const { today, hour, days } = input;
+    const entries = await windowEntries(tx, ownerId, today, days.at(-1)!);
+    // Every slot filled already (a double tap, a retried plan_week, a week
+    // planned by hand): nothing to plan, so neither the pool nor the
+    // generator's memory is read (#165: two round trips). planWeek plans
+    // exactly these slots.
+    if (emptySlots({ today, hour, days, template, entries }).length === 0) {
+      return { templateSet: true, weekPlanId: null, planned: [], unfilled: [] };
+    }
     const plan = planWeek({
-      ...week,
-      hour: input.hour,
-      days: input.days,
+      today,
+      entries,
+      ...(await readGenerator(tx, ownerId, today)),
+      hour,
+      days,
       template,
       forecast: input.forecast.days,
       offset: input.forecast.offset,
@@ -184,10 +195,10 @@ export function planMyWeek(
 
 /**
  * What the planner and the re-plan judge a week by, read inside their
- * locked transaction: the entries from today to `last`, the pool, and the
- * saved outfits with the avoided pairs (generatorMemory, one statement). In
- * turn, not at once: a transaction is one connection, which runs one query
- * at a time (pg deprecates queuing more).
+ * locked transaction: the entries from today to `last`, then what the
+ * generator draws from (readGenerator). In turn, not at once: a
+ * transaction is one connection, which runs one query at a time (pg
+ * deprecates queuing more).
  */
 export async function readWeek(
   tx: Queryable,
@@ -196,9 +207,23 @@ export async function readWeek(
   last: IsoDate,
 ): Promise<Omit<WeekContext<WeekPoolGarment>, 'forecast' | 'offset'>> {
   const entries = await windowEntries(tx, ownerId, today, last);
+  return { today, entries, ...(await readGenerator(tx, ownerId, today)) };
+}
+
+/**
+ * The pool and the saved outfits with the avoided pairs (generatorMemory,
+ * one statement): what the planner fills slots from. Two statements,
+ * independent of each other and of the window's entries: one statement
+ * once #216's select-scalars lands.
+ */
+async function readGenerator(
+  tx: Queryable,
+  ownerId: number,
+  today: IsoDate,
+): Promise<Pick<WeekContext<WeekPoolGarment>, 'pool' | 'saved' | 'avoid'>> {
   const pool = await weekPool(tx, ownerId, today);
   const { saved, avoid } = await generatorMemory(tx, ownerId);
-  return { today, entries, pool, saved, avoid };
+  return { pool, saved, avoid };
 }
 
 /**
@@ -253,10 +278,10 @@ export async function writeAutoPick(
 
 /**
  * Undo of one "Plan my week": its entries the planner still owns are
- * removed, with the outfits it created for them that nothing else holds
- * (removeAutoEntries); entries the person took over since (edited, worn)
- * stay theirs. The batch goes once it has no entry left. 'not-found' for a
- * batch that is not the owner's.
+ * removed (removeBatchAutoEntries), with the outfits it created for them
+ * that nothing else holds (removeUnheldOutfits); entries the person took
+ * over since (edited, worn) stay theirs. The batch goes once it has no
+ * entry left. 'not-found' for a batch that is not the owner's.
  */
 export function undoWeekPlan(
   db: Queryable,
@@ -264,14 +289,19 @@ export function undoWeekPlan(
   weekPlanId: number,
 ): Promise<{ entries: number; outfits: number } | 'not-found'> {
   return ownerTransaction(db, ownerId, 'undoWeekPlan', async (tx) => {
-    if (!(await weekPlanOf(tx, ownerId, weekPlanId))) return 'not-found';
-    const removed = await removeAutoEntries(
+    const removed = await removeBatchAutoEntries(tx, ownerId, weekPlanId);
+    // Nothing removed: an own batch whose entries were all taken over (or
+    // undone already), or not the owner's at all. Only then is it asked.
+    if (removed.length === 0 && !(await weekPlanOf(tx, ownerId, weekPlanId))) {
+      return 'not-found';
+    }
+    const outfits = await removeUnheldOutfits(
       tx,
       ownerId,
-      await batchAutoEntries(tx, weekPlanId),
+      removed.filter((e) => e.outfitCreated).map((e) => e.outfitId),
     );
     await deleteEmptyWeekPlan(tx, weekPlanId);
-    return removed;
+    return { entries: removed.length, outfits };
   });
 }
 

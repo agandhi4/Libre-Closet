@@ -87,6 +87,44 @@ export async function findEntries(
   }));
 }
 
+/**
+ * The owner's entries on `day`, bare: which outfits are on it and for which
+ * occasion, and each entry's outfit name and worn state. What picking an
+ * outfit for the day needs (dayChoice), without findEntries' collages and
+ * selfies, which no picker draws (#165).
+ */
+export async function entriesOfDay(
+  db: Db,
+  ownerId: number,
+  day: IsoDate,
+): Promise<
+  {
+    id: number;
+    occasion: Occasion;
+    outfitId: number;
+    outfitName: string | null;
+    worn: boolean;
+  }[]
+> {
+  const rows = await db
+    .select({
+      id: outfitCalendar.id,
+      occasion: outfitCalendar.occasion,
+      outfitId: outfitCalendar.outfitId,
+      outfitName: outfit.name,
+      wornAt: outfitCalendar.wornAt,
+    })
+    .from(outfitCalendar)
+    .innerJoin(outfit, eq(outfit.id, outfitCalendar.outfitId))
+    .where(
+      and(eq(outfitCalendar.ownerId, ownerId), eq(outfitCalendar.day, day)),
+    );
+  return rows.map(({ wornAt, ...entry }) => ({
+    ...entry,
+    worn: wornAt !== null,
+  }));
+}
+
 export type ScheduleOutcome = 'scheduled' | 'already-scheduled';
 
 /** An entry to plan: the owner's outfit on a day, for an occasion. */
@@ -373,6 +411,12 @@ export async function ownEntryDay(
  * (deleteOutfit, src/web/outfits/queries.ts). Under the owner lock: a
  * re-plan must not swap in an outfit for the entry the person just took
  * off the day.
+ *
+ * Two statements inside the lock, no look-up first (#165): the selfie's
+ * delete is scoped to the owner, so for another's or a missing entry it
+ * finds nothing, and the entry's own delete (which locks its row) answers
+ * whether there was one. The selfie goes first, while the entry still
+ * points at it.
  */
 export function deleteEntry(
   db: Queryable,
@@ -380,16 +424,13 @@ export function deleteEntry(
   ownerId: number,
 ): Promise<{ selfies: string[] } | EntryMiss> {
   return ownerTransaction(db, ownerId, 'deleteEntry', async (tx) => {
-    const [entry] = await tx
-      .select({ id: outfitCalendar.id })
-      .from(outfitCalendar)
+    const selfies = await deleteEntrySelfie(tx, id, ownerId);
+    const deleted = await tx
+      .delete(outfitCalendar)
       .where(
         and(eq(outfitCalendar.id, id), eq(outfitCalendar.ownerId, ownerId)),
       )
-      .for('update');
-    if (!entry) return 'not-found';
-    const selfies = await deleteEntrySelfie(tx, id);
-    await tx.delete(outfitCalendar).where(eq(outfitCalendar.id, id));
-    return { selfies };
+      .returning({ id: outfitCalendar.id });
+    return deleted.length > 0 ? { selfies } : 'not-found';
   });
 }

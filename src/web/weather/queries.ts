@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Queryable } from '../../db/client';
 import { userWeather, weatherForecast, weatherNormals } from '../../db/schema';
 import type { Forecast } from '../../weather/forecast';
@@ -82,6 +82,17 @@ export async function findWeatherSettings(
   return row ? settingsOf(row) : NO_WEATHER_SETTINGS;
 }
 
+/** A user's settings and their active location's forecast row, read together. */
+export interface WeatherWithForecast {
+  settings: WeatherSettings;
+  /**
+   * The row of the location activeLocation picks; null when none is active
+   * (or the statement joined another place); `row` undefined when that
+   * location has no cache row yet.
+   */
+  forecast: { row: CacheRow<Forecast> | undefined } | null;
+}
+
 /**
  * The user's settings and, in the same statement, the forecast cache row
  * of the location they make active at `now` (activeLocation's rule in SQL:
@@ -97,10 +108,23 @@ export async function findWeatherWithForecast(
   db: Queryable,
   userId: number,
   now: Date,
-): Promise<{
-  settings: WeatherSettings;
-  forecast: { row: CacheRow<Forecast> | undefined } | null;
-}> {
+): Promise<WeatherWithForecast> {
+  const found = await findWeathersWithForecast(db, [userId], now);
+  return found.get(userId) ?? { settings: NO_WEATHER_SETTINGS, forecast: null };
+}
+
+/**
+ * findWeatherWithForecast for several users in one statement: a batch
+ * job's (refreshForecastsFor), where a read per user was an N+1 (#165). A
+ * user without a settings row is absent from the map.
+ */
+export async function findWeathersWithForecast(
+  db: Queryable,
+  userIds: readonly number[],
+  now: Date,
+): Promise<Map<number, WeatherWithForecast>> {
+  const found = new Map<number, WeatherWithForecast>();
+  if (userIds.length === 0) return found;
   const hereSince = new Date(now.getTime() - HERE_FRESH_HOURS * 3_600_000);
   const hereFresh = sql`${userWeather.hereLocatedAt} > ${hereSince}`;
   // numeric arrives as text unless mapped, like the columns' own mode.
@@ -112,7 +136,7 @@ export async function findWeatherWithForecast(
     then ${userWeather.hereLongitude} else ${userWeather.homeLongitude} end`.mapWith(
     Number,
   );
-  const [row] = await db
+  const rows = await db
     .select({
       settings: userWeather,
       joinedLatitude: latitude,
@@ -129,26 +153,31 @@ export async function findWeatherWithForecast(
         eq(weatherForecast.longitude, longitude),
       ),
     )
-    .where(eq(userWeather.userId, userId));
-  if (!row) return { settings: NO_WEATHER_SETTINGS, forecast: null };
-  const settings = settingsOf(row.settings);
-  const active = activeLocation(settings, now);
-  const joined = row.joinedLatitude !== null &&
-    row.joinedLongitude !== null && {
-      latitude: row.joinedLatitude,
-      longitude: row.joinedLongitude,
-    };
-  if (!active || !joined || !sameLocation(joined, active.location)) {
-    return { settings, forecast: null };
+    .where(inArray(userWeather.userId, [...new Set(userIds)]));
+  for (const row of rows) {
+    const settings = settingsOf(row.settings);
+    const active = activeLocation(settings, now);
+    const joined = row.joinedLatitude !== null &&
+      row.joinedLongitude !== null && {
+        latitude: row.joinedLatitude,
+        longitude: row.joinedLongitude,
+      };
+    const { value, fetchedAt, attemptedAt } = row;
+    found.set(row.settings.userId, {
+      settings,
+      forecast:
+        !active || !joined || !sameLocation(joined, active.location)
+          ? null
+          : {
+              // attempted_at is never null in a row: null is "none joined".
+              row:
+                attemptedAt === null
+                  ? undefined
+                  : { value, fetchedAt, attemptedAt },
+            },
+    });
   }
-  const { value, fetchedAt, attemptedAt } = row;
-  return {
-    settings,
-    forecast: {
-      // attempted_at is never null in a row: null is "none joined".
-      row: attemptedAt === null ? undefined : { value, fetchedAt, attemptedAt },
-    },
-  };
+  return found;
 }
 
 function sameLocation(a: Location, b: Location): boolean {
