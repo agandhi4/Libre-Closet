@@ -844,6 +844,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             canDelete: access.isOwner,
             justCreated: request.query.created === '1',
             justSavedPhoto: request.query.photoSaved === '1',
+            justRotatedPhoto: request.query.photoRotated === '1',
             justBought: request.query.bought === '1',
             justLoggedRepair: request.query.repairSaved === '1',
             justAddedCopy: request.query.copyAdded === '1',
@@ -1148,8 +1149,10 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   );
 
   // The photo sheet's ↺ and ↻: a native post (PostForm), 303 back to the
-  // garment. The photo is replaced by a turned copy as an upload replaces
-  // it (rotateGarmentPhoto); a photo that changed meanwhile is a 409.
+  // garment with ?photoRotated=1, which opens the sheet again so the next
+  // quarter turn is one tap. The photo is replaced by a turned copy as an
+  // upload replaces it (rotateGarmentPhoto); a photo that changed
+  // meanwhile is a 409.
   app.post(
     '/wardrobe/:id/photo/rotate',
     {
@@ -1176,7 +1179,10 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         garment.photo,
         request.body.direction,
       );
-      return reply.redirect(garmentUrl(id, viewOwner), 303);
+      return reply.redirect(
+        garmentUrl(id, viewOwner, '', { photoRotated: 1 }),
+        303,
+      );
     },
   );
 

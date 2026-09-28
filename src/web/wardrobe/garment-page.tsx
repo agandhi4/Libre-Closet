@@ -91,6 +91,8 @@ export interface GarmentPageModel {
   canDelete: boolean;
   justCreated: boolean;
   justSavedPhoto: boolean;
+  /** A rotate landed here: the photo sheet opens again for the next turn. */
+  justRotatedPhoto: boolean;
   justBought: boolean;
   justLoggedRepair: boolean;
   /** "Add a copy" from a new garment's form (#20) landed here. */
@@ -101,6 +103,13 @@ const PHOTO_SHEET_ID = 'garment-photo-sheet';
 
 /** Opens the photo sheet (the ⋯ menu's Photo, the empty hero's button). */
 const OPEN_PHOTO_SHEET = `this.closest('details')?.removeAttribute('open'); document.getElementById('${PHOTO_SHEET_ID}').showModal()`;
+
+/**
+ * Opens the photo sheet as the page loads, after a rotate (?photoRotated=1),
+ * so repeated quarter turns are one tap each. A fixed string, placed after
+ * the dialog; StripFlags drops the marker, so a reload does not reopen it.
+ */
+const REOPEN_PHOTO_SHEET = `document.getElementById('${PHOTO_SHEET_ID}').showModal();`;
 
 /**
  * The mask editor's pencil (mask-editor.js), as an inline module so it runs
@@ -114,6 +123,7 @@ wireUpEditMask(document.getElementById('garment-photo-slot'));`;
 const GARMENT_PAGE_FLAGS = [
   'created',
   'photoSaved',
+  'photoRotated',
   'bought',
   'repairSaved',
   'copyAdded',
@@ -273,6 +283,9 @@ function PhotoTools({ model }: { model: GarmentPageModel }) {
   return (
     <>
       <PhotoSheet garment={garment} viewOwner={model.viewOwner} />
+      {model.justRotatedPhoto && (
+        <script dangerouslySetInnerHTML={{ __html: REOPEN_PHOTO_SHEET }} />
+      )}
       {garment.photo && (
         <>
           <MaskEditorDialog />
@@ -895,7 +908,8 @@ function PhotoSource(props: { action: string; source: 'camera' | 'library' }) {
 /**
  * ↺ and ↻ (#199): one native post whose submitter names the direction
  * (submit-once disables the buttons a tick after the submit, so its
- * `direction` still posts), 303 back to the page with the turned photo.
+ * `direction` still posts), 303 back to the page with the turned photo
+ * and this sheet open again (?photoRotated=1, REOPEN_PHOTO_SHEET).
  * "Rotating…" while it submits (submit-once's `data-submitting` on the
  * form, the `rotate` group). Disabled offline.
  */

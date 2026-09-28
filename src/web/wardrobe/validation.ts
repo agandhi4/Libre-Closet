@@ -1170,6 +1170,7 @@ export const GarmentPageQuery = Type.Object({
   ...OwnerQuery.properties,
   created: Type.Optional(Type.String()),
   photoSaved: Type.Optional(Type.String()),
+  photoRotated: Type.Optional(Type.String()),
   bought: Type.Optional(Type.String()),
   repairSaved: Type.Optional(Type.String()),
   copyAdded: Type.Optional(Type.String()),

@@ -125,7 +125,7 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
 
     const res = await rotate(id, 'right');
     expect(res.statusCode).toBe(303);
-    expect(res.headers.location).toBe(`/wardrobe/${id}`);
+    expect(res.headers.location).toBe(`/wardrobe/${id}?photoRotated=1`);
 
     const after = await photoFileName(t, id);
     expect(after).not.toBe(before);
@@ -289,6 +289,22 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
     expect(html).toMatch(/name="direction" value="left"[^>]*>.*Rotate left/s);
     expect(html).toMatch(/name="direction" value="right"[^>]*>.*Rotate right/s);
     expectNativePostForms(res);
+    const reopen =
+      "document.getElementById('garment-photo-sheet').showModal();";
+    expect(res.body).not.toContain(reopen);
+
+    // Where a rotate lands: the sheet opens again for the next turn, after
+    // the dialog it opens, and the marker is stripped from the address.
+    const landed = await t.inject({
+      method: 'GET',
+      url: `/wardrobe/${id}?photoRotated=1`,
+    });
+    const body = unescapeHtml(landed.body);
+    expect(body).toContain(`<script>${reopen}</script>`);
+    expect(body.indexOf(reopen)).toBeGreaterThan(
+      body.indexOf('id="garment-photo-sheet"'),
+    );
+    expect(body).toContain('"photoRotated"');
   });
 
   describe('wardrobe shares', () => {
@@ -348,7 +364,7 @@ describe('POST /wardrobe/:id/photo/rotate', () => {
       const res = await rotate(id, 'right', manager, `?ownerId=${t.owner.id}`);
       expect(res.statusCode).toBe(303);
       expect(res.headers.location).toBe(
-        `/wardrobe/${id}?ownerId=${t.owner.id}`,
+        `/wardrobe/${id}?photoRotated=1&ownerId=${t.owner.id}`,
       );
       expect(await garmentRow(t, id)).toMatchObject({
         photo: { createdById: t.owner.id, cutoutStatus: 'pending' },
