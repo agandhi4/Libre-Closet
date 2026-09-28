@@ -180,6 +180,14 @@ const PostedCareFields = {
 export const ConditionBody = Type.Object(PostedConditionFields);
 export type ConditionBody = Static<typeof ConditionBody>;
 
+/**
+ * POST /wardrobe/:id/photo/rotate: the photo sheet's ↺ and ↻ (ROTATIONS,
+ * writes.ts). Anything else is a 400: it is the write itself.
+ */
+export const RotateBody = Type.Object({
+  direction: Type.Union([Type.Literal('left'), Type.Literal('right')]),
+});
+
 /** Where a new garment lands (EntryStatus, src/wardrobe/status.ts). */
 export const Destination = Type.Union([
   Type.Literal('closet'),

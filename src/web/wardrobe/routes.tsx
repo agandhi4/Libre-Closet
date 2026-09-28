@@ -112,6 +112,7 @@ import {
   readCondition,
   readGarmentForm,
   readTags,
+  RotateBody,
   storedFormValues,
   TagBody,
   TagQuery,
@@ -131,6 +132,7 @@ import {
   createGarmentWithPendingPhoto,
   removeGarment,
   replacePhoto,
+  rotateGarmentPhoto,
   stagePhotoUpload,
   type WardrobeDeps,
 } from './writes';
@@ -1142,6 +1144,39 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         return reply.header('HX-Redirect', saved).status(200).send();
       }
       return reply.redirect(saved, 303);
+    },
+  );
+
+  // The photo sheet's ↺ and ↻: a native post (PostForm), 303 back to the
+  // garment. The photo is replaced by a turned copy as an upload replaces
+  // it (rotateGarmentPhoto); a photo that changed meanwhile is a 409.
+  app.post(
+    '/wardrobe/:id/photo/rotate',
+    {
+      schema: {
+        params: GarmentParams,
+        querystring: OwnerQuery,
+        body: RotateBody,
+      },
+    },
+    async (request, reply) => {
+      const { access, viewOwner } = await resolve(
+        options,
+        request,
+        request.query.ownerId,
+        'manage',
+      );
+      const { id } = request.params;
+      const garment = await requireGarment(options, id, access.ownerId);
+      if (!garment.photo) throw new HttpError(400, 'Garment has no photo');
+      await rotateGarmentPhoto(
+        deps,
+        id,
+        access.ownerId,
+        garment.photo,
+        request.body.direction,
+      );
+      return reply.redirect(garmentUrl(id, viewOwner), 303);
     },
   );
 
