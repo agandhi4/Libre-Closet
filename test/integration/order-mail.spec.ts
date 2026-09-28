@@ -556,10 +556,17 @@ describe('order email import, off', () => {
 
   it('has no poll, no review list and no menu entry without a token', async () => {
     expect(t.orderMail).toBeUndefined();
-    // No such route: the path is only /wardrobe/:id's, which refuses the id.
+    // A 404 like a route that is not there, never /wardrobe/:id's 400.
     const page = await t.inject({ method: 'GET', url: '/wardrobe/orders' });
-    expect(page.statusCode).toBe(400);
-    expect(page.body).not.toContain(text('orders.TITLE'));
+    expect(page.statusCode).toBe(404);
+    expect(page.body).not.toContain(text('orders.INTRO'));
+    for (const action of ['add', 'dismiss']) {
+      const post = await t.inject({
+        method: 'POST',
+        url: `/wardrobe/orders/1/${action}`,
+      });
+      expect(post.statusCode).toBe(404);
+    }
     const wardrobe = await t.inject({ method: 'GET', url: '/wardrobe' });
     expect(wardrobe.body).not.toContain('href="/wardrobe/orders"');
   });

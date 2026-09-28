@@ -4,7 +4,7 @@ The owner's decisions are on #25 (2026-09-28): a dedicated Fastmail account the 
 
 ## Config and whose items they are
 
-- `ORDER_MAIL_JMAP_TOKEN`: the Fastmail API token. Empty or unset: the feature is off. No JMAP client, no timer, no route, no menu entry.
+- `ORDER_MAIL_JMAP_TOKEN`: the Fastmail API token, made under Settings › Privacy & Security › Manage API tokens with **Email** and **Read-only access** ticked ([Fastmail's help](https://www.fastmail.help/hc/en-us/articles/5254602856719-API-tokens)). A read-only token offers only `urn:ietf:params:jmap:core` and `urn:ietf:params:jmap:mail`, which is all the poll uses. Empty or unset: the feature is off. No JMAP client, no timer, no menu entry, and the review list is a 404.
 - `ORDER_MAIL_SENDERS`: the owner's own addresses, comma-separated. Required with the token.
 - `ORDER_MAIL_OWNER`: the sign-in email of the closet account the items belong to. Required with the token. Closet is single-owner here, so the account is named by the one identifier the owner types anyway. The poll looks the account up each run. If no account has that email, the run fails, which reaches metrics and Bugsink, rather than guessing.
 - `ORDER_MAIL_POLL_MINUTES`: 1 to 60, default 5.

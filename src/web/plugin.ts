@@ -53,7 +53,7 @@ export interface WebConfig {
   vapid: VapidConfig | undefined;
   /**
    * ORDER_MAIL_OWNER, normalized, when the order mail is on (#25): the one
-   * account whose review list exists (/wardrobe/orders); no routes otherwise.
+   * account whose review list exists (/wardrobe/orders); a 404 for all otherwise.
    */
   orderMailOwner: string | undefined;
 }
@@ -151,11 +151,15 @@ export const webPlugin: FastifyPluginAsync<WebOptions> = async (
   await app.register(tokenRoutes, options);
   await app.register(sizesRoutes, options);
   await app.register(sharingRoutes, options);
-  // No ORDER_MAIL_JMAP_TOKEN: no review list (src/web/wardrobe/order-mail).
-  const { orderMailOwner } = options.config;
-  if (orderMailOwner) {
-    await app.register(orderReviewRoutes, { ...options, orderMailOwner });
-  }
+  // No ORDER_MAIL_JMAP_TOKEN: the review list is a 404 for everyone
+  // (src/web/wardrobe/order-mail).
+  // Registered on or off: off, every route is the 404 a missing route
+  // would be. Unregistered, /wardrobe/orders fell to /wardrobe/:id, whose
+  // id check answered 400.
+  await app.register(orderReviewRoutes, {
+    ...options,
+    orderMailOwner: options.config.orderMailOwner,
+  });
   // WEATHER_ENABLED=false: no /weather route, so nothing stores a location.
   const { weather } = options;
   if (weather) await app.register(weatherRoutes, { ...options, weather });

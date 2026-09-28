@@ -31,9 +31,10 @@ const HOUSEHOLD_CURRENCY = 'USD';
 
 /**
  * "From your orders" (#25): the review list of what the order mail's poll
- * found (poll.ts), registered only with the order mail on, and only for
- * ORDER_MAIL_OWNER's account: anyone else gets a 404 like a route that
- * does not exist (their session is never the order account's owner).
+ * found (poll.ts), for ORDER_MAIL_OWNER's account only: anyone else, and
+ * everyone with the order mail off, gets a 404 like a route that does not
+ * exist. Registered either way, so the static path always wins over
+ * /wardrobe/:id (whose id check would answer "orders" with a 400).
  *
  * "Add to closet" is the link import (importLink, as POST
  * /wardrobe/new/from-link runs it) on the item's product link, answering
@@ -44,7 +45,7 @@ const HOUSEHOLD_CURRENCY = 'USD';
  * item out of the list. Both are native posts (PostForm).
  */
 export const orderReviewRoutes: FastifyPluginCallbackTypebox<
-  WebOptions & { orderMailOwner: string }
+  WebOptions & { orderMailOwner: string | undefined }
 > = (app, options, done) => {
   const { db, logger, photos, fetcher, orderMailOwner } = options;
   const importDeps = { db, fetcher, photos, logger };
@@ -53,7 +54,9 @@ export const orderReviewRoutes: FastifyPluginCallbackTypebox<
   /** The requester when they are the order account's owner; else a 404. */
   function reviewer(request: FastifyRequest): number {
     const userId = sessionUserId(request);
-    if (request.auth?.user.email?.toLowerCase() !== orderMailOwner) {
+    const email = request.auth?.user.email?.toLowerCase();
+    // Off (no owner), or not the owner: a 404 like a route that is not there.
+    if (orderMailOwner === undefined || email !== orderMailOwner) {
       throw new HttpError(404, `Cannot ${request.method} ${request.url}`);
     }
     return userId;

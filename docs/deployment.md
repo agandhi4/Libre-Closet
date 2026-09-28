@@ -44,7 +44,7 @@ ORDER_MAIL_OWNER=<the owner's closet sign-in email>
 **Order email import** (#25; `src/web/wardrobe/order-mail.md`). Off until the token is set. The owner's steps, once:
 
 1. Create a Fastmail account used for nothing else (the order address). Closet only ever reads it.
-2. In that account, Settings › Privacy & Security › Integrations › API tokens › New API token (Fastmail moves this page now and then; it is the API tokens page). Give it **Email** access only, tick **Read-only access**, and leave every other scope (contacts, calendars, sending, masked email) unticked. Copy the token (`fmu1-…`): Fastmail shows it once.
+2. In that account, Settings › Privacy & Security › Manage API tokens › New API token ([Fastmail's help](https://www.fastmail.help/hc/en-us/articles/5254602856719-API-tokens)). Give it **Email** access only, tick **Read-only access**, and leave every other scope (contacts, calendars, sending, masked email) unticked. Copy the token (`fmu1-…`): Fastmail shows it once.
 3. Put the token and the owner's addresses in `closet.env` (above): `ORDER_MAIL_SENDERS` lists every address the owner forwards from, and `ORDER_MAIL_OWNER` is the email the owner signs in to closet with. The homelab compose file must pass the three variables through to the container. Redeploy.
 4. Forward an order confirmation **by hand** to the order address (an auto-forward rule keeps the retailer as From and is ignored). Within `ORDER_MAIL_POLL_MINUTES` its products show under Wardrobe › ⋯ › From your orders.
 
