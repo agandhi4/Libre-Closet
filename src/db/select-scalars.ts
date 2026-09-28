@@ -21,6 +21,13 @@ type ScalarValues<T extends Record<string, SQL | undefined>> = {
  * JSON value (`json_agg`), a count needs `::int` (node-postgres answers a
  * bigint as a string). A column given as undefined is not read (its value
  * is undefined), and with none left nothing is sent.
+ *
+ * Gotchas, as node-postgres decodes the row: a subquery that finds nothing
+ * is null (wrap a list in `coalesce(json_agg(...), '[]')`), and anything
+ * inside JSON arrives as JSON has it, so a `date` or `timestamptz` in a
+ * `json_build_object` is an ISO string, never a Date, whatever its column's
+ * Drizzle type says. Type such a field `string` in the column's SQL<T>.
+ * select-scalars.spec.ts and test/integration/select-scalars.spec.ts.
  */
 export async function selectScalars<T extends Record<string, SQL | undefined>>(
   db: Queryable,
