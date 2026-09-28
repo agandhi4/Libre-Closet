@@ -46,6 +46,7 @@ export function LinkPage(props: { ctx: ViewContext; model: LinkPageModel }) {
           {},
           wishlist ? WISHLIST_PATH : '/wardrobe/new',
         )}
+        formPage
       />
       <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto">
         <p class="text-sm text-muted mb-4">{t('linkImport.INTRO')}</p>
@@ -61,9 +62,12 @@ export function LinkPage(props: { ctx: ViewContext; model: LinkPageModel }) {
             <label class="label" for="link-url">
               <span class="label-text">{t('linkImport.URL_LABEL')}</span>
             </label>
+            {/* Text, not type="url": a pasted "Product title https://…" is
+                valid input (linkIn finds the link), and the browser's URL
+                validation would refuse it before the post. */}
             <input
               id="link-url"
-              type="url"
+              type="text"
               name="url"
               inputmode="url"
               class={`input input-bordered w-full ${model.error ? 'input-error' : ''}`}
