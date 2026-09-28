@@ -9,6 +9,9 @@ import {
   tripOutfit,
 } from '../../src/db/schema';
 import { addDays } from '../../src/web/calendar/calendar-date';
+import { deleteOutfit } from '../../src/web/outfits/queries';
+import { lockTrip } from '../../src/web/trips/packed';
+import { addTripOutfit } from '../../src/web/trips/queries';
 import { startWeatherStub, type WeatherStub } from '../support/weather-stub';
 import {
   createTestApp,
@@ -18,6 +21,7 @@ import {
   type TestApp,
   unescapeHtml,
 } from './harness';
+import { interleave } from './interleave';
 import { callTool, createAccessToken, tool } from './mcp';
 import { expectFragment, expectFullPage, HX_FRAGMENT } from './pages';
 
@@ -374,6 +378,28 @@ describe('trips', () => {
         /^\/outfits\/(\d+)$/.exec(String(theirs.headers.location))![1],
       );
       expect((await addOutfit(id, theirOutfit)).statusCode).toBe(404);
+    });
+
+    // addTripOutfit is one statement, whose snapshot predates its wait for
+    // the trip lock: an outfit deleted during that wait must be read again
+    // (owned, FOR KEY SHARE), or the insert dies on the foreign key (500).
+    it('answers no-outfit, writing nothing, for an outfit deleted while it waited for the trip', async () => {
+      const doomed = await outfitOf('Deleted meanwhile', [['tops', polo]]);
+      const [, added] = await interleave(
+        t.db,
+        (tx) => lockTrip(tx, id, t.owner.id),
+        () =>
+          addTripOutfit(t.db, {
+            tripId: id,
+            ownerId: t.owner.id,
+            outfitId: doomed,
+          }),
+        () => deleteOutfit(t.db, doomed, t.owner.id),
+      );
+      expect(added).toBe('no-outfit');
+      expect(
+        await t.db.$count(tripOutfit, eq(tripOutfit.outfitId, doomed)),
+      ).toBe(0);
     });
 
     it('offers the saved outfits on the add page, those on the day disabled', async () => {

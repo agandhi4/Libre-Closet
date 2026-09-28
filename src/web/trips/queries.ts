@@ -368,6 +368,15 @@ async function lockTripFor(
  * insert happens only for the owner's outfit on a day of the locked trip,
  * and the refusal is told from what it read, in the order the checks were
  * made one by one: the trip, the day, the outfit.
+ *
+ * The outfit is read from outside the trip, so the statement's snapshot
+ * (taken before it waited for the trip lock) may still hold one deleted
+ * meanwhile: `owned` locks it FOR KEY SHARE (what the insert's foreign key
+ * takes anyway), and a row locked after a wait is read again, so a deleted
+ * outfit drops out and the answer is 'no-outfit', never the foreign key's
+ * 500. `exists (select 1 from locked)` is a one-time filter that takes the
+ * trip lock before the outfit's, the order every trip write keeps
+ * (deleteOutfit locks the outfit and never a trip, so they cannot deadlock).
  */
 export async function addTripOutfit(
   db: Queryable,
@@ -384,6 +393,8 @@ export async function addTripOutfit(
     owned as (
       select ${outfit.id} as id from ${outfit}
       where ${and(eq(outfit.id, input.outfitId), eq(outfit.ownerId, input.ownerId))}
+      and exists (select 1 from locked)
+      for key share
     ),
     added as (
       insert into ${tripOutfit} (trip_id, outfit_id, day, occasion)
