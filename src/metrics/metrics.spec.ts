@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { captureLogs } from '../../test/support/log-capture';
 import { recordErrors } from '../../test/support/sentry-stub';
 import { Metrics } from './metrics';
@@ -201,22 +201,77 @@ describe('Metrics', () => {
     );
   });
 
-  it("keeps the cutout queue's last depth when the database cannot answer", async () => {
-    const { metrics, logs } = newMetrics();
-    let depth: number | Error = 3;
-    metrics.trackCutoutQueue(() =>
-      depth instanceof Error ? Promise.reject(depth) : Promise.resolve(depth),
-    );
-    expect((await metrics.exposition()).body).toMatch(
-      /^cutout_queue_depth 3$/m,
-    );
-    depth = new Error('connection refused');
-    expect((await metrics.exposition()).body).toMatch(
-      /^cutout_queue_depth 3$/m,
-    );
-    expect(logs.messages('warn')).toEqual([
-      "Could not read the cutout queue's depth: connection refused",
-    ]);
+  describe("the cutout queue's depth", () => {
+    // Each count the gauge starts, answered when the spec says.
+    function scriptedCounts() {
+      const counts: { resolve: (depth: number) => void }[] = [];
+      return {
+        counts,
+        pending: () =>
+          new Promise<number>((resolve) => counts.push({ resolve })),
+      };
+    }
+
+    it('waits for the first count, when nothing was read yet', async () => {
+      const { metrics } = newMetrics();
+      const { counts, pending } = scriptedCounts();
+      metrics.trackCutoutQueue(pending);
+      const scrape = metrics.exposition();
+      await vi.waitFor(() => expect(counts).toHaveLength(1));
+      counts[0].resolve(3);
+      expect((await scrape).body).toMatch(/^cutout_queue_depth 3$/m);
+    });
+
+    // In production the count is a round trip to pgvault, which was most of
+    // every scrape's time (#174).
+    it('answers later scrapes with the last count, never waiting for the database', async () => {
+      const { metrics } = newMetrics();
+      const { counts, pending } = scriptedCounts();
+      metrics.trackCutoutQueue(pending);
+      const first = metrics.exposition();
+      await vi.waitFor(() => expect(counts).toHaveLength(1));
+      counts[0].resolve(3);
+      await first;
+
+      // The second scrape's count never answers before the scrape does.
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 3$/m,
+      );
+      expect(counts).toHaveLength(2);
+      // While it is out, a scrape starts no other count.
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 3$/m,
+      );
+      expect(counts).toHaveLength(2);
+
+      counts[1].resolve(5);
+      await new Promise((settled) => setImmediate(settled));
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 5$/m,
+      );
+      expect(counts).toHaveLength(3);
+    });
+
+    it('keeps the last depth when the database cannot answer', async () => {
+      const { metrics, logs } = newMetrics();
+      let depth: number | Error = 3;
+      metrics.trackCutoutQueue(() =>
+        depth instanceof Error ? Promise.reject(depth) : Promise.resolve(depth),
+      );
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 3$/m,
+      );
+      depth = new Error('connection refused');
+      await metrics.exposition();
+      await vi.waitFor(() =>
+        expect(logs.messages('warn')).toEqual([
+          "Could not read the cutout queue's depth: connection refused",
+        ]),
+      );
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 3$/m,
+      );
+    });
   });
 
   // The homelab's dashboards and alerts (homelab #39) read these names,

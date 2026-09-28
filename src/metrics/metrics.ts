@@ -255,24 +255,41 @@ export class Metrics {
   }
 
   /**
-   * The background-removal queue's pending photos, read from the database
-   * at each scrape (a gauge that is never stale). A failed read is logged
-   * and the scrape keeps the last value rather than failing whole.
+   * The background-removal queue's pending photos, counted in the database
+   * (any server's writes count). Each scrape starts a count and answers
+   * with the last one that finished, so the value is at most one scrape
+   * interval old; only the first scrape, with nothing read yet, waits for
+   * its count. The scrape never waits on the database otherwise: in
+   * production that is a round trip to pgvault on the NAS, which was most
+   * of every scrape's time (#174). One count at a time: a scrape while one
+   * is still out starts none. A failed count is logged and the last value
+   * stands.
    */
   trackCutoutQueue(pending: () => Promise<number>): void {
     const logger = this.logger;
+    let counting: Promise<void> | undefined;
+    let counted = false;
     new Gauge({
       name: 'cutout_queue_depth',
       help: 'Photos waiting for background removal (pending cutouts).',
       registers: [this.registry],
       async collect() {
-        try {
-          this.set(await pending());
-        } catch (error) {
-          logger.warn(
-            `Could not read the cutout queue's depth: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+        counting ??= pending()
+          .then(
+            (depth) => {
+              this.set(depth);
+              counted = true;
+            },
+            (error: unknown) => {
+              logger.warn(
+                `Could not read the cutout queue's depth: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            },
+          )
+          .finally(() => {
+            counting = undefined;
+          });
+        if (!counted) await counting;
       },
     });
   }
