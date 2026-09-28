@@ -9,7 +9,9 @@ import {
   planWeek,
   type Slot,
   type WeekContext,
+  type WeekEntry,
 } from '../../wardrobe/week-planner';
+import type { TemplateSlot } from '../../wardrobe/week';
 import type { DayForecast } from '../../weather/forecast';
 import { ownerTransaction } from '../auth/queries';
 import { addDays, type IsoDate } from '../calendar/calendar-date';
@@ -27,7 +29,6 @@ import {
   type WeatherService,
 } from '../weather/service';
 import {
-  batchEntries,
   type BatchEntry,
   createWeekPlan,
   deleteEmptyWeekPlan,
@@ -213,8 +214,8 @@ export async function readWeek(
 /**
  * The pool and the saved outfits with the avoided pairs (generatorMemory,
  * one statement): what the planner fills slots from. Two statements,
- * independent of each other and of the window's entries: one statement
- * once #216's select-scalars lands.
+ * independent of each other: one through selectScalars once weekPool is a
+ * scalar subquery (src/web/gallery/queries.ts, the generator's own).
  */
 async function readGenerator(
   tx: Queryable,
@@ -318,30 +319,30 @@ export interface PlannedBanner {
  * The banner's model: the batch's entries still on the calendar, and the
  * template slots of the next 7 days that are still empty (what the plan
  * could not fill, or what was removed since). Undefined for a batch that
- * is not the owner's (the banner is navigation state: no 404).
+ * is not the owner's (the banner is navigation state: no 404). From reads
+ * the caller made (weekContext, src/web/calendar/week-context.ts: the
+ * batch's entries, the template, and the entries of planDays(today), in
+ * the week page's one statement).
  */
-export async function plannedBanner(
-  db: Db,
-  ownerId: number,
+export function plannedBanner(
   planned: number | 'none',
+  reads: {
+    batch: BatchEntry[];
+    template: readonly TemplateSlot[];
+    window: readonly Pick<WeekEntry, 'day' | 'occasion'>[];
+  },
   now: { today: IsoDate; hour: number },
-): Promise<PlannedBanner | undefined> {
-  const days = planDays(now.today);
-  const [entries, template, window] = await Promise.all([
-    planned === 'none' ? [] : batchEntries(db, ownerId, planned),
-    findWeekTemplate(db, ownerId),
-    windowEntries(db, ownerId, now.today, days[days.length - 1]),
-  ]);
-  if (planned !== 'none' && entries.length === 0) return undefined;
+): PlannedBanner | undefined {
+  if (planned !== 'none' && reads.batch.length === 0) return undefined;
   return {
     weekPlanId: planned === 'none' ? null : planned,
-    entries,
+    entries: reads.batch,
     stillEmpty: emptySlots({
       today: now.today,
       hour: now.hour,
-      days,
-      template,
-      entries: window,
+      days: planDays(now.today),
+      template: reads.template,
+      entries: reads.window,
     }),
   };
 }

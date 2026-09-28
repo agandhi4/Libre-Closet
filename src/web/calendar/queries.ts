@@ -1,10 +1,17 @@
-import { and, between, eq, sql } from 'drizzle-orm';
+import { and, eq, type SQL, sql } from 'drizzle-orm';
 import type { Db, Queryable } from '../../db/client';
-import { outfit, outfitCalendar } from '../../db/schema';
+import {
+  file,
+  garment,
+  outfit,
+  outfitCalendar,
+  outfitSlot,
+} from '../../db/schema';
+import { selectScalars } from '../../db/select-scalars';
 import type { Occasion } from '../../wardrobe/occasions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
-import { deleteEntrySelfie, SELFIE_WITH } from '../selfies/queries';
+import { deleteEntrySelfie, entrySelfieSql } from '../selfies/queries';
 import { type EntryWornOutcome, setEntryWorn } from '../wears/queries';
 import type { IsoDate } from './calendar-date';
 import type { CalendarEntry } from './calendar-view';
@@ -25,66 +32,65 @@ export type EntryMiss = 'not-found';
 
 /**
  * The owner's entries from `first` to `last` (inclusive), by day then id,
- * each with its outfit's garments for the collage; the pages put a day's
- * entries in occasion order (buildCalendarView, Today's todayFor).
+ * each with its selfie and its outfit's garments for the collage (in the
+ * order the outfit was built; empty slots have nothing to show); the pages
+ * put a day's entries in occasion order (buildCalendarView, Today's
+ * todayFor). A scalar subquery (a JSON list), so the week page reads it in
+ * one statement with the rest of what it shows (weekContext); findEntries
+ * reads it alone. Served by outfit_calendar_owner_id_day_outfit_id_unique
+ * (owner_id, day). Every table appears once in each scope, so the columns
+ * need no aliases: the selfie's `file` and the garments' are in sibling
+ * subqueries.
  */
+export function entriesSql(
+  ownerId: number,
+  first: IsoDate,
+  last: IsoDate,
+): SQL<CalendarEntry[]> {
+  const photo = sql`case when ${file.id} is null then null
+    else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}) end`;
+  return sql<CalendarEntry[]>`(
+    select coalesce(json_agg(json_build_object(
+      'id', ${outfitCalendar.id},
+      'day', ${outfitCalendar.day},
+      'occasion', ${outfitCalendar.occasion},
+      'worn', ${outfitCalendar.wornAt} is not null,
+      'plannedBy', ${outfitCalendar.plannedBy},
+      'selfie', ${entrySelfieSql(outfitCalendar.id)},
+      'outfit', json_build_object(
+        'id', ${outfit.id},
+        'name', ${outfit.name},
+        'garments', (
+          select coalesce(json_agg(json_build_object(
+            'id', ${garment.id},
+            'name', ${garment.name},
+            'category', ${garment.category},
+            'photo', ${photo}
+          ) order by ${outfitSlot.position}), '[]')
+          from ${outfitSlot}
+          inner join ${garment} on ${garment.id} = ${outfitSlot.garmentId}
+          left join ${file} on ${file.id} = ${garment.photoId}
+          where ${outfitSlot.outfitId} = ${outfit.id}
+        )
+      )
+    ) order by ${outfitCalendar.day}, ${outfitCalendar.id}), '[]')
+    from ${outfitCalendar}
+    inner join ${outfit} on ${outfit.id} = ${outfitCalendar.outfitId}
+    where ${outfitCalendar.ownerId} = ${ownerId}
+      and ${outfitCalendar.day} between ${first} and ${last})`;
+}
+
+/** entriesSql alone: Today, the month, get_calendar. One statement. */
 export async function findEntries(
-  db: Db,
+  db: Queryable,
   ownerId: number,
   first: IsoDate,
   last: IsoDate,
 ): Promise<CalendarEntry[]> {
-  // Served by outfit_calendar_owner_id_day_outfit_id_unique (owner_id, day).
-  const rows = await db.query.outfitCalendar.findMany({
-    columns: {
-      id: true,
-      day: true,
-      occasion: true,
-      wornAt: true,
-      plannedBy: true,
-    },
-    where: and(
-      eq(outfitCalendar.ownerId, ownerId),
-      between(outfitCalendar.day, first, last),
-    ),
-    orderBy: (entry, { asc }) => [asc(entry.day), asc(entry.id)],
-    with: {
-      selfie: SELFIE_WITH,
-      outfit: {
-        columns: { id: true, name: true },
-        with: {
-          // The outfit's garments in the order it was built (empty slots
-          // have nothing to show).
-          slots: {
-            columns: {},
-            where: (slot, { isNotNull }) => isNotNull(slot.garmentId),
-            orderBy: (slot, { asc }) => [asc(slot.position)],
-            with: {
-              garment: {
-                columns: { id: true, name: true, category: true },
-                with: { photo: { columns: { fileName: true, version: true } } },
-              },
-            },
-          },
-        },
-      },
-    },
+  const { entries } = await selectScalars(db, {
+    entries: entriesSql(ownerId, first, last),
   });
-  return rows.map((row) => ({
-    id: row.id,
-    day: row.day,
-    occasion: row.occasion,
-    worn: row.wornAt !== null,
-    selfie: row.selfie,
-    plannedBy: row.plannedBy,
-    outfit: {
-      id: row.outfit.id,
-      name: row.outfit.name,
-      garments: row.outfit.slots.flatMap(({ garment }) =>
-        garment ? [garment] : [],
-      ),
-    },
-  }));
+  return entries;
 }
 
 /**

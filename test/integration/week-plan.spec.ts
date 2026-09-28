@@ -421,12 +421,17 @@ describe('the weekly auto-plan', () => {
           ),
       ).toBe(true);
 
-      // The banner: what was planned, and Undo.
-      const banner = await get(String(res.headers.location));
-      expectFullPage(banner);
-      expectNativePostForms(banner);
-      expectNoScriptNavigation(banner);
-      const html = unescapeHtml(banner.body);
+      // The banner: what was planned, and Undo. #165: read with the week in
+      // one statement after the session (five in parallel before).
+      let banner: Awaited<ReturnType<typeof get>> | undefined;
+      const bannerRead = await recordQueries(async () => {
+        banner = await get(String(res.headers.location));
+      });
+      expect(bannerRead.statements).toBe(2);
+      expectFullPage(banner!);
+      expectNativePostForms(banner!);
+      expectNoScriptNavigation(banner!);
+      const html = unescapeHtml(banner!.body);
       expect(html).toContain('Planned 8 outfits for your week');
       expect(html.match(/data-entry-id="/g)).toHaveLength(8);
       expect(html).toContain(`action="/calendar/plan-week/${planId}/undo"`);

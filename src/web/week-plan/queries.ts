@@ -9,6 +9,7 @@ import {
   isNull,
   lt,
   not,
+  type SQL,
   sql,
 } from 'drizzle-orm';
 import type { Queryable } from '../../db/client';
@@ -515,30 +516,48 @@ export interface BatchEntry {
   outfitName: string | null;
 }
 
-/** Batch `id`'s entries still on the calendar (auto or taken over), by day. */
-export async function batchEntries(
-  db: Queryable,
+/**
+ * Batch `id`'s entries still on the calendar (auto or taken over), by day,
+ * as a scalar subquery (a JSON list): the calendar's banner after "Plan my
+ * week", read in the week's one statement (weekContext).
+ */
+export function batchEntriesSql(
   ownerId: number,
   id: number,
-): Promise<BatchEntry[]> {
-  return db
-    .select({
-      entryId: outfitCalendar.id,
-      day: outfitCalendar.day,
-      occasion: outfitCalendar.occasion,
-      plannedBy: outfitCalendar.plannedBy,
-      outfitName: outfit.name,
-    })
-    .from(weekPlanEntry)
-    .innerJoin(outfitCalendar, eq(outfitCalendar.id, weekPlanEntry.entryId))
-    .innerJoin(outfit, eq(outfit.id, outfitCalendar.outfitId))
-    .where(
-      and(
-        eq(weekPlanEntry.weekPlanId, id),
-        eq(outfitCalendar.ownerId, ownerId),
-      ),
-    )
-    .orderBy(outfitCalendar.day, outfitCalendar.id);
+): SQL<BatchEntry[]> {
+  return sql<BatchEntry[]>`(
+    select coalesce(json_agg(json_build_object(
+      'entryId', ${outfitCalendar.id},
+      'day', ${outfitCalendar.day},
+      'occasion', ${outfitCalendar.occasion},
+      'plannedBy', ${outfitCalendar.plannedBy},
+      'outfitName', ${outfit.name}
+    ) order by ${outfitCalendar.day}, ${outfitCalendar.id}), '[]')
+    from ${weekPlanEntry}
+    inner join ${outfitCalendar} on ${outfitCalendar.id} = ${weekPlanEntry.entryId}
+    inner join ${outfit} on ${outfit.id} = ${outfitCalendar.outfitId}
+    where ${weekPlanEntry.weekPlanId} = ${id}
+      and ${outfitCalendar.ownerId} = ${ownerId})`;
+}
+
+/**
+ * The day and occasion of each of the owner's entries from `first` to
+ * `last`, as a scalar subquery (a JSON list): all emptySlots needs of them,
+ * for the banner's slots still empty (weekContext).
+ */
+export function entrySlotsSql(
+  ownerId: number,
+  first: IsoDate,
+  last: IsoDate,
+): SQL<Pick<WeekEntry, 'day' | 'occasion'>[]> {
+  return sql<Pick<WeekEntry, 'day' | 'occasion'>[]>`(
+    select coalesce(json_agg(json_build_object(
+      'day', ${outfitCalendar.day},
+      'occasion', ${outfitCalendar.occasion}
+    )), '[]')
+    from ${outfitCalendar}
+    where ${outfitCalendar.ownerId} = ${ownerId}
+      and ${outfitCalendar.day} between ${first} and ${last})`;
 }
 
 // ---- The daily re-plan's claims ---------------------------------------------

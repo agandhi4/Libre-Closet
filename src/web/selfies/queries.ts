@@ -1,4 +1,5 @@
-import { and, asc, between, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, type SQL, sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { initialCutoutState } from '../../cutout/state';
 import type { Db, Queryable } from '../../db/client';
 import { file, selfie } from '../../db/schema';
@@ -221,45 +222,39 @@ export interface DetachedLook extends SelfieRef {
 
 /**
  * The owner's looks without an entry from `first` to `last` (inclusive), by
- * day then when they were taken: the calendar shows them on their day.
- * Served by selfie_owner_id_day_index.
+ * day then when they were taken: the calendar shows them on their day. A
+ * scalar subquery (a JSON list) for the week's one statement (weekContext,
+ * src/web/calendar/week-context.ts). Served by selfie_owner_id_day_index.
  */
-export async function detachedLooks(
-  db: Db,
+export function detachedLooksSql(
   ownerId: number,
   first: IsoDate,
   last: IsoDate,
-): Promise<DetachedLook[]> {
-  const rows = await db
-    .select({
-      id: selfie.id,
-      day: selfie.day,
-      fileName: file.fileName,
-      version: file.version,
-    })
-    .from(selfie)
-    .innerJoin(file, eq(file.id, selfie.photoId))
-    .where(
-      and(
-        eq(selfie.ownerId, ownerId),
-        between(selfie.day, first, last),
-        isNull(selfie.outfitCalendarId),
-      ),
-    )
-    .orderBy(asc(selfie.day), asc(selfie.id));
-  return rows.map(({ id, day, fileName, version }) => ({
-    id,
-    day,
-    photo: { fileName, version },
-  }));
+): SQL<DetachedLook[]> {
+  return sql<DetachedLook[]>`(
+    select coalesce(json_agg(json_build_object(
+      'id', ${selfie.id},
+      'day', ${selfie.day},
+      'photo', json_build_object('fileName', ${file.fileName}, 'version', ${file.version})
+    ) order by ${selfie.day}, ${selfie.id}), '[]')
+    from ${selfie} inner join ${file} on ${file.id} = ${selfie.photoId}
+    where ${selfie.ownerId} = ${ownerId}
+      and ${selfie.day} between ${first} and ${last}
+      and ${selfie.outfitCalendarId} is null)`;
 }
 
 /**
- * An entry's selfie in a relational query (`with: { selfie: SELFIE_WITH }`
- * on outfit_calendar): a SelfieRef, or null without one. The calendar week,
- * Today and get_calendar read it this way.
+ * The selfie of the calendar entry `entryId` names (a column of an
+ * enclosing query over outfit_calendar), as JSON: a SelfieRef, or null
+ * without one. The calendar week, Today and get_calendar read it inside
+ * entriesSql (src/web/calendar/queries.ts).
  */
-export const SELFIE_WITH = {
-  columns: { id: true },
-  with: { photo: { columns: { fileName: true, version: true } } },
-} as const;
+export function entrySelfieSql(entryId: AnyPgColumn): SQL<SelfieRef | null> {
+  return sql<SelfieRef | null>`(
+    select json_build_object(
+      'id', ${selfie.id},
+      'photo', json_build_object('fileName', ${file.fileName}, 'version', ${file.version})
+    )
+    from ${selfie} inner join ${file} on ${file.id} = ${selfie.photoId}
+    where ${selfie.outfitCalendarId} = ${entryId})`;
+}

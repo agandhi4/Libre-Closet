@@ -126,6 +126,16 @@ describe('calendar', () => {
       expect(html).not.toMatch(/<h2[^>]*text-primary/);
     });
 
+    // #165: production pays a ~114 ms round trip per statement. The session,
+    // then the week's entries, its looks and the week template together in
+    // one statement (weekContext; three in parallel before).
+    it('reads the week in two statements', async () => {
+      const read = await recordQueries(() =>
+        t.inject({ method: 'GET', url: WEEK_URL }),
+      );
+      expect(read.statements).toBe(2);
+    });
+
     it('steps a week at a time and strips the days down to their blocks', async () => {
       const html = await weekPage();
       // With its year: nothing else on the page says which (#99).
