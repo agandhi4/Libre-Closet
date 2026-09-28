@@ -151,8 +151,15 @@ export async function deleteUserAndFileRows(
  * plan, the outfit a double tap would save twice, the entry a re-plan is
  * about to swap). NO KEY UPDATE leaves the row's key alone, so it never
  * blocks another table's foreign key check against the user (a garment
- * insert, a wear), only another such write of the same owner. Taking it
- * again in the same transaction is free.
+ * insert, a wear), only another such write of the same owner.
+ *
+ * The same statement bounds every lock wait from here to the end of the
+ * transaction by OWNER_LOCK_TIMEOUT_MS (`set_config(..., true)` is SET
+ * LOCAL with a bound value; in a savepoint it lasts to the caller's
+ * commit), this one included: the select list is computed below the plan's
+ * LockRows node, before the row is locked. One round trip, not two (#158;
+ * production reaches Postgres over a ~114 ms link). owner-lock.spec.ts's
+ * #134 case proves the bound holds (a re-plan behind a held lock defers).
  *
  * Writers call it through ownerTransaction; the rule it serves (every
  * writer of the calendar and the plan tables, the owner lock first) is in
@@ -164,7 +171,10 @@ export async function deleteUserAndFileRows(
  */
 export async function lockOwner(tx: Queryable, ownerId: number): Promise<void> {
   const [locked] = await tx
-    .select({ id: user.id })
+    .select({
+      id: user.id,
+      lockTimeout: sql`set_config('lock_timeout', ${`${OWNER_LOCK_TIMEOUT_MS}ms`}, true)`,
+    })
     .from(user)
     .where(eq(user.id, ownerId))
     .for('no key update');
@@ -198,6 +208,14 @@ export class OwnerLockTimeout extends HttpError {
 }
 
 /**
+ * The transactions whose work holds an owner's lock, and whose: a nested
+ * ownerTransaction handed one of them joins it (see ownerTransaction).
+ * Keyed by Drizzle's transaction object, so a savepoint the work opens on
+ * its own (`tx.transaction`) is a new key and takes the lock again.
+ */
+const lockedFor = new WeakMap<Queryable, number>();
+
+/**
  * `work` in a transaction (a savepoint inside a caller's) that holds the
  * owner lock from its first statement: the one way to write
  * outfit_calendar, the week planner's tables, wardrobe plans and their
@@ -208,15 +226,24 @@ export class OwnerLockTimeout extends HttpError {
  * operation for the log (the function's name).
  *
  * Every lock wait from here to the end of the transaction is bounded by
- * OWNER_LOCK_TIMEOUT_MS (`SET LOCAL lock_timeout`, which in a savepoint
- * lasts to the caller's commit); a wait past it throws OwnerLockTimeout.
+ * OWNER_LOCK_TIMEOUT_MS (lockOwner); a wait past it throws OwnerLockTimeout.
  *
- * Nested inside a caller's transaction, the lock belongs to the outermost
- * transaction once taken. But if this savepoint is the first to take it and
- * then rolls back (`work` throws) while the caller catches and carries on,
- * the lock goes with the savepoint: the rest of the caller's transaction
- * runs unlocked. No caller does that today; one that must keep going after
- * a failed owner write takes lockOwner itself first.
+ * **Nested in an ownerTransaction of the same owner** (handed its `tx`:
+ * "Wear this" is pickIdea, then wearOutfitOn's insertEntry and
+ * setEntryWorn, all in wearIdea's), `work` runs in the caller's
+ * transaction as it is: no savepoint, no second lock. Each nesting used to
+ * cost four statements (savepoint, lock timeout, lock, release; #158), one
+ * round trip each. So a nested writer's failure is its caller's: a caller
+ * that must carry on after one catches it inside its own
+ * `tx.transaction(...)` savepoint (none does today).
+ *
+ * Nested inside any other transaction, this is a savepoint and the lock
+ * belongs to the outermost transaction once taken. But if this savepoint
+ * is the first to take it and then rolls back (`work` throws) while the
+ * caller catches and carries on, the lock goes with the savepoint: the rest
+ * of the caller's transaction runs unlocked. No caller does that today; one
+ * that must keep going after a failed owner write takes lockOwner itself
+ * first.
  */
 export async function ownerTransaction<T>(
   db: Queryable,
@@ -224,14 +251,16 @@ export async function ownerTransaction<T>(
   writer: string,
   work: (tx: Queryable) => Promise<T>,
 ): Promise<T> {
+  if (lockedFor.get(db) === ownerId) return work(db);
   try {
     return await db.transaction(async (tx) => {
-      // set_config(..., true) is SET LOCAL with a bound value.
-      await tx.execute(
-        sql`select set_config('lock_timeout', ${`${OWNER_LOCK_TIMEOUT_MS}ms`}, true)`,
-      );
       await lockOwner(tx, ownerId);
-      return work(tx);
+      lockedFor.set(tx, ownerId);
+      try {
+        return await work(tx);
+      } finally {
+        lockedFor.delete(tx);
+      }
     });
   } catch (error) {
     // A nested ownerTransaction already mapped it (and is not a pg error).
