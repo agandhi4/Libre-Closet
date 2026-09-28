@@ -11,18 +11,12 @@ import { Layout } from '../layout/layout';
 import { EmptyState, GarmentThumb } from '../layout/parts';
 import type { ViewContext } from '../view-context';
 import { priceLabel } from '../wardrobe/garment';
-import { garmentUrl, wardrobeUrl } from '../wardrobe/urls';
+import { garmentUrl } from '../wardrobe/urls';
 import { Card, GarmentList, garmentName, perWearLine, Strip } from './parts';
 import { recapUrl } from './urls';
 
 export interface RecapPageModel {
   recap: YearRecap;
-  /** The shared wardrobe addressed, for links; undefined for one's own. */
-  viewOwner: number | undefined;
-  /** A grantee's view: whose wardrobe, by name. */
-  ownerName?: string;
-  /** The owner is offered the calendar and "Save image"; a grantee neither. */
-  isOwner: boolean;
   /** The household's current year: the › link's bare address. */
   currentYear: number;
 }
@@ -33,22 +27,19 @@ const IMAGE_MOST_WORN = 3;
 /**
  * GET /wardrobe/recap (#26, docs/plans/2026-09-28-yearly-recap.md): a year
  * in review. The year's switcher, then either its empty state (fewer than
- * RECAP_MIN_WEARS wears) or its figures: the numbers and "Save image" (the
- * owner's), most worn, new this year, best value per wear, colours worn,
- * the pair worn together most. Every figure is src/wardrobe/recap.ts's.
- * Share-aware: a grantee sees the owner's recap, links under the share.
+ * RECAP_MIN_WEARS wears) or its figures: the numbers and "Save image",
+ * most worn, new this year, best value per wear, colours worn, the pair
+ * worn together most. Every figure is src/wardrobe/recap.ts's. The
+ * signed-in user's own, like insights: never a grantee's view of someone
+ * else's wear log.
  */
 export function RecapPage(props: { ctx: ViewContext; model: RecapPageModel }) {
   const { ctx, model } = props;
-  const { recap, viewOwner } = model;
+  const { recap } = model;
   const { period } = recap;
   return (
     <Layout ctx={ctx} title={t('recap.TITLE')}>
-      <AppBar
-        ctx={ctx}
-        title={t('recap.TITLE')}
-        back={wardrobeUrl(viewOwner)}
-      />
+      <AppBar ctx={ctx} title={t('recap.TITLE')} back="/wardrobe" />
       <main
         class="p-4 pt-20 pb-24 w-full sm:max-w-lg sm:mx-auto flex flex-col gap-4"
         id="recap"
@@ -56,16 +47,11 @@ export function RecapPage(props: { ctx: ViewContext; model: RecapPageModel }) {
         data-from={period.from}
         data-to={period.to}
       >
-        {model.ownerName && (
-          <p class="text-sm text-muted" id="recap-shared">
-            {t('recap.SHARED', { name: model.ownerName })}
-          </p>
-        )}
         <YearNav model={model} />
         {recap.enough ? (
           <Figures model={model} appName={ctx.appName} />
         ) : (
-          <Empty model={model} />
+          <Empty recap={recap} />
         )}
       </main>
       <Dock ctx={ctx} />
@@ -86,7 +72,7 @@ function yearTitle(recap: YearRecap): string {
  * one is the bare address).
  */
 function YearNav({ model }: { model: RecapPageModel }) {
-  const { recap, viewOwner, currentYear } = model;
+  const { recap, currentYear } = model;
   const { year, complete } = recap.period;
   const next = year + 1;
   return (
@@ -95,11 +81,7 @@ function YearNav({ model }: { model: RecapPageModel }) {
       aria-label={t('recap.YEARS')}
     >
       {recap.earlier ? (
-        <a
-          href={recapUrl(viewOwner, year - 1)}
-          class="btn btn-ghost btn-sm"
-          rel="prev"
-        >
+        <a href={recapUrl(year - 1)} class="btn btn-ghost btn-sm" rel="prev">
           ‹ {year - 1}
         </a>
       ) : (
@@ -114,7 +96,7 @@ function YearNav({ model }: { model: RecapPageModel }) {
       </div>
       {complete ? (
         <a
-          href={recapUrl(viewOwner, next === currentYear ? undefined : next)}
+          href={recapUrl(next === currentYear ? undefined : next)}
           class="btn btn-ghost btn-sm"
           rel="next"
         >
@@ -127,8 +109,7 @@ function YearNav({ model }: { model: RecapPageModel }) {
   );
 }
 
-function Empty({ model }: { model: RecapPageModel }) {
-  const { recap } = model;
+function Empty({ recap }: { recap: YearRecap }) {
   const { year } = recap.period;
   const message =
     recap.wears === 0
@@ -141,18 +122,14 @@ function Empty({ model }: { model: RecapPageModel }) {
   return (
     <div id="recap-empty">
       <EmptyState message={message}>
-        {model.isOwner && (
-          <>
-            <p class="text-center text-sm px-4">{t('recap.EMPTY_OWNER')}</p>
-            <a
-              href={CALENDAR_PATH}
-              class="btn btn-primary btn-sm"
-              id="recap-calendar"
-            >
-              {t('recap.OPEN_CALENDAR')}
-            </a>
-          </>
-        )}
+        <p class="text-center text-sm px-4">{t('recap.EMPTY_OWNER')}</p>
+        <a
+          href={CALENDAR_PATH}
+          class="btn btn-primary btn-sm"
+          id="recap-calendar"
+        >
+          {t('recap.OPEN_CALENDAR')}
+        </a>
       </EmptyState>
     </div>
   );
@@ -167,14 +144,13 @@ function yearWears(garment: InsightGarment): string {
 
 function Figures(props: { model: RecapPageModel; appName: string }) {
   const { model } = props;
-  const { recap, viewOwner } = model;
+  const { recap } = model;
   const { additions } = recap;
   return (
     <>
       <Summary model={model} appName={props.appName} />
       <Card id="recap-most-worn" title={t('recap.MOST_WORN')}>
         <GarmentList
-          viewOwner={viewOwner}
           rows={recap.mostWorn.map((garment) => ({
             garment,
             detail: yearWears(garment),
@@ -184,7 +160,6 @@ function Figures(props: { model: RecapPageModel; appName: string }) {
       {additions.count > 0 && (
         <Card id="recap-additions" title={t('recap.ADDITIONS')}>
           <GarmentList
-            viewOwner={viewOwner}
             rows={additions.garments.map((garment) => ({
               garment,
               detail: [
@@ -212,7 +187,6 @@ function Figures(props: { model: RecapPageModel; appName: string }) {
             })}
           </p>
           <GarmentList
-            viewOwner={viewOwner}
             rows={recap.bestValue.map((entry) => ({
               garment: entry.garment,
               detail: perWearLine(entry),
@@ -249,7 +223,7 @@ function Figures(props: { model: RecapPageModel; appName: string }) {
             data-pair={`${recap.pair.a.id}-${recap.pair.b.id}`}
           >
             {[recap.pair.a, recap.pair.b].map((garment) => (
-              <a href={garmentUrl(garment.id, viewOwner)} class="shrink-0">
+              <a href={garmentUrl(garment.id, undefined)} class="shrink-0">
                 <GarmentThumb garment={garment} class="rounded-box" />
               </a>
             ))}
@@ -281,7 +255,7 @@ function Summary(props: { model: RecapPageModel; appName: string }) {
           </div>
         ))}
       </div>
-      {model.isOwner && <Export recap={recap} appName={props.appName} />}
+      <Export recap={recap} appName={props.appName} />
     </Card>
   );
 }

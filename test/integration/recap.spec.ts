@@ -18,10 +18,11 @@ import { expectFullPage, expectNoScriptNavigation } from './pages';
  * December 31), a past year's figures stopping at its December 31, an
  * archived garment still that year's, a wishlist item and another user's
  * wears changing nothing, additions by acquired date (undated ones left
- * out), the threshold's empty state, `?year=` as navigation state, and the
- * access: the owner's, a grantee's under `?ownerId=` (no image), a
- * stranger's 404. The rules on made-up rows are src/wardrobe/recap.spec.ts;
- * the seed's Theo is insights-seed.spec.ts.
+ * out), the threshold's empty state, `?year=` as navigation state, and
+ * that it is the signed-in user's own, like insights: a grantee or a
+ * stranger passing `?ownerId=<owner>` sees their own recap, never the
+ * owner's. The rules on made-up rows are src/wardrobe/recap.spec.ts; the
+ * seed's Theo is insights-seed.spec.ts.
  */
 
 const NOW = '2026-09-27T16:00:00Z';
@@ -60,6 +61,7 @@ describe('year in review', () => {
   let ownerId: number;
   let viewerCookie: string;
   let strangerCookie: string;
+  let viewerJacket: number;
   const g: Record<string, number> = {};
 
   async function newGarment(fields: GarmentFields, cookie?: string) {
@@ -178,9 +180,21 @@ describe('year in review', () => {
     await wear(theirs, ['2026-03-03', '2026-04-14'], strangerId);
 
     viewerCookie = await t.register('viewer@example.com');
+    const viewerId = await userIdOf(t, 'viewer@example.com');
+    viewerJacket = await newGarment(
+      { name: 'Viewer jacket', category: 'outerwear' },
+      viewerCookie,
+    );
+    await wear(
+      viewerJacket,
+      [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        .map((month) => `2026-0${month}-02`)
+        .concat('2026-09-03'),
+      viewerId,
+    );
     await t.db.insert(wardrobeShare).values({
       grantorId: ownerId,
-      granteeId: await userIdOf(t, 'viewer@example.com'),
+      granteeId: viewerId,
       permission: 'VIEW',
       inviteToken: randomUUID(),
       createdAt: new Date(),
@@ -333,46 +347,33 @@ describe('year in review', () => {
     expect(record.statements).toBe(3);
   });
 
-  it('shows a VIEW grantee the owner’s recap, links under the share, no image', async () => {
+  // As insights' "is the signed-in user's own: ?ownerId= is ignored": the
+  // share gives the grantee the owner's garments, never the owner's wears.
+  it('is the signed-in user’s own: a grantee’s ?ownerId= is ignored', async () => {
+    // Their own 2026: the jacket's ten wears, and the image of their recap.
     const { html } = await page(`?ownerId=${ownerId}`, viewerCookie);
-    expect(html).toContain('id="recap-shared"');
-    expect(idsIn(html, 'recap-most-worn')).toEqual([
-      g.tee,
-      g.jeans,
-      g.coat,
-      g.undated,
-    ]);
-    expect(html).toContain(`href="/wardrobe/${g.tee}?ownerId=${ownerId}"`);
-    expect(html).toContain(
-      `href="/wardrobe/recap?year=2025&ownerId=${ownerId}"`,
+    expect(idsIn(html, 'recap-most-worn')).toEqual([viewerJacket]);
+    expect(section(html, 'recap-summary')).toMatch(
+      /data-stat="wears"[^]*?>10</,
     );
-    expect(html).toContain(`href="/wardrobe?ownerId=${ownerId}"`);
-    expect(html).not.toContain('id="recap-export"');
-    expect(html).not.toContain('recap-card-data');
-    // An empty year of the owner's: nothing to mark worn for them.
-    const empty = (await page(`?year=2024&ownerId=${ownerId}`, viewerCookie))
+    expect(html).toContain('id="recap-export"');
+    // The owner's 2025 is a recap; the grantee's is empty.
+    const past = (await page(`?ownerId=${ownerId}&year=2025`, viewerCookie))
       .html;
-    expect(empty).toContain('id="recap-empty"');
-    expect(empty).not.toContain('id="recap-calendar"');
-    // Their own is their own: nothing worn.
-    const own = (await page('', viewerCookie)).html;
-    expect(own).toContain('id="recap-empty"');
-    expect(own).not.toContain('White tee');
+    expect(past).toContain('Nothing was marked worn in 2025.');
+    for (const shown of [html, past]) {
+      expect(shown).not.toContain('White tee');
+      expect(shown).not.toContain('Blue jeans');
+      expect(shown).not.toContain(`ownerId=${ownerId}`);
+    }
   });
 
-  it('is a 404 to someone the wardrobe is not shared with, and a 400 for a malformed ownerId', async () => {
-    const stranger = await t.inject({
-      method: 'GET',
-      url: `/wardrobe/recap?ownerId=${ownerId}`,
-      headers: { cookie: strangerCookie },
-    });
-    expect(stranger.statusCode).toBe(404);
-    expect(stranger.body).not.toContain('White tee');
-    const malformed = await t.inject({
-      method: 'GET',
-      url: '/wardrobe/recap?ownerId=abc',
-    });
-    expect(malformed.statusCode).toBe(400);
+  it('shows anyone else passing ?ownerId= their own recap too, whatever it names', async () => {
+    for (const query of [`?ownerId=${ownerId}`, '?ownerId=abc']) {
+      const { html } = await page(query, strangerCookie);
+      expect(html, query).toContain('Only 2 wears were marked in 2026.');
+      expect(html, query).not.toContain('White tee');
+    }
   });
 
   it('is linked from insights', async () => {

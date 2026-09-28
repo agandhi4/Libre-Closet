@@ -3,8 +3,9 @@
 Issue #26. A year in review built from insights: the most worn pieces, what was added, and the cost
 per wear winners. Seen in Whering's "Unpacked". **Shareable means an image export** (coordinator's
 design call on the issue): the owner saves the recap as a PNG and sends it wherever they like. There
-is no public link and no unauthenticated route. People the owner already shares the wardrobe with see
-the page under their existing grant.
+is no public link and no unauthenticated route. **The recap is owner-only, like Insights**: it is
+built from the wear log, and wear data never reaches a grantee. (A first version let grantees see
+the owner's recap under their grant; the coordinator reversed that on 2026-09-28.)
 
 ## Data
 
@@ -37,21 +38,21 @@ the page under their existing grant.
 
 ## UX
 
-- **Where it lives.** `GET /wardrobe/recap[?year=YYYY][&ownerId=N]`, under Wardrobe in the dock.
+- **Where it lives.** `GET /wardrobe/recap[?year=YYYY]`, under Wardrobe in the dock.
   It is reached from the Wardrobe's ⋯ menu ("Year in review") and from Insights.
-  - The menu entry carries `?ownerId=` on a shared wardrobe.
+  - The menu offers it only on the user's own wardrobe, never in a grantee's view of another.
   - `?year=` is navigation state. Anything that is not a four-digit year up to this one is the
     current year, never a 400.
-- **Access.** The recap is share-aware: it goes through `authorizeWardrobe(…, 'view')`, so a VIEW or
-  MANAGE grantee sees the owner's recap and a stranger gets a 404. This is the one place a grantee
-  sees figures drawn from the owner's wear log. It is an aggregate, which the owner already chose to
-  share by granting the wardrobe. The export button is the owner's alone.
+- **Access.** The signed-in user's own, exactly like Insights: the route reads `sessionUserId` and
+  ignores `?ownerId=`. A grantee who passes `?ownerId=<owner>` sees their own recap, never the
+  owner's. So "Save image" is owner-only by construction: there is only ever one's own recap to
+  export.
 - **Phone first**, in one column of Atelier cards:
   1. the year's switcher (‹ 2025 · 2026 so far ›);
   2. the summary: wears, pieces worn, new pieces, and "Save image";
   3. Most worn, New this year, Best value per wear, Colours worn, and Worn together most.
 
-  Garments link to their pages, under the share for a grantee.
+  Garments link to their pages.
 - **Current year versus past years:**
   - The current year reads "2026 so far", through today ("Jan 1 – Sep 27"), and fills in as the year
     goes on.
@@ -63,7 +64,7 @@ the page under their existing grant.
 - **Too little data.** A year needs at least `RECAP_MIN_WEARS` (10) wears to be recapped. Below
   that, the page shows an empty state:
   - it says how many wears the year has;
-  - for the owner, it offers the calendar;
+  - it offers the calendar;
   - it keeps the ‹ link when an earlier year has wears.
 
   There is no export for such a year. A year with additions but no wears is still empty: the recap
@@ -76,7 +77,7 @@ the page under their existing grant.
 
 ## Image export: on the device, with Canvas 2D
 
-`public/js/recap-export.js` (about 200 lines, loaded only by the owner's recap) draws the card on a
+`public/js/recap-export.js` (about 200 lines, loaded only by the recap page) draws the card on a
 `<canvas>` from a JSON data island the page renders. `canvas.toBlob` makes the PNG. Then:
 
 - where the browser can share files (`navigator.canShare({ files })`: iOS Safari 15 and later,

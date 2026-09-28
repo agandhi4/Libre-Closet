@@ -1,7 +1,7 @@
 import type { Child } from 'hono/jsx';
 import { PostForm } from '../auth/form';
 import { t } from '../i18n';
-import { INSIGHTS_PATH, recapUrl } from '../insights/urls';
+import { INSIGHTS_PATH, RECAP_PATH } from '../insights/urls';
 import { AppBar } from '../layout/app-bar';
 import {
   CameraIcon,
@@ -168,9 +168,10 @@ function SwitcherItems(props: WardrobeHeaderProps) {
  * less frequent places. Select (the closet grid's, with its filters) and
  * tagging for someone who may edit; Plans, the shopping list (#34) and
  * Insights (#17), which are the signed-in user's own, so those links never
- * carry a shared wardrobe's `?ownerId=`; the year in review (#26), which is
- * share-aware and does. Links only: a form inside a daisyUI menu item loses
- * its styling.
+ * carry a shared wardrobe's `?ownerId=`. The year in review (#26) is the
+ * user's own too, and offered only on their own wardrobe, never in a
+ * grantee's view of another. Links only: a form inside a daisyUI menu item
+ * loses its styling.
  *
  * `oob` swaps it in beside a filtered grid (GET /wardrobe's fragment), so
  * Select keeps the filters the grid now shows.
@@ -216,9 +217,11 @@ export function WardrobeMenu(props: {
         <li>
           <a href={INSIGHTS_PATH}>{t('insights.TITLE')}</a>
         </li>
-        <li>
-          <a href={recapUrl(viewOwner)}>{t('recap.TITLE')}</a>
-        </li>
+        {viewOwner === undefined && (
+          <li>
+            <a href={RECAP_PATH}>{t('recap.TITLE')}</a>
+          </li>
+        )}
       </ul>
     </details>
   );

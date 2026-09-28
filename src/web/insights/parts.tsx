@@ -30,14 +30,10 @@ export function garmentName(garment: InsightGarment): string {
   return garment.name ?? categoryLabel(garment.category);
 }
 
-/**
- * A row per garment: its thumb and name (linking to its page, under the
- * shared wardrobe's `?ownerId=` for a grantee), a line, an action.
- */
+/** A row per garment: its thumb and name (linking to its page), a line, an action. */
 export function GarmentList(props: {
   rows: { garment: InsightGarment; detail: string }[];
   action?: (garment: InsightGarment) => Child;
-  viewOwner?: number;
 }) {
   if (props.rows.length === 0) return null;
   return (
@@ -45,7 +41,7 @@ export function GarmentList(props: {
       {props.rows.map(({ garment, detail }) => (
         <li class="flex items-center gap-3" data-garment-id={garment.id}>
           <a
-            href={garmentUrl(garment.id, props.viewOwner)}
+            href={garmentUrl(garment.id, undefined)}
             class="flex items-center gap-3 flex-1 min-w-0"
           >
             <GarmentThumb garment={garment} class="rounded-box shrink-0" />

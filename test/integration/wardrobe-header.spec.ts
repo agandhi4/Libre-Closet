@@ -128,14 +128,15 @@ describe('the Wardrobe header and tabs', () => {
     expect(menu).toContain('href="/wardrobe?category=bottoms&select=1"');
   });
 
-  it('offers a VIEW grantee no Select, tagging or add, their own Plans and Insights, and the shared year in review', async () => {
+  it('offers a VIEW grantee no Select, tagging or add, their own Plans and Insights, and no year in review', async () => {
     const html = await get(`/wardrobe?ownerId=${ownerId}`, viewer);
     const menu = menuOf(html)!;
     expect(menu).not.toContain('select=1');
     expect(menu).not.toContain('/wardrobe/tag');
     expect(menu).toContain('href="/wardrobe/plans"');
     expect(menu).toContain('href="/wardrobe/insights"');
-    expect(menu).toContain(`href="/wardrobe/recap?ownerId=${ownerId}"`);
+    // The recap is the wear log: never offered inside someone else's wardrobe.
+    expect(menu).not.toContain('/wardrobe/recap');
     expect(sheetOf(html)).toBeUndefined();
     expect(html).not.toContain('aria-label="Add"');
   });
