@@ -272,6 +272,88 @@ describe('Metrics', () => {
         /^cutout_queue_depth 3$/m,
       );
     });
+
+    // Past the first scrape nothing awaits the count, so a throw in its
+    // handling would be an unhandled rejection: a crash in production
+    // (main.ts). Watched on the process itself, not left to Vitest.
+    it.each([
+      ['NaN', Number.NaN],
+      ['a string', '4' as unknown as number],
+      ['Infinity', Number.POSITIVE_INFINITY],
+    ])(
+      'keeps the last depth and logs when a count is %s, rejecting nothing',
+      async (_name, bad) => {
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', onUnhandled);
+        try {
+          const { metrics, logs } = newMetrics();
+          let depth = 3;
+          metrics.trackCutoutQueue(() => Promise.resolve(depth));
+          expect((await metrics.exposition()).body).toMatch(
+            /^cutout_queue_depth 3$/m,
+          );
+          depth = bad;
+          await metrics.exposition();
+          await vi.waitFor(() =>
+            expect(logs.messages('warn')).toEqual([
+              `Could not read the cutout queue's depth: not a count: ${String(bad)}`,
+            ]),
+          );
+          await new Promise((settled) => setImmediate(settled));
+          expect((await metrics.exposition()).body).toMatch(
+            /^cutout_queue_depth 3$/m,
+          );
+          expect(unhandled).toEqual([]);
+        } finally {
+          process.off('unhandledRejection', onUnhandled);
+        }
+      },
+    );
+
+    it('stops waiting after a first count that failed, the gauge at 0', async () => {
+      const { metrics, logs } = newMetrics();
+      const counts: { reject: (error: Error) => void }[] = [];
+      metrics.trackCutoutQueue(
+        () =>
+          new Promise<number>((_resolve, reject) => counts.push({ reject })),
+      );
+      const first = metrics.exposition();
+      await vi.waitFor(() => expect(counts).toHaveLength(1));
+      counts[0].reject(new Error('connection refused'));
+      expect((await first).body).toMatch(/^cutout_queue_depth 0$/m);
+      expect(logs.messages('warn')).toEqual([
+        "Could not read the cutout queue's depth: connection refused",
+      ]);
+      // The next count never answers; the scrape does not wait for it.
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 0$/m,
+      );
+      expect(counts).toHaveLength(2);
+    });
+
+    it('survives a count that throws before it is a promise', async () => {
+      const { metrics, logs } = newMetrics();
+      let calls = 0;
+      metrics.trackCutoutQueue(() => {
+        calls += 1;
+        if (calls === 1) throw new Error('pool closed');
+        return Promise.resolve(2);
+      });
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 0$/m,
+      );
+      expect(logs.messages('warn')).toEqual([
+        "Could not read the cutout queue's depth: pool closed",
+      ]);
+      // A later scrape starts a count again: the first did not stay stuck.
+      await metrics.exposition();
+      await new Promise((settled) => setImmediate(settled));
+      expect((await metrics.exposition()).body).toMatch(
+        /^cutout_queue_depth 2$/m,
+      );
+      expect(calls).toBe(3);
+    });
   });
 
   // The homelab's dashboards and alerts (homelab #39) read these names,
