@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { BUILD_INFO } from '../../src/build-info';
 import { user } from '../../src/db/schema';
 import {
   type SentryEvent,
@@ -183,8 +184,13 @@ describe('error tracking with a DSN (a stub Bugsink)', () => {
     expect(event.tags).toMatchObject({
       source: 'client',
       route: '/wardrobe/:id',
+      // What the page claims: visible, but never the event's release.
+      page_release: '0123456789abcdef0123456789abcdef01234567',
     });
-    expect(event.release).toBe('0123456789abcdef0123456789abcdef01234567');
+    // The server's own (no build.json here, so none): a signed-in user
+    // cannot file events under a release of their choosing.
+    expect(event.release).toBe(BUILD_INFO.sha);
+    expect(event.release).not.toBe('0123456789abcdef0123456789abcdef01234567');
     expect(event.user).toEqual({ id: String(t.owner.id) });
     const [exception] = event.exception?.values ?? [];
     expect(exception.type).toBe('ClientError');

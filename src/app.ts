@@ -125,7 +125,7 @@ export async function createApp(
   boot.info(
     `Metrics: ${config.METRICS_ENABLED ? 'on (GET /metrics, POST /metrics/vitals)' : 'off (METRICS_ENABLED=false)'}`,
   );
-  const errors = createErrorTracker({
+  const errors = await createErrorTracker({
     dsn: config.SENTRY_DSN,
     release: BUILD_INFO.sha,
     environment: config.NODE_ENV,

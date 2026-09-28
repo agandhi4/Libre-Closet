@@ -126,6 +126,7 @@ export function recordErrors(): RecordedErrors {
       captureClientError(report, userId) {
         clientErrors.push({ report, userId });
       },
+      flush: () => Promise.resolve(),
       close: () => Promise.resolve(),
     },
     exceptions,
