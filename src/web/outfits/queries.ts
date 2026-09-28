@@ -23,8 +23,12 @@ import {
 import type { Occasion } from '../../wardrobe/occasions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
-import type { ImageRef } from '../files/image-url';
-import { PHOTO_REF_RELATION, photoRefJson } from '../files/queries';
+import type { SignablePhotoRef } from '../files/image-url';
+import {
+  PHOTO_REF_RELATION,
+  photoRefJson,
+  readPhotoRef,
+} from '../files/queries';
 import type { IsoDate } from '../calendar/calendar-date';
 import { insertEntry, type ScheduleOutcome } from '../calendar/queries';
 import type { SelfieRef } from '../selfies/queries';
@@ -48,7 +52,7 @@ export interface OutfitGarment {
   name: string | null;
   /** Where it goes in an OutfitCollage (its role). */
   category: string;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
 }
 
 export interface OutfitSummary {
@@ -133,7 +137,9 @@ async function outfitsWithGarments(
   });
   return rows.map(({ slots, ...fields }) => ({
     ...fields,
-    garments: slots.flatMap(({ garment: shown }) => (shown ? [shown] : [])),
+    garments: slots.flatMap(({ garment: shown }) =>
+      shown ? [{ ...shown, photo: readPhotoRef(shown.photo) }] : [],
+    ),
   }));
 }
 

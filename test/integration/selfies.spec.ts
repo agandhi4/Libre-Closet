@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { file, garmentWear, outfitCalendar, selfie } from '../../src/db/schema';
 import { addDays } from '../../src/web/calendar/calendar-date';
 import { imageUrl } from '../../src/web/files/image-url';
+import { readPhotoRef } from '../../src/web/files/queries';
 import { variantFileName } from '../../src/web/files/image-variant';
 import { createGarment } from './garments';
 import {
@@ -227,7 +228,11 @@ describe('outfit selfies', () => {
     // A signature is the server's word that a name is no selfie's (#162):
     // one made for another photo does not carry over to this name.
     const signedForAnother = imageUrl(
-      { fileName: `${randomUUID()}.webp`, version: 1, variantKey: null },
+      readPhotoRef({
+        fileName: `${randomUUID()}.webp`,
+        version: 1,
+        variantKey: null,
+      }),
       'thumb',
     );
     const borrowed = `/file/thumb/${fileName}?${signedForAnother.split('?')[1]}`;

@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { file, garment, garmentWear } from '../../db/schema';
-import { PHOTO_REF_COLUMNS } from '../files/queries';
+import { photoRefJson } from '../files/queries';
 import {
   type InsightGarment,
   PAIR_MIN_DAYS,
@@ -74,7 +74,7 @@ export function insightGarments(
         // is what the garment had cost by its December 31 (#151).
         repairCost: repairCostSql(garment.id, window.to),
         condition: garment.condition,
-        photo: PHOTO_REF_COLUMNS,
+        photo: photoRefJson,
         acquiredOn: garment.acquiredOn,
         wearDays: sql<number>`count(distinct ${garmentWear.day})::int`,
         recentWearDays: sql<number>`(count(distinct ${garmentWear.day}) filter (where ${garmentWear.day} >= ${window.from}::date))::int`,

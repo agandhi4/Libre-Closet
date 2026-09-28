@@ -30,6 +30,7 @@ const heicMock = vi.mocked(heicDecode.all);
 vi.mock('./queries', () => ({
   findPhotoByShareableId: vi.fn(),
   findVariantKey: vi.fn(),
+  readPhotoRef: (photo: unknown) => photo,
 }));
 vi.mock('../../cutout/queries', () => ({
   lockCutoutRow: vi.fn(),

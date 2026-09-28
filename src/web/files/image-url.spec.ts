@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   configurePhotoUrls,
   imageUrl,
   type PhotoUrlQuery,
   selfieUrl,
+  type SignablePhotoRef,
   signedPhoto,
 } from './image-url';
+import { readPhotoRef } from './queries';
 
 const NAME = '0b8f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4.webp';
 const KEY = 'a1b2c3d4e5f6';
@@ -20,7 +22,7 @@ function parse(url: string): { path: string; query: PhotoUrlQuery } {
 }
 
 describe('imageUrl', () => {
-  const keyed = { fileName: NAME, version: 3, variantKey: KEY };
+  const keyed = readPhotoRef({ fileName: NAME, version: 3, variantKey: KEY });
 
   it('names the variant by path and the set by its query', () => {
     expect(parse(imageUrl(keyed, 'original')).path).toBe(`/file/${NAME}`);
@@ -40,20 +42,33 @@ describe('imageUrl', () => {
   });
 
   it('leaves the key out while the set is unkeyed, and defaults the version to 1', () => {
-    expect(imageUrl({ fileName: NAME, variantKey: null }, 'thumb')).toMatch(
-      new RegExp(`^/file/thumb/${NAME}\\?v=1&s=[A-Za-z0-9_-]{16}$`),
-    );
+    expect(
+      imageUrl(readPhotoRef({ fileName: NAME, variantKey: null }), 'thumb'),
+    ).toMatch(new RegExp(`^/file/thumb/${NAME}\\?v=1&s=[A-Za-z0-9_-]{16}$`));
+  });
+
+  // Only the photo-ref helpers of queries.ts make a SignablePhotoRef: an
+  // object with the right fields, a selfie's row say, is not one (#162).
+  it('takes only a branded photo ref', () => {
+    const plain = { fileName: NAME, version: 3, variantKey: null };
+    // @ts-expect-error a plain object is not a SignablePhotoRef
+    expect(imageUrl(plain, 'thumb')).toMatch(/^\/file\/thumb\//);
+    expectTypeOf(plain).not.toExtend<SignablePhotoRef>();
+    expectTypeOf(readPhotoRef(plain)).toExtend<SignablePhotoRef>();
   });
 
   it('percent-encodes the file name', () => {
     expect(
-      imageUrl({ fileName: 'a b.webp', variantKey: null }, 'original'),
+      imageUrl(
+        readPhotoRef({ fileName: 'a b.webp', variantKey: null }),
+        'original',
+      ),
     ).toMatch(/^\/file\/a%20b\.webp\?v=1&s=/);
   });
 });
 
 describe('signedPhoto', () => {
-  const photo = { fileName: NAME, version: 4, variantKey: KEY };
+  const photo = readPhotoRef({ fileName: NAME, version: 4, variantKey: KEY });
 
   it('answers the set a URL names when its signature holds', () => {
     const { query } = parse(imageUrl(photo, 'nobg'));

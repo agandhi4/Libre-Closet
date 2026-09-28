@@ -1,26 +1,33 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { type ImageVariant, type StoredPhoto } from './image-variant';
 
-/**
- * A photo a share may show (a garment's, or a pending photo shown to the
- * user who stored it) as its URL names it: the stored set its row points at
- * (StoredPhoto: select PHOTO_REF_COLUMNS, src/web/files/queries.ts) and
- * `file.version`. The variant key is required on purpose: an outfit
- * selfie's query selects none (SelfiePhoto), so a selfie cannot reach
- * imageUrl, whose signature is what lets /file/** serve without asking the
- * database whether a name is a selfie.
- */
-export interface ImageRef extends StoredPhoto {
+/** The parts of a photo a /file URL names: its stored set and `file.version`. */
+export interface PhotoRefFields extends StoredPhoto {
   version?: number;
 }
+
+declare const signable: unique symbol;
+
+/**
+ * A photo a share may show (a garment's, a wishlist item's, an outfit's
+ * garments', or a pending photo shown to the user who stored it), as
+ * imageUrl signs it. Branded: only the photo-ref helpers of
+ * src/web/files/queries.ts make one (photoRefJson, photoWithCutoutJson,
+ * plinthPhoto, readPhotoRef, pendingPhotoRef), so a plain object with the
+ * same fields does not compile as one. The signature is what lets /file/**
+ * serve without asking the database whether a name is a selfie's; an
+ * outfit selfie's queries (src/web/selfies) never import those helpers
+ * (photo-ref-guard.spec.ts) and draw through selfieUrl (SelfiePhoto).
+ */
+export type SignablePhotoRef = PhotoRefFields & { readonly [signable]: true };
 
 /**
  * A garment's photo as the plinth draws it (PlinthImage, layout/parts.tsx):
  * `cutout` is showsCutout of its cutout status (src/cutout/state.ts).
  */
-export interface PlinthPhoto extends ImageRef {
+export type PlinthPhoto = SignablePhotoRef & {
   cutout: boolean;
-}
+};
 
 /** An outfit selfie's photo (#19): never keyed, never under /file/**. */
 export interface SelfiePhoto {
@@ -40,7 +47,10 @@ export interface SelfiePhoto {
 // never change: every variant is immutable for a year. The signature does
 // not depend on the variant, so a photo's three URLs differ only in their
 // path.
-export function imageUrl(image: ImageRef, variant: ImageVariant): string {
+export function imageUrl(
+  image: SignablePhotoRef,
+  variant: ImageVariant,
+): string {
   const version = image.version ?? 1;
   const key = image.variantKey === null ? '' : `&k=${image.variantKey}`;
   const signature = photoSignature(image.fileName, image.variantKey, version);
@@ -113,9 +123,9 @@ export interface PhotoUrlQuery {
 
 /**
  * The StoredPhoto an imageUrl names, when its signature holds: then the
- * name is one the server rendered through imageUrl, which only photos a
- * share may show reach (never a selfie: SelfiePhoto), with the variant key its
- * row had then. Undefined for anything else (an old page's unsigned URL, a
+ * name is one the server rendered through imageUrl, which takes only a
+ * SignablePhotoRef (never a selfie's), with the variant key its row had
+ * then. Undefined for anything else (an old page's unsigned URL, a
  * URL signed under another secret, a changed parameter), which the route
  * answers through the row as it always did.
  */

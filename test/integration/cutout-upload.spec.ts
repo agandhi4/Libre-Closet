@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { file } from '../../src/db/schema';
 import { imageUrl } from '../../src/web/files/image-url';
+import { readPhotoRef } from '../../src/web/files/queries';
 import { fakeRunner, halfMask, storedCutout } from './cutouts';
 import {
   createGarment,
@@ -132,7 +133,7 @@ describe('cutouts: upload, page and polling', () => {
     // The new set's URL: version 2 under the key the job stored it as.
     const row = await photoRow(t, fileName);
     const nobgUrl = imageUrl(
-      { fileName, version: 2, variantKey: row!.variantKey },
+      readPhotoRef({ fileName, version: 2, variantKey: row!.variantKey }),
       'nobg',
     );
     expect(row!.variantKey).toMatch(/^[0-9a-f]{12}$/);

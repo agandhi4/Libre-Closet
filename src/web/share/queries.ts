@@ -1,7 +1,7 @@
 import { asc, eq, isNotNull } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { garment, outfit, outfitSlot } from '../../db/schema';
-import { PHOTO_REF_RELATION } from '../files/queries';
+import { PHOTO_REF_RELATION, readPhotoRef } from '../files/queries';
 
 /**
  * The public share page's reads: a garment or an outfit by its share id,
@@ -19,11 +19,12 @@ const PHOTO_COLUMNS = {
 } as const;
 
 export async function findSharedGarment(db: Db, shareableId: string) {
-  return db.query.garment.findFirst({
+  const row = await db.query.garment.findFirst({
     columns: { name: true, category: true, brand: true },
     where: eq(garment.shareableId, shareableId),
     with: { owner: OWNER_COLUMNS, photo: PHOTO_COLUMNS },
   });
+  return row && { ...row, photo: readPhotoRef(row.photo) };
 }
 
 export type SharedGarment = NonNullable<
@@ -54,7 +55,9 @@ export async function findSharedOutfit(db: Db, shareableId: string) {
   const { slots, ...fields } = row;
   return {
     ...fields,
-    garments: slots.flatMap(({ garment: shown }) => (shown ? [shown] : [])),
+    garments: slots.flatMap(({ garment: shown }) =>
+      shown ? [{ ...shown, photo: readPhotoRef(shown.photo) }] : [],
+    ),
   };
 }
 

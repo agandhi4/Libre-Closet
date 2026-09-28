@@ -11,8 +11,12 @@ import {
   tripPhase,
 } from '../../wardrobe/packing';
 import type { IsoDate } from '../calendar/calendar-date';
-import type { ImageRef } from '../files/image-url';
-import { PHOTO_REF_COLUMNS, PHOTO_REF_RELATION } from '../files/queries';
+import type { SignablePhotoRef } from '../files/image-url';
+import {
+  PHOTO_REF_RELATION,
+  photoRefJson,
+  readPhotoRef,
+} from '../files/queries';
 import type { CollageGarment } from '../outfits/collage';
 import { wearsSinceWashSql } from '../wears/queries';
 import {
@@ -51,7 +55,7 @@ export interface TripDay {
 /** A garment on the packing list, as the page and the tool show it. */
 export interface PackingGarmentView extends PackingGarment {
   name: string | null;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
 }
 
 export interface TripModel {
@@ -116,7 +120,9 @@ async function tripOutfitViews(
       name: row.outfit.name,
       day: row.day,
       occasion: row.occasion,
-      garments: row.outfit.slots.flatMap(({ garment: g }) => (g ? [g] : [])),
+      garments: row.outfit.slots.flatMap(({ garment: g }) =>
+        g ? [{ ...g, photo: readPhotoRef(g.photo) }] : [],
+      ),
     }))
     .sort(byDayAndOccasion);
 }
@@ -142,7 +148,7 @@ async function packingGarments(
       washAfterWears: garment.washAfterWears,
       status: garment.status,
       away: garment.away,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
       wearsSinceWash: wearsSinceWashSql(),
       packed: sql<boolean>`exists (select 1 from ${tripGarmentPacked} where ${tripGarmentPacked.tripId} = ${tripId} and ${tripGarmentPacked.garmentId} = ${garment.id})`,
     })

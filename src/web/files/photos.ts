@@ -23,7 +23,7 @@ import {
   imageTooLarge,
   isHeicUpload,
 } from './heic';
-import type { ImageRef } from './image-url';
+import type { SignablePhotoRef } from './image-url';
 import {
   type ImageVariant,
   newVariantKey,
@@ -35,6 +35,7 @@ import {
 import {
   findPhotoByShareableId,
   findVariantKey,
+  readPhotoRef,
   type NewPhotoRow,
 } from './queries';
 import { PhotoStorage } from './storage';
@@ -483,7 +484,7 @@ export class Photos {
   async saveEditedCutout(
     stream: Readable,
     originalFileName: string,
-  ): Promise<ImageRef | undefined> {
+  ): Promise<SignablePhotoRef | undefined> {
     const bytes = await this.encodeUpload(
       stream,
       originalTransformer(decoder()),
@@ -500,7 +501,9 @@ export class Photos {
       return undefined;
     }
     const { version, variantKey } = outcome.state;
-    return { fileName: originalFileName, version, variantKey };
+    // A garment's photo: the mask editor edits only those (never a selfie,
+    // `unwanted`, which the machine refuses an edit).
+    return readPhotoRef({ fileName: originalFileName, version, variantKey });
   }
 
   /**

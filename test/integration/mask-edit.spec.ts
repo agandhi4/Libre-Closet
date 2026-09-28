@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { imageUrl } from '../../src/web/files/image-url';
+import { readPhotoRef } from '../../src/web/files/queries';
 import { variantFileName } from '../../src/web/files/image-variant';
 import {
   createGarment,
@@ -104,7 +105,10 @@ describe('mask edit (POST /wardrobe/:id/nobg)', () => {
     // A script from before the answer had URLs rewrote only `v` of the
     // old signed URL: the signature covers it, so the row answers, with
     // the new set, never the old one under the new version.
-    const before = imageUrl({ fileName, version: 1, variantKey: null }, 'nobg');
+    const before = imageUrl(
+      readPhotoRef({ fileName, version: 1, variantKey: null }),
+      'nobg',
+    );
     const rewritten = await t.inject({
       method: 'GET',
       url: before.replace('?v=1&', '?v=2&'),

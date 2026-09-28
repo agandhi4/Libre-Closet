@@ -10,9 +10,11 @@ import { publicPhoto } from './references';
 
 // A variant URL names its bytes for good (imageUrl: a signed URL names the
 // set, and new bytes are a new version, so a new URL), which is what makes
-// a year of immutable caching safe. Private: a photo is someone's, and no
-// shared cache should keep one its owner has deleted.
-const IMMUTABLE_YEAR = 'private, max-age=31536000, immutable';
+// a year of immutable caching safe. `private` (#229): a photo is its owner's
+// wardrobe, so no shared cache (a proxy, a CDN) may keep a copy that would
+// outlive its deletion or a share that showed it. The one constant for
+// every /file variant, whichever way it was found.
+const PRIVATE_IMMUTABLE_YEAR = 'private, max-age=31536000, immutable';
 // Share previews are addressed by the photo's share id, which never changes
 // with its bytes: a day, so a crawler's copy catches up with a mask edit.
 const SHARE_PREVIEW_CACHE = 'public, max-age=86400';
@@ -69,12 +71,13 @@ export const fileRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const stream = await photos.openStoredVariant(signed, variant);
       if (stream) {
         metrics.countPhotoRequest('none');
-        return sendImage(reply, stream, 'image/webp', IMMUTABLE_YEAR);
+        return sendImage(reply, stream, 'image/webp', PRIVATE_IMMUTABLE_YEAR);
       }
       // The set is gone (a cutout swap or a rotate retired it, the garment
       // was deleted) or its thumb is still to be made: the row decides.
+      // Never the URL: its `s=` is a capability.
       logger.debug(
-        `${reply.request.url}: the signed set is not in storage; asking the row`,
+        `Signed ${variant} of ${fileName} is not in storage; asking the row`,
       );
     }
     // The row names the nobg and thumb it points at (its variant key), so
@@ -86,12 +89,13 @@ export const fileRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       throw new HttpError(404);
     }
     const stream = await photos.getVariant(photo, variant);
-    return sendImage(reply, stream, 'image/webp', IMMUTABLE_YEAR);
+    return sendImage(reply, stream, 'image/webp', PRIVATE_IMMUTABLE_YEAR);
   };
 
   // Fastify answers a stream that fails before its headers through the
   // error handler and destroys one that fails later; either way the failure
-  // is logged here, with the file it was serving.
+  // is logged here, with the file it was serving: the path alone, since a
+  // /file query's `s=` is a capability.
   const sendImage = (
     reply: FastifyReply,
     stream: Readable,
@@ -99,7 +103,10 @@ export const fileRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     cacheControl: string,
   ) => {
     stream.on('error', (error) =>
-      logger.error({ err: error }, `Streaming ${reply.request.url} failed`),
+      logger.error(
+        { err: error },
+        `Streaming ${reply.request.url.split('?')[0]} failed`,
+      ),
     );
     return reply
       .header('Cache-Control', cacheControl)

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { imageUrl } from '../../src/web/files/image-url';
+import { readPhotoRef } from '../../src/web/files/queries';
 import { variantFileName } from '../../src/web/files/image-variant';
 import { createGarment, garmentRow, jpegPhoto, uploadPhoto } from './garments';
 import {
@@ -58,7 +59,7 @@ describe('wardrobe', () => {
     it('renders the grid with versioned thumbs, eager above the fold and lazy below', async () => {
       // The URL a page renders: signed (#162).
       const thumbUrl = imageUrl(
-        { fileName, version: 1, variantKey: null },
+        readPhotoRef({ fileName, version: 1, variantKey: null }),
         'thumb',
       );
       const tileFor = (html: string) =>

@@ -19,6 +19,7 @@ import type * as CutoutQueueModule from '../../src/cutout/queue';
 import type { CutoutRunner } from '../../src/cutout/runner';
 import type * as DbClientModule from '../../src/db/client';
 import type * as ImageUrlModule from '../../src/web/files/image-url';
+import type * as FileQueriesModule from '../../src/web/files/queries';
 import type * as LoggerModule from '../../src/logger';
 import type * as ReconcileModule from '../../src/maintenance/reconcile';
 import type * as SchemaModule from '../../src/db/schema';
@@ -84,6 +85,7 @@ export interface Build {
   logger: typeof LoggerModule;
   db: typeof DbClientModule;
   imageUrl: typeof ImageUrlModule;
+  fileQueries: typeof FileQueriesModule;
   schema: typeof SchemaModule;
   seed: typeof SeedModule;
   calendar: typeof CalendarDateModule;
@@ -109,6 +111,7 @@ async function loadBuild(): Promise<Build> {
     logger: await load('logger.js'),
     db: await load('db/client.js'),
     imageUrl: await load('web/files/image-url.js'),
+    fileQueries: await load('web/files/queries.js'),
     schema: await load('db/schema.js'),
     seed: await load('seed/seed.js'),
     calendar: await load('web/calendar/calendar-date.js'),

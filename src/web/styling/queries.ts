@@ -11,7 +11,11 @@ import {
 } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { file, garment, outfit, outfitSlot } from '../../db/schema';
-import { PHOTO_REF_COLUMNS, PHOTO_REF_RELATION } from '../files/queries';
+import {
+  PHOTO_REF_RELATION,
+  photoRefJson,
+  readPhotoRef,
+} from '../files/queries';
 import {
   builtInCategoriesOf,
   categoryRole,
@@ -120,7 +124,7 @@ export async function roleWindows(
       status: deepest.status,
       role: deepest.role,
       count: deepest.count,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
     })
     .from(deepest)
     .leftJoin(file, eq(file.id, deepest.photoId))
@@ -152,7 +156,7 @@ export async function roleGarmentsBefore(
       name: garment.name,
       category: garment.category,
       status: garment.status,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))
@@ -195,7 +199,7 @@ export async function ownGarments(
       name: garment.name,
       category: garment.category,
       status: garment.status,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
     })
     .from(garment)
     .leftJoin(file, eq(file.id, garment.photoId))
@@ -243,7 +247,9 @@ export async function savedGarments(
     id: found.id,
     name: found.name,
     garments: withRole(
-      found.slots.flatMap(({ garment: held }) => (held ? [held] : [])),
+      found.slots.flatMap(({ garment: held }) =>
+        held ? [{ ...held, photo: readPhotoRef(held.photo) }] : [],
+      ),
     ),
   };
 }

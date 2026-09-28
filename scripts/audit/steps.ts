@@ -55,7 +55,10 @@ const get = (url: string, extra: Partial<AuditRequest> = {}): AuditRequest => ({
 
 /** The seed photo's URL as a page renders it: signed by the build's imageUrl. */
 const photoUrl = (f: Fixture, variant: 'original' | 'nobg' | 'thumb') =>
-  f.build.imageUrl.imageUrl(f.ids.photo, variant);
+  f.build.imageUrl.imageUrl(
+    f.build.fileQueries.readPhotoRef(f.ids.photo),
+    variant,
+  );
 
 const post = (
   url: string,

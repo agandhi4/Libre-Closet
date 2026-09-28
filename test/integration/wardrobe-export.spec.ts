@@ -26,6 +26,7 @@ import {
 } from '../../src/wardrobe/properties';
 import { EXPORT_PAGE_SIZE } from '../../src/web/wardrobe/export';
 import { imageUrl } from '../../src/web/files/image-url';
+import { readPhotoRef } from '../../src/web/files/queries';
 import { createGarment, jpegPhoto, uploadPhoto } from './garments';
 import { createTestApp, type TestApp, userIdOf } from './harness';
 
@@ -228,9 +229,11 @@ describe('the wardrobe export', () => {
       return parsed.pathname + parsed.search;
     };
     // The URLs a page renders (signed: served without a statement, #162).
-    expect(path(photo.original)).toBe(imageUrl(fullPhoto, 'original'));
-    expect(path(photo.cutout)).toBe(imageUrl(fullPhoto, 'nobg'));
-    expect(path(photo.thumb)).toBe(imageUrl(fullPhoto, 'thumb'));
+    expect(path(photo.original)).toBe(
+      imageUrl(readPhotoRef(fullPhoto), 'original'),
+    );
+    expect(path(photo.cutout)).toBe(imageUrl(readPhotoRef(fullPhoto), 'nobg'));
+    expect(path(photo.thumb)).toBe(imageUrl(readPhotoRef(fullPhoto), 'thumb'));
     expect(path(photo.thumb)).toMatch(
       new RegExp(
         `^/file/thumb/${fullPhoto.fileName}\\?v=${fullPhoto.version}&`,

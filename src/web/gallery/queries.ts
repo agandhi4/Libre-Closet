@@ -16,8 +16,8 @@ import type { PlannerGarment } from '../../wardrobe/week-planner';
 import { matchGarment } from '../../weather/match';
 import type { IsoDate } from '../calendar/calendar-date';
 import { inCapsule } from '../capsules/queries';
-import type { ImageRef } from '../files/image-url';
-import { PHOTO_REF_COLUMNS, photoRefJson } from '../files/queries';
+import type { SignablePhotoRef } from '../files/image-url';
+import { photoRefJson, readPhotoRef } from '../files/queries';
 import { sameGarmentsOutfit } from '../outfits/queries';
 import { inCloset, onWishlist, ownedGarment } from '../wardrobe/status';
 import { availableGarment, wearsSinceWashSql } from '../wears/queries';
@@ -33,7 +33,7 @@ import { availableGarment, wearsSinceWashSql } from '../wears/queries';
 export interface PoolGarment extends IdeaGarment {
   name: string | null;
   category: string;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
 }
 
 /** What the generator judges a garment by, and what a card names. */
@@ -53,7 +53,7 @@ const garmentColumns = {
 /** garmentColumns and the card's photo. */
 const drawnColumns = {
   ...garmentColumns,
-  photo: PHOTO_REF_COLUMNS,
+  photo: photoRefJson,
 };
 
 /** Days since the last day worn (wears count by day); null when never. */
@@ -277,7 +277,7 @@ function drawnGarment([
   const photo =
     fileName === null || version === null
       ? null
-      : { fileName, version, variantKey };
+      : readPhotoRef({ fileName, version, variantKey });
   return {
     ...poolGarment({
       ...{ id, name, category, colors, pattern, formality, warmth, type },

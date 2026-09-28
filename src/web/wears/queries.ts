@@ -15,8 +15,8 @@ import {
 } from '../../wardrobe/availability';
 import { ownerTransaction } from '../auth/queries';
 import type { IsoDate } from '../calendar/calendar-date';
-import type { ImageRef } from '../files/image-url';
-import { PHOTO_REF_COLUMNS } from '../files/queries';
+import type { SignablePhotoRef } from '../files/image-url';
+import { photoRefJson } from '../files/queries';
 import type { GarmentDetail } from '../wardrobe/queries';
 import { repairCostSql } from '../wardrobe/repairs';
 import { inCloset, onWishlist, ownedGarment } from '../wardrobe/status';
@@ -194,7 +194,7 @@ export interface LaundryItem {
   id: number;
   name: string | null;
   category: string;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
   quantity: number;
   /** Copies that need a wash; 0 for one worn but not due yet. */
   dirty: number;
@@ -214,7 +214,7 @@ export async function laundryList(
       id: garment.id,
       name: garment.name,
       category: garment.category,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
       quantity: garment.quantity,
       dirty: dirtyCopiesSql(),
     })

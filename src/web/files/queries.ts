@@ -7,32 +7,66 @@ import {
 } from '../../cutout/state';
 import type { Db, Queryable } from '../../db/client';
 import { file, garment } from '../../db/schema';
-import type { PlinthPhoto } from './image-url';
+import { unkeyedPhoto } from './image-variant';
+import type {
+  PhotoRefFields,
+  PlinthPhoto,
+  SignablePhotoRef,
+} from './image-url';
+
+/*
+ * The photo-ref helpers: the only makers of a SignablePhotoRef, the one
+ * type imageUrl signs (#162). Each reads a garment's `file` row (a wardrobe,
+ * wishlist or outfit photo) or names a pending photo; an outfit selfie's
+ * queries (src/web/selfies) never import them (photo-ref-guard.spec.ts).
+ * A signed URL is served without asking the database whether the name is a
+ * selfie's, so a new caller that could pass a selfie's row here would serve
+ * it to anyone holding the URL.
+ */
 
 /**
- * A `file` row's columns for imageUrl (an ImageRef): the name, the version
- * and the variant key its URL signs, so /file/** serves it without a
- * statement. Every query that feeds a photo to imageUrl selects these (as a
- * left join's `photo`) or builds photoRefJson; an outfit selfie's never
- * does (selfieUrl).
+ * A left-joined `file` row as imageUrl's photo, selected as the row's
+ * `photo` or built into a json_agg/json_build_object: the name, the
+ * version and the variant key its URL signs; null when the join found no
+ * row (a garment without a photo).
  */
-export const PHOTO_REF_COLUMNS = {
-  fileName: file.fileName,
-  version: file.version,
-  variantKey: file.variantKey,
+export const photoRefJson = sql<SignablePhotoRef | null>`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}, 'variantKey', ${file.variantKey}) end`;
+
+/** A garment's photo with its cutout state (its page, the export). */
+export type PhotoWithCutout = SignablePhotoRef & {
+  version: number;
+  cutoutStatus: CutoutStatus;
 };
 
-/** PHOTO_REF_COLUMNS for a relational query's `with: { photo: ... }`. */
+/** photoRefJson with the cutout state. */
+export const photoWithCutoutJson = sql<PhotoWithCutout | null>`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}, 'variantKey', ${file.variantKey}, 'cutoutStatus', ${file.cutoutStatus}) end`;
+
+/**
+ * The decoder for a garment photo read some other way: a relational
+ * query's `with: { photo: PHOTO_REF_RELATION }`, a JSON array's fields.
+ * Its extra fields (a share id) ride along.
+ */
+export function readPhotoRef<T extends PhotoRefFields>(
+  photo: T,
+): T & SignablePhotoRef;
+export function readPhotoRef<T extends PhotoRefFields>(
+  photo: T | null,
+): (T & SignablePhotoRef) | null;
+export function readPhotoRef<T extends PhotoRefFields>(
+  photo: T | null,
+): (T & SignablePhotoRef) | null {
+  return photo as (T & SignablePhotoRef) | null;
+}
+
+/** A relational query's garment `photo` columns, for readPhotoRef. */
 export const PHOTO_REF_RELATION = {
   columns: { fileName: true, version: true, variantKey: true },
 } as const;
 
-/**
- * PHOTO_REF_COLUMNS as a JSON object, for a photo inside a json_agg or a
- * json_build_object; null when the left join found no `file` row (a garment
- * without a photo).
- */
-export const photoRefJson = sql`case when ${file.id} is null then null else json_build_object('fileName', ${file.fileName}, 'version', ${file.version}, 'variantKey', ${file.variantKey}) end`;
+/** A pending photo's thumb, shown to the user who stored it (no row yet). */
+export function pendingPhotoRef(fileName: string): SignablePhotoRef {
+  return unkeyedPhoto(fileName) as SignablePhotoRef;
+}
 
 /**
  * A left-joined `file` row's columns for a photo the plinth draws (the
@@ -40,7 +74,9 @@ export const photoRefJson = sql`case when ${file.id} is null then null else json
  * `photo`, then map it through plinthPhoto.
  */
 export const PLINTH_PHOTO_COLUMNS = {
-  ...PHOTO_REF_COLUMNS,
+  fileName: file.fileName,
+  version: file.version,
+  variantKey: file.variantKey,
   cutoutStatus: file.cutoutStatus,
 };
 
@@ -54,7 +90,10 @@ export function plinthPhoto(
 ): PlinthPhoto | null {
   if (!photo) return null;
   const { cutoutStatus, ...ref } = photo;
-  return { ...ref, cutout: showsCutout(cutoutStatus) };
+  return {
+    ...(ref as SignablePhotoRef),
+    cutout: showsCutout(cutoutStatus),
+  };
 }
 
 /**

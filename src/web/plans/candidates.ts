@@ -16,8 +16,8 @@ import {
 } from '../../wardrobe/properties';
 import { ownerTransaction } from '../auth/queries';
 import { HttpError } from '../errors';
-import type { ImageRef } from '../files/image-url';
-import { PHOTO_REF_COLUMNS } from '../files/queries';
+import type { SignablePhotoRef } from '../files/image-url';
+import { photoRefJson } from '../files/queries';
 import { t } from '../i18n';
 import { onWishlist } from '../wardrobe/status';
 import { itemNotFound } from './validation';
@@ -326,7 +326,7 @@ export interface CandidateGarment extends PieceSpec {
   price: string | null;
   /** The product page (http(s) only: readSourceUrl and the column's check). */
   sourceUrl: string | null;
-  photo: ImageRef | null;
+  photo: SignablePhotoRef | null;
 }
 
 /**
@@ -348,7 +348,7 @@ function candidateRows(db: Queryable, ownerId: number, which: SQL) {
       formality: garment.formality,
       price: garment.price,
       sourceUrl: garment.sourceUrl,
-      photo: PHOTO_REF_COLUMNS,
+      photo: photoRefJson,
     })
     .from(planItemCandidate)
     .innerJoin(planItem, eq(planItem.id, planItemCandidate.planItemId))
