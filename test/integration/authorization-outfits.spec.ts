@@ -335,6 +335,24 @@ const ROUTES: Route[] = [
     },
   },
   {
+    // The year in review (#26) reads the wear log like insights, but is
+    // share-aware: a grantee under `?ownerId=` gets the owner's recap (a
+    // 200; the fixture's garment is never worn, so no year is recapped and
+    // nothing names it), a stranger a 404; without it, everyone their own.
+    name: 'GET /wardrobe/recap',
+    kind: 'read',
+    ok: 200,
+    secret: garmentName,
+    vias: BOTH,
+    request: (_, q) => ({ method: 'GET', url: `/wardrobe/recap${q}` }),
+    expect: {
+      owner: 'ok',
+      manager: ['hidden', 'ok'],
+      viewer: ['hidden', 'ok'],
+      stranger: ['hidden', 'notFound'],
+    },
+  },
+  {
     name: 'POST /laundry',
     kind: 'write',
     ok: 303,

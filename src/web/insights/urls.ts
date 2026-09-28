@@ -21,3 +21,14 @@ export function insightsUrl(days: UnwornDays): string {
 export const NEEDS_ATTENTION_URL = wardrobeUrl(undefined, {
   attention: 'true',
 });
+
+/**
+ * The year in review (#26), beside insights under /wardrobe. Share-aware,
+ * unlike insights: a grantee's links carry the wardrobe's `?ownerId=`.
+ */
+export const RECAP_PATH = '/wardrobe/recap';
+
+/** A year's recap; the bare path (with the owner) for the current year. */
+export function recapUrl(viewOwner: number | undefined, year?: number): string {
+  return wardrobeUrl(viewOwner, { year }, RECAP_PATH);
+}
