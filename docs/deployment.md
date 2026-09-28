@@ -30,6 +30,7 @@ CLOSET_DB_PORT=5433
 CLOSET_WEB_NETWORK=linuxbox_web
 TRUSTED_PROXIES=172.23.0.0/16      # linuxbox_web: Caddy is the edge here, so X-Forwarded-For is the real client
 CLOSET_MODELS_DIR=/srv/docker/closet/models
+METRICS_ENABLED=true               # GET /metrics for vmagent on the Docker network (homelab #39); src/metrics/CLAUDE.md
 # APP_TIMEZONE defaults to America/New_York in the compose file
 ```
 
@@ -45,4 +46,4 @@ Deploy now (instead of waiting for the hourly timer): on linux-box, `docker pull
 
 ## CI and publishing
 
-- **`ci.yml`'s `publish` job pushes `:latest` and `sha-<7>` only after `check` and `e2e` pass** (and semver tags on `v*` tags from `tag-release.yml`), amd64 only, GHCR only. Until 2026-09-25 publishing was a separate workflow racing CI, so a red run still deployed. Docs-only pushes to main (`docs/**`, `*.md`) skip CI and publish entirely; pull requests always run both jobs, docs-only ones included, because branch protection requires them. Merging to main is deploying: the homelab autoupdater redeploys within the hour. The browser job runs with the PWA on, as production does; specs sign in through `test/support/e2e-session.ts`. Load test and Lighthouse run nightly (`nightly.yml`).
+- **`ci.yml`'s `publish` job pushes `:latest` and `sha-<7>` only after `check` and `e2e` pass** (and semver tags on `v*` tags from `tag-release.yml`), amd64 only, GHCR only. Until 2026-09-25 publishing was a separate workflow racing CI, so a red run still deployed. Docs-only pushes to main (`docs/**`, `*.md`) skip CI and publish entirely, and run `docs.yml` (`npm run docs:check`) instead, whose `paths` are exactly `ci.yml`'s `paths-ignore`; pull requests always run both jobs, docs-only ones included, because branch protection requires them. Merging to main is deploying: the homelab autoupdater redeploys within the hour. The browser job runs with the PWA on, as production does; specs sign in through `test/support/e2e-session.ts`. Load test and Lighthouse run nightly (`nightly.yml`).
