@@ -24,8 +24,10 @@ import type { Logger } from '../../src/logger';
  */
 
 /**
- * Where the control listens: derived from PORT, as SENTRY_STUB_PORT is
- * (e2e-session.ts), so worktrees running side by side never share one.
+ * Where the control listens: a fixed offset from PORT, because the
+ * Playwright process must reach it without a handshake with the server (so
+ * port 0 won't do). Following PORT keeps worktrees running side by side
+ * apart, and +20000 stays clear of the local gate's 3200-3799 range.
  */
 export const CUTOUT_STUB_PORT = Number(process.env.PORT ?? '3000') + 20000;
 export const CUTOUT_STUB_ORIGIN = `http://127.0.0.1:${CUTOUT_STUB_PORT}`;
