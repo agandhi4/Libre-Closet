@@ -642,6 +642,9 @@
     "PHOTO_LIBRARY": "Choose from library",
     "PHOTO_HINT": "The background is removed for you.",
     "PHOTO_UPLOADING": "Uploading…",
+    "PHOTO_ROTATING": "Rotating…",
+    "ROTATE_LEFT": "Rotate left",
+    "ROTATE_RIGHT": "Rotate right",
     "IN_OUTFITS_ONE": "In 1 outfit",
     "IN_OUTFITS": "In {count} outfits",
     "SUMMARY": "About this garment",
@@ -683,6 +686,7 @@
   "weather": {
     "RANGE": "{low}–{high} {unit}",
     "DAY_RANGE": "{low}–{high}°",
+    "DAY_HIGH": "{high}°",
     "RAIN_FROM": "rain from {hour}",
     "RAIN_NOW": "rain now",
     "TAKE_LAYER": "take a layer",
