@@ -290,8 +290,7 @@ export async function replacePhoto(
     async (tx, photoId) => {
       const locked = await lockGarment(tx, id, ownerId);
       if (!locked) throw new HttpError(404, 'Garment not found');
-      await replacePhotoRow(tx, id, photoId, locked.photoId);
-      return locked.photo;
+      return replacePhotoRow(tx, id, photoId, locked.photoId);
     },
   );
   deps.logger.info(

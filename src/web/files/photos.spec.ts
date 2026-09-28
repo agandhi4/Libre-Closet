@@ -322,10 +322,16 @@ describe('Photos.saveEditedCutout', () => {
     );
   });
 
-  it('keeps its files when the swap committed although its transaction failed', async () => {
+  it('keeps its files, and deletes the set it replaced, when the swap committed although its transaction failed', async () => {
     const photos = build();
+    const old = variantFileName('a.webp', 'nobg', '0123456789ab');
+    const oldThumb = variantFileName('a.webp', 'thumb', '0123456789ab');
     await put('a.webp', await png(1000));
-    lockMock.mockResolvedValue(cutoutRow({ status: 'none' }));
+    await put(old, await png(600));
+    await put(oldThumb, await png(400));
+    lockMock.mockResolvedValue(
+      cutoutRow({ status: 'ready', variantKey: '0123456789ab' }),
+    );
     applyAsTheMachine();
     transactionFails = new Error('Connection terminated unexpectedly');
     findKeyMock.mockImplementation(() => Promise.resolve(writtenKey()));
@@ -334,8 +340,14 @@ describe('Photos.saveEditedCutout', () => {
       photos.saveEditedCutout(Readable.from(await png(300)), 'a.webp'),
     ).resolves.toBe(2);
     const key = writtenKey();
-    expect(has(variantFileName('a.webp', 'nobg', key))).toBe(true);
-    expect(has(variantFileName('a.webp', 'thumb', key))).toBe(true);
+    expect(photoFiles().sort()).toEqual(
+      [
+        'a.webp',
+        variantFileName('a.webp', 'nobg', key),
+        variantFileName('a.webp', 'thumb', key),
+      ].sort(),
+    );
+    expect(has(old)).toBe(false);
   });
 
   it('keeps its files when the row cannot be read after a failed swap', async () => {
@@ -428,6 +440,35 @@ describe('Photos.copy', () => {
         await stored(variantFileName('a.webp', 'nobg', '0123456789ab')),
       ),
     ).toBe(true);
+  });
+
+  it('reads the cutout again when a swap deleted the one it was about to open', async () => {
+    const photos = build();
+    await put('a.webp', await png(1000));
+    // The row read first names a set a swap has deleted since.
+    const swappedIn = variantFileName('a.webp', 'nobg', 'fedcba987654');
+    await put(swappedIn, await png(300));
+    findKeyMock
+      .mockResolvedValueOnce('0123456789ab')
+      .mockResolvedValue('fedcba987654');
+
+    const row = await photos.copy('a.webp', 7);
+
+    const base = row!.fileName.replace('.webp', '');
+    expect(
+      (await stored(`${base}-nobg.webp`)).equals(await stored(swappedIn)),
+    ).toBe(true);
+  });
+
+  it('copies no cutout when the row names none that exists', async () => {
+    const photos = build();
+    await put('a.webp', await png(1000));
+    findKeyMock.mockResolvedValue('0123456789ab');
+
+    const row = await photos.copy('a.webp', 7);
+
+    expect(has(`${row!.fileName.replace('.webp', '')}-nobg.webp`)).toBe(false);
+    expect(findKeyMock).toHaveBeenCalledTimes(2);
   });
 
   it('returns undefined when the source is gone', async () => {

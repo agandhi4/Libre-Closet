@@ -164,27 +164,39 @@ describe('storage reconciliation', () => {
   // #141: a cutout is stored under a variant key before its row points at
   // it, so a write that died before its swap (or whose clean-up failed)
   // leaves files the base name alone cannot tell from the live ones.
-  it("deletes a live photo's day-old variants under another key than its row's", async () => {
-    const garmentId = await createGarment(t, { name: 'Recut' });
+  /** A garment photo with a mask edit: its row keyed, its set aged `ageMs`. */
+  const keyedPhoto = async (name: string, ageMs: number) => {
+    const garmentId = await createGarment(t, { name });
     await uploadPhoto(t, garmentId, await jpegPhoto());
     const fileName = await photoFileName(t, garmentId);
-    await ageRow(fileName, 3 * DAY_MS);
+    await ageRow(fileName, 5 * DAY_MS);
     await t.photos.saveEditedCutout(Readable.from(await pngCutout()), fileName);
     const { variantKey } = (await photoRow(t, fileName))!;
-    const current = (['nobg', 'thumb'] as const).map((variant) =>
-      variantFileName(fileName, variant, variantKey),
-    );
-    // Old as they are, the row's own files stay.
-    const then = new Date(Date.now() - 2 * DAY_MS);
-    for (const name of current)
+    const current = variantSet(fileName, variantKey);
+    const then = new Date(Date.now() - ageMs);
+    for (const name of current) {
       await utimes(join(t.dataPath, name), then, then);
-    const died = (['nobg', 'thumb'] as const).map((variant) =>
-      variantFileName(fileName, variant, '0123456789ab'),
+    }
+    return { fileName, variantKey, current };
+  };
+
+  const variantSet = (fileName: string, key: string | null) =>
+    (['nobg', 'thumb'] as const).map((variant) =>
+      variantFileName(fileName, variant, key),
     );
-    for (const name of died) await writeAged(name, 2 * DAY_MS);
+
+  const reconcileLogged = (options?: ReconcileOptions) =>
+    reconcileStorage({ db: t.db, photos: t.photos, logger: t.logger }, options);
+
+  it("deletes a live photo's day-old variants under another key than its row's", async () => {
+    // Old as they are, the row's own files stay.
+    const { fileName, current } = await keyedPhoto('Recut', 2 * DAY_MS);
+    // Older than the row's set: a write that died before an earlier swap.
+    const died = variantSet(fileName, '0123456789ab');
+    for (const name of died) await writeAged(name, 3 * DAY_MS);
     // A thumb backfilled for a request that raced the swap.
     const unkeyedThumb = variantFileName(fileName, 'thumb');
-    await writeAged(unkeyedThumb, 2 * DAY_MS);
+    await writeAged(unkeyedThumb, 3 * DAY_MS);
     // A write between its files and its swap right now.
     const inFlight = variantFileName(fileName, 'nobg', 'abcdefabcdef');
     await writeAged(inFlight, 0);
@@ -206,6 +218,48 @@ describe('storage reconciliation', () => {
       expect(files).not.toContain(name);
     }
     expect((await reconcile()).supersededVariantsDeleted).toBe(0);
+  });
+
+  // A database restored from a backup taken before an edit: the row names
+  // the older key, and the newer set is the photo's real cutout. Deleting
+  // it would lose the only copy; before #141 a restore never deleted bytes.
+  it("keeps a set newer than the row's, warning of a restore behind storage", async () => {
+    const { fileName, variantKey, current } = await keyedPhoto(
+      'Restored',
+      4 * DAY_MS,
+    );
+    const newer = variantSet(fileName, 'fedcba987654');
+    for (const name of newer) await writeAged(name, 2 * DAY_MS);
+    t.logs.clear();
+
+    const report = await reconcileLogged();
+
+    expect(report.supersededVariantsDeleted).toBe(0);
+    expect(await storedFiles()).toEqual(
+      expect.arrayContaining([...current, ...newer]),
+    );
+    expect(t.logs.messages('warn')).toContainEqual(
+      `Keeping variant key fedcba987654 of ${fileName}: newer than the row's variant (key ${variantKey}): database restored behind storage?`,
+    );
+  });
+
+  it("deletes nothing of a photo whose row's own set is missing", async () => {
+    const { fileName, variantKey, current } = await keyedPhoto(
+      'Lost cut',
+      2 * DAY_MS,
+    );
+    for (const name of current) await rm(join(t.dataPath, name));
+    const older = variantSet(fileName, '0123456789ab');
+    for (const name of older) await writeAged(name, 3 * DAY_MS);
+    t.logs.clear();
+
+    const report = await reconcileLogged();
+
+    expect(report.supersededVariantsDeleted).toBe(0);
+    expect(await storedFiles()).toEqual(expect.arrayContaining(older));
+    expect(t.logs.messages('warn')).toContainEqual(
+      `Keeping every variant of ${fileName}: the files of its row's variant (key ${variantKey}) are not in storage`,
+    );
   });
 });
 

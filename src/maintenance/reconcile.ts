@@ -296,6 +296,7 @@ async function planReconciliation(
     rows.filter((row) => !orphanedIds.has(row.id)),
     photoSets,
     cutoff,
+    logger,
   );
   const missingOriginals = reportMissingOriginals(
     rows.filter((row) => !orphanedIds.has(row.id)),
@@ -329,31 +330,95 @@ function holdsOriginal(
 
 /**
  * A live row's cutout and thumb files under another variant key than the
- * row's (null included: unkeyed ones beside a keyed set), older than the
- * cutoff. A younger one may be a cutout write between its files and its
- * swap (Photos.writeCutout), which the row is about to point at.
+ * row's (null included: unkeyed ones beside a keyed set) that a cutout
+ * write replaced. A set goes only when every file of it is older than the
+ * cutoff (a younger one may be a write between its files and its swap,
+ * Photos.writeCutout) and older than every file of the set the row points
+ * at. Fails safe, never destroying the newest bytes: a set newer than the
+ * row's is what a database restored behind its storage looks like (the
+ * row names an older key), so it is kept and logged; a row whose own files
+ * are not in storage deletes nothing, since nothing then says which set is
+ * the older one.
  */
 function supersededVariants(
   rows: readonly FileRow[],
   photoSets: ReadonlyMap<string, StoredPhotoSet>,
   cutoff: Date,
+  logger: Logger,
 ): Map<string, string[]> {
   const superseded = new Map<string, string[]>();
   for (const row of rows) {
-    const stale = (photoSets.get(row.fileName)?.objects ?? [])
-      .filter((object) => {
-        const parsed = parseStoredName(object.name);
-        return (
-          parsed !== undefined &&
-          parsed.variant !== 'original' &&
-          parsed.variantKey !== row.variantKey &&
-          object.lastModified < cutoff
-        );
-      })
-      .map((object) => object.name);
+    const stale = staleVariantsOf(
+      row,
+      photoSets.get(row.fileName)?.objects ?? [],
+      cutoff,
+      logger,
+    );
     if (stale.length > 0) superseded.set(row.fileName, stale);
   }
   return superseded;
+}
+
+// One row's side of supersededVariants: the names to delete.
+function staleVariantsOf(
+  row: FileRow,
+  objects: readonly StoredObject[],
+  cutoff: Date,
+  logger: Logger,
+): string[] {
+  const { current, others } = variantSets(row, objects);
+  if (others.size === 0) return [];
+  // A keyed set is written whole (nobg and thumb); an unkeyed one may lack
+  // either (no cutout, a thumb not backfilled yet), not both.
+  if (current.length < (row.variantKey === null ? 1 : 2)) {
+    logger.warn(
+      `Keeping every variant of ${row.fileName}: the files of its row's variant (${keyLabel(row.variantKey)}) are not in storage`,
+    );
+    return [];
+  }
+  const currentOldest = Math.min(
+    ...current.map((object) => object.lastModified.getTime()),
+  );
+  const stale: string[] = [];
+  for (const [key, files] of others) {
+    if (files.some((object) => object.lastModified >= cutoff)) continue;
+    if (
+      files.some((object) => object.lastModified.getTime() >= currentOldest)
+    ) {
+      logger.warn(
+        `Keeping variant ${keyLabel(key)} of ${row.fileName}: newer than the row's variant (${keyLabel(row.variantKey)}): database restored behind storage?`,
+      );
+      continue;
+    }
+    stale.push(...files.map((object) => object.name));
+  }
+  return stale;
+}
+
+// A photo's nobg and thumb files: the row's set, and every other set by its
+// key (null: the unkeyed set).
+function variantSets(
+  row: FileRow,
+  objects: readonly StoredObject[],
+): { current: StoredObject[]; others: Map<string | null, StoredObject[]> } {
+  const current: StoredObject[] = [];
+  const others = new Map<string | null, StoredObject[]>();
+  for (const object of objects) {
+    const parsed = parseStoredName(object.name);
+    if (!parsed || parsed.variant === 'original') continue;
+    if (parsed.variantKey === row.variantKey) current.push(object);
+    else {
+      others.set(parsed.variantKey, [
+        ...(others.get(parsed.variantKey) ?? []),
+        object,
+      ]);
+    }
+  }
+  return { current, others };
+}
+
+function keyLabel(variantKey: string | null): string {
+  return variantKey === null ? 'unkeyed' : `key ${variantKey}`;
 }
 
 async function removeOrphans(

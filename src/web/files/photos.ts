@@ -46,6 +46,9 @@ const THUMB_QUALITY = 80;
 // data: URLs keep the page light.
 const PREVIEW_MAX_PX = 240;
 const PREVIEW_QUALITY = 70;
+// openCurrentCutout: each retry follows a swap that landed meanwhile; a
+// photo swapped this often during one copy is copied without its cutout.
+const MAX_CUTOUT_READS = 3;
 
 /**
  * The decompression-bomb guard on every decode (sharp's limitInputPixels,
@@ -361,13 +364,7 @@ export class Photos {
     const copied = unkeyedPhoto(`${randomUUID()}.webp`);
     try {
       await this.storage.store(copied.fileName, original);
-      // Read right before the cutout is opened: a cutout swapped in since
-      // the caller read the row deletes the set it replaced. An open file
-      // streams whole even when it is deleted.
-      const sourceKey = await findVariantKey(this.db, sourceFileName);
-      const nobgSource = await this.storage.get(
-        variantFileName(sourceFileName, 'nobg', sourceKey ?? null),
-      );
+      const nobgSource = await this.openCurrentCutout(sourceFileName);
       if (nobgSource) {
         await this.storage.store(
           variantFileName(copied.fileName, 'nobg'),
@@ -381,6 +378,30 @@ export class Photos {
     }
     this.logger.info(`Copied photo ${sourceFileName} to ${copied.fileName}`);
     return newPhotoRow(copied.fileName, userId);
+  }
+
+  // The cutout the row points at, opened (an open file streams whole even
+  // when it is deleted after); undefined when the photo has none. A swap
+  // between reading the key and opening its file deletes the set it
+  // replaced, so a missing file under a key the row no longer names is
+  // read again under the new one: a copy (a clone keeps the source's
+  // ready or edited status) must not lose the cutout to that race.
+  private async openCurrentCutout(
+    fileName: string,
+  ): Promise<Readable | undefined> {
+    let key = (await findVariantKey(this.db, fileName)) ?? null;
+    for (let attempt = 1; ; attempt++) {
+      const opened = await this.storage.get(
+        variantFileName(fileName, 'nobg', key),
+      );
+      if (opened || attempt === MAX_CUTOUT_READS) return opened;
+      const current = (await findVariantKey(this.db, fileName)) ?? null;
+      if (current === key) return undefined;
+      this.logger.info(
+        `Cutout of ${fileName} swapped from ${key ?? 'unkeyed'} to ${current ?? 'unkeyed'} while it was read; reading again`,
+      );
+      key = current;
+    }
   }
 
   /**
@@ -524,16 +545,19 @@ export class Photos {
     const event = eventFor(variantKey);
     await this.storeCutoutFiles(written, bytes);
 
-    // What the machine answered inside the transaction: settleFailedSwap
-    // needs it when the COMMIT landed but its answer was lost.
-    let decided: Transition | undefined;
-    let swap: { before: CutoutRow; outcome: Transition } | 'gone';
+    // What the transaction decided: settleFailedSwap needs it when the
+    // COMMIT landed but its answer was lost.
+    let decided: Swap | undefined;
+    let swap: Swap | 'gone';
     try {
       swap = await this.db.transaction(async (tx) => {
         const before = await lockCutoutRow(tx, originalFileName);
         if (!before) return 'gone' as const;
-        decided = await applyCutoutEvent(tx, before, event);
-        return { before, outcome: decided };
+        decided = {
+          before,
+          outcome: await applyCutoutEvent(tx, before, event),
+        };
+        return decided;
       });
     } catch (error) {
       return this.settleFailedSwap(written, event, decided, error);
@@ -554,11 +578,19 @@ export class Photos {
     this.logger.info(
       `Cutout of ${originalFileName} stored (${event.type}) under key ${variantKey}: ${before.status} -> ${outcome.state.status}, version ${outcome.state.version}`,
     );
-    await this.deleteCutoutFiles(
-      { fileName: originalFileName, variantKey: before.variantKey },
-      `replaced by key ${variantKey}`,
-    );
+    await this.deleteReplacedCutout(before, variantKey);
     return outcome;
+  }
+
+  // After a committed swap: the set it replaced (the row's key before it).
+  private deleteReplacedCutout(
+    before: CutoutRow,
+    newKey: string | null,
+  ): Promise<void> {
+    return this.deleteCutoutFiles(
+      { fileName: before.fileName, variantKey: before.variantKey },
+      `replaced by key ${newKey}`,
+    );
   }
 
   // The nobg and its thumb under `written`'s key, the thumb made from the
@@ -598,7 +630,7 @@ export class Photos {
   private async settleFailedSwap(
     written: StoredPhoto,
     event: CutoutEvent,
-    decided: Transition | undefined,
+    decided: Swap | undefined,
     error: unknown,
   ): Promise<CutoutOutcome> {
     const { fileName, variantKey } = written;
@@ -614,13 +646,21 @@ export class Photos {
     }
     // Structured: a driver error's reason is often only in its `cause`
     // (drizzle's "Failed query: commit").
-    if (current === variantKey && decided?.ok) {
+    // Keys are unique per write: the row naming this one means this swap
+    // committed and none has moved it since, so the set it replaced is
+    // still this write's to delete, as on the normal path.
+    if (current === variantKey && decided?.outcome.ok) {
       this.logger.warn(
         { err: error },
-        `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} committed although its transaction failed; version ${decided.state.version}`,
+        `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} committed although its transaction failed; version ${decided.outcome.state.version}`,
       );
-      return decided;
+      await this.deleteReplacedCutout(decided.before, variantKey);
+      return decided.outcome;
     }
+    // current !== variantKey. Even if this swap had committed after all, a
+    // second swap that has moved the key since already deleted this set as
+    // the one it replaced, so deleting it again is expected: deleteFiles
+    // takes a missing file as done.
     this.logger.warn(
       { err: error },
       `Cutout of ${fileName} (${event.type}): the swap to key ${variantKey} rolled back`,
@@ -933,6 +973,12 @@ export class Photos {
       throw error;
     }
   }
+}
+
+/** writeCutout's transaction: the row as it was locked, and what the machine answered. */
+interface Swap {
+  before: CutoutRow;
+  outcome: Transition;
 }
 
 // Every thumb, from the cutout when there is one (writeThumb, writeCutout).
