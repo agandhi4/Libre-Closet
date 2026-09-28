@@ -28,6 +28,7 @@ import type { PushPayload } from './payload';
 import {
   claimReminders,
   pruneReminderClaims,
+  releaseReminderClaims,
   reminderDevices,
 } from './queries';
 import type { DeviceMessage, PushSender } from './sender';
@@ -108,6 +109,8 @@ export interface ReminderRun {
   sent: number;
   skipped: number;
   failed: number;
+  /** Claims given back unsent, for the next run (sendAll). */
+  released: number;
 }
 
 /** One person's reminder of one kind, to the devices that claimed it. */
@@ -115,6 +118,16 @@ interface ReminderGroup {
   userId: number;
   kind: ReminderKind;
   deviceIds: number[];
+  /** This run's claims behind it: released if it cannot be sent (sendAll). */
+  claims: ClaimedReminder[];
+}
+
+type ClaimedReminder = Awaited<ReturnType<typeof claimReminders>>[number];
+
+/** A composed reminder and the claims it answers for. */
+interface ComposedReminder {
+  message: DeviceMessage;
+  claims: readonly ClaimedReminder[];
 }
 
 /** What the run read once for all its people (readBatch). */
@@ -140,6 +153,7 @@ export async function sendDueReminders(
     sent: 0,
     skipped: 0,
     failed: 0,
+    released: 0,
   };
   if (due.length === 0) return run;
   const claimed = await claimReminders(db, due, now);
@@ -149,16 +163,23 @@ export async function sendDueReminders(
   // One notification per person and kind, to the devices that claimed it.
   const userOf = new Map(due.map((d) => [d.deviceId, d.userId]));
   const groups = new Map<string, ReminderGroup>();
-  for (const { deviceId, kind } of claimed) {
+  for (const claim of claimed) {
+    const { deviceId, kind } = claim;
     const userId = userOf.get(deviceId)!;
     const key = `${userId}:${kind}`;
-    const group = groups.get(key) ?? { userId, kind, deviceIds: [] };
+    const group = groups.get(key) ?? {
+      userId,
+      kind,
+      deviceIds: [],
+      claims: [],
+    };
     group.deviceIds.push(deviceId);
+    group.claims.push(claim);
     groups.set(key, group);
   }
   const batch = await readBatch(deps, [...groups.values()], now);
-  const messages: DeviceMessage[] = [];
-  for (const { userId, kind, deviceIds } of groups.values()) {
+  const composed: ComposedReminder[] = [];
+  for (const { userId, kind, deviceIds, claims } of groups.values()) {
     // Logged before sending: a claim is never retried (claim before send, so
     // a crash loses a reminder rather than doubling it), and this line is
     // what tells a lost reminder apart from one that was never due.
@@ -177,11 +198,14 @@ export async function sendDueReminders(
         );
         continue;
       }
-      messages.push({
-        userId,
-        devices: deviceIds,
-        payload,
-        options: { ttlSeconds: REMINDER_TTL_SECONDS[kind] },
+      composed.push({
+        message: {
+          userId,
+          devices: deviceIds,
+          payload,
+          options: { ttlSeconds: REMINDER_TTL_SECONDS[kind] },
+        },
+        claims,
       });
     } catch (error) {
       run.failed += 1;
@@ -191,7 +215,7 @@ export async function sendDueReminders(
       );
     }
   }
-  await sendAll(deps, messages, run);
+  await sendAll(deps, composed, run);
   logger.info(
     `Reminders at ${now.toISOString()}: ${run.claimed} claimed of ${run.due} due, ${run.sent} sent, ${run.skipped} skipped, ${run.failed} failed`,
   );
@@ -232,24 +256,45 @@ async function readBatch(
 
 /**
  * The composed reminders, sent together (their devices read in one
- * statement). The sender never throws for a device; a failed read of the
- * devices fails every message of the run, logged and counted.
+ * statement, at send time: a device revoked or moved to another account
+ * since the claim gets nothing). The sender never throws for a device;
+ * only that one read can fail, and then nothing was sent, so the run's
+ * claims behind these messages are released (releaseReminderClaims): the
+ * next minute finds them due again and sends them, while they are within
+ * LATE_LIMIT_MINUTES. Without the release one failed read (a dropped
+ * connection) would lose the whole minute's reminders, where a failure
+ * before #173 lost one person's. Counted as failed for this run either way.
  */
 async function sendAll(
   deps: ReminderDeps,
-  messages: readonly DeviceMessage[],
+  composed: readonly ComposedReminder[],
   run: ReminderRun,
 ): Promise<void> {
-  if (messages.length === 0) return;
+  if (composed.length === 0) return;
   try {
-    await deps.sender.sendEach(messages);
-    run.sent += messages.length;
+    await deps.sender.sendEach(composed.map((c) => c.message));
+    run.sent += composed.length;
   } catch (error) {
-    run.failed += messages.length;
+    run.failed += composed.length;
+    const users = composed.map((c) => c.message.userId).join(', ');
     deps.logger.error(
       { err: error },
-      `The reminders for user(s) ${messages.map((m) => m.userId).join(', ')} failed`,
+      `The reminders for user(s) ${users} could not be sent: their devices could not be read`,
     );
+    try {
+      run.released = await releaseReminderClaims(
+        deps.db,
+        composed.flatMap((c) => c.claims),
+      );
+      deps.logger.warn(
+        `Released ${run.released} reminder claim(s) for user(s) ${users}: the next run sends them while they are due`,
+      );
+    } catch (releaseError) {
+      deps.logger.error(
+        { err: releaseError },
+        `The reminder claims for user(s) ${users} could not be released: those reminders are lost`,
+      );
+    }
   }
 }
 

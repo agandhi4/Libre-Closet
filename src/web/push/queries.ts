@@ -298,6 +298,35 @@ export async function claimReminders(
     });
 }
 
+/**
+ * Gives back claims this process took and never sent on (the batch's
+ * device read failed, src/web/push/reminders.ts): the next minute's run
+ * finds them due again, while still within LATE_LIMIT_MINUTES, and claims
+ * them afresh. Safe only because nothing was sent on them. Returns how
+ * many were released.
+ */
+export async function releaseReminderClaims(
+  db: Db,
+  claims: readonly { deviceId: number; kind: ReminderKind; day: IsoDate }[],
+): Promise<number> {
+  if (claims.length === 0) return 0;
+  const released = await db
+    .delete(pushReminder)
+    .where(
+      or(
+        ...claims.map((claim) =>
+          and(
+            eq(pushReminder.deviceId, claim.deviceId),
+            eq(pushReminder.kind, claim.kind),
+            eq(pushReminder.day, claim.day),
+          ),
+        ),
+      ),
+    )
+    .returning({ deviceId: pushReminder.deviceId });
+  return released.length;
+}
+
 /** Removes claims for days before `before`: they only ever guard today. */
 export async function pruneReminderClaims(
   db: Db,
