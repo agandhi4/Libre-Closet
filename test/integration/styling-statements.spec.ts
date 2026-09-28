@@ -10,8 +10,8 @@ import { HX_FRAGMENT } from './pages';
 /**
  * What each Styling request costs in statements (#163): production pays a
  * round trip per statement (#156), so the count is the latency. Each
- * request's first statement is the session's user, and a shared
- * wardrobe's second its share. After them: one statement for a page
+ * request's first statement is the session's user, which reads a shared
+ * wardrobe's share with it (#170). After it: one statement for a page
  * without "Style this", for "Add row" and for a refused Save's page
  * (stripsReads); two for "Style this" and Shuffle, whose windows must
  * reach the idea the first one drew (ideaReads, then stripsReads). The
@@ -194,15 +194,15 @@ describe('Styling statements (#163)', () => {
       );
     });
 
-    it('a shared wardrobe: the share, then one statement, and none of the owner’s records', async () => {
+    it('a shared wardrobe: the session with the share, then one statement, and none of the owner’s records', async () => {
       const record = await statementsOf(`/styling?ownerId=${ownerId}`, viewer);
-      expect(record.statements).toBe(3);
-      expect(record.sql[1]).toContain('"wardrobe_share"');
+      expect(record.statements).toBe(2);
+      expect(record.sql[0]).toContain('"wardrobe_share"');
       const styled = await statementsOf(
         `/styling?ownerId=${ownerId}&with=${tops[0]}`,
         viewer,
       );
-      expect(styled.statements).toBe(4);
+      expect(styled.statements).toBe(3);
       const all = [...record.sql, ...styled.sql].join('\n');
       for (const table of OWNERS_RECORDS) expect(all).not.toContain(table);
     });
@@ -226,7 +226,7 @@ describe('Styling statements (#163)', () => {
       expect(stripOf(rows, 'top')).toContain(tops[0]);
     });
 
-    it('Shuffle over a shared wardrobe: the share, then two, none of the owner’s records', async () => {
+    it('Shuffle over a shared wardrobe: the session with the share, then two, none of the owner’s records', async () => {
       const query = rowsQuery(
         [
           ['top', tops[0], true],
@@ -235,7 +235,7 @@ describe('Styling statements (#163)', () => {
         { ownerId: String(ownerId), seed: '5' },
       );
       const record = await statementsOf(`/styling/shuffle?${query}`, viewer);
-      expect(record.statements).toBe(4);
+      expect(record.statements).toBe(3);
       const all = record.sql.join('\n');
       for (const table of OWNERS_RECORDS) expect(all).not.toContain(table);
     });
