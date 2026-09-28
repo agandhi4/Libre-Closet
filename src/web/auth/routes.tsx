@@ -36,8 +36,6 @@ import {
   normalizeEmail,
   updateEmail,
 } from './queries';
-import { USER_EMAIL_UNIQUE } from '../../db/schema';
-import { isUniqueViolation } from '../../db/errors';
 import { sessionUserId } from './require-session';
 import { findWeekTemplate } from '../week-plan/template';
 import { endSession, sessionAccount, setSessionCookie } from './session';
@@ -168,7 +166,8 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       if (hasErrors(errors)) return refuse(errors);
 
       // The insert is the check: no row back means the address is taken,
-      // however recently (insertUser).
+      // however recently (insertUser). The hash comes first, so a taken
+      // address costs what a free one does.
       const account = await insertUser(
         db,
         email,
@@ -296,12 +295,9 @@ export const authRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         return refuse({ currentPassword: [t('WRONG_CURRENT_PASSWORD')] });
       }
 
-      // The unique index is the clash check: another account's address
-      // fails the update (this account's own, in any case, is no clash).
-      try {
-        await updateEmail(db, id, email);
-      } catch (error) {
-        if (!isUniqueViolation(error, USER_EMAIL_UNIQUE)) throw error;
+      // The update is the clash check (updateEmail): false when another
+      // account has the address.
+      if (!(await updateEmail(db, id, email))) {
         logger.info(`Email change refused for user ${id}: the email is taken`);
         return refuse({ email: [t('EMAIL_IN_USE')] });
       }

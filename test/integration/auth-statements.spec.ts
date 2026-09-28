@@ -1,12 +1,20 @@
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import type { LightMyRequestResponse } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { personalAccessToken, user } from '../../src/db/schema';
 import {
   createToken,
   MAX_ACTIVE_TOKENS,
 } from '../../src/web/auth/personal-tokens';
-import { findSessionAccount } from '../../src/web/auth/queries';
+import type { Queryable } from '../../src/db/client';
+import { HttpError } from '../../src/web/errors';
+import {
+  findSessionAccount,
+  insertUser,
+  updatePasswordHash,
+} from '../../src/web/auth/queries';
+import { recordStatements } from '../support/query-recorder';
 import { passwordFingerprint } from '../../src/web/auth/tokens';
 import {
   createTestApp,
@@ -38,6 +46,73 @@ describe('auth, account and push statements (#171)', () => {
   });
 
   afterAll(() => t?.cleanup());
+
+  const register = (email: string) =>
+    t.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        email,
+        password: TEST_PASSWORD,
+        confirmPassword: TEST_PASSWORD,
+      },
+      headers: uniqueClient(),
+      anonymous: true,
+    });
+
+  const change = (cookie: string, email: string) =>
+    t.inject({
+      method: 'POST',
+      url: '/auth/update-email',
+      payload: { email, confirmEmail: email, currentPassword: TEST_PASSWORD },
+      headers: { cookie },
+    });
+
+  /** The statements `work` sent that Postgres refused, by SQLSTATE. */
+  const refusedStatements = async (work: () => Promise<unknown>) => {
+    const { statements } = await recordStatements(work);
+    return statements.flatMap((statement) =>
+      statement.error ? [statement.error] : [],
+    );
+  };
+
+  /**
+   * Holds a transaction that has written `hold` open, runs `request` (which
+   * must then wait on its lock: the unique index's), commits the first and
+   * answers the request: the race a taken address's check cannot see.
+   */
+  async function raceAgainst(
+    hold: (tx: Queryable) => Promise<unknown>,
+    request: () => Promise<LightMyRequestResponse>,
+  ): Promise<LightMyRequestResponse> {
+    let wrote!: () => void;
+    const written = new Promise<void>((resolve) => (wrote = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const held = t.db.transaction(async (tx) => {
+      await hold(tx);
+      wrote();
+      await released;
+    });
+    await Promise.race([written, held]);
+    const answer = request();
+    await expect
+      .poll(
+        async () => {
+          const { rows } = await t.db.execute<{ waiting: number }>(
+            sql`select count(*)::int as waiting from pg_stat_activity
+                where datname = current_database() and wait_event_type = 'Lock'`,
+          );
+          return rows[0].waiting;
+        },
+        // The request hashes its password (bcrypt) before it writes.
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+    release();
+    await held;
+    return answer;
+  }
 
   const passwordOf = async (id: number) => {
     const [row] = await t.db
@@ -118,25 +193,13 @@ describe('auth, account and push statements (#171)', () => {
   });
 
   describe('registration', () => {
-    const register = (email: string) =>
-      t.inject({
-        method: 'POST',
-        url: '/auth/register',
-        payload: {
-          email,
-          password: TEST_PASSWORD,
-          confirmPassword: TEST_PASSWORD,
-        },
-        headers: uniqueClient(),
-        anonymous: true,
-      });
-
     it('is the insert alone', async () => {
       const record = await recordQueries(async () => {
         expect((await register('joiner@example.com')).statusCode).toBe(302);
       });
       expect(record.statements).toBe(1);
-      expect(record.sql[0]).toMatch(/^insert into "user"/);
+      expect(record.sql[0]).toMatch(/^\s*insert into "user"/);
+      expect(record.sql[0]).toMatch(/where not exists/);
     });
 
     it('a taken address, in any case, is the same one statement and a field error', async () => {
@@ -161,14 +224,6 @@ describe('auth, account and push statements (#171)', () => {
   });
 
   describe('change email', () => {
-    const change = (cookie: string, email: string) =>
-      t.inject({
-        method: 'POST',
-        url: '/auth/update-email',
-        payload: { email, confirmEmail: email, currentPassword: TEST_PASSWORD },
-        headers: { cookie },
-      });
-
     it('is the lookup and the update', async () => {
       const cookie = await t.register('mover@example.com');
       const record = await recordQueries(async () => {
@@ -193,6 +248,72 @@ describe('auth, account and push statements (#171)', () => {
       expect(t.logs.messages('info', 'Web')).toContain(
         `Email change refused for user ${id}: the email is taken`,
       );
+    });
+  });
+
+  describe('a taken address raises no error; the race and other conflicts', () => {
+    it('neither route sends a statement Postgres refuses for a taken address', async () => {
+      await t.register('quiet@example.com');
+      const cookie = await t.register('quiet-mover@example.com');
+      expect(
+        await refusedStatements(async () => {
+          expect((await register('Quiet@example.com')).statusCode).toBe(400);
+          expect((await change(cookie, 'quiet@example.com')).statusCode).toBe(
+            400,
+          );
+        }),
+      ).toEqual([]);
+    });
+
+    it('registration that loses the race to a sign-up is the field error', async () => {
+      const res = await raceAgainst(
+        (tx) =>
+          insertUser(tx, 'racer@example.com', 'not-a-hash-racer').then((row) =>
+            expect(row).toBeDefined(),
+          ),
+        () => register('racer@example.com'),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toContain('Another account already uses this email');
+      expect(res.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('an email change that loses the race is the field error', async () => {
+      const cookie = await t.register('race-mover@example.com');
+      const id = await userIdOf(t, 'race-mover@example.com');
+      const res = await raceAgainst(
+        (tx) => insertUser(tx, 'race-target@example.com', 'not-a-hash-target'),
+        () => change(cookie, 'race-target@example.com'),
+      );
+      expect(res.statusCode).toBe(400);
+      expect(res.body).toContain('Another account already uses this email');
+      const [row] = await t.db
+        .select({ email: user.email })
+        .from(user)
+        .where(eq(user.id, id));
+      expect(row.email).toBe('race-mover@example.com');
+    });
+
+    it('a unique violation of another index is an error, never "taken"', async () => {
+      // At most one account at clash.test: a unique index that is not the
+      // address's, standing in for one a later migration might add.
+      await t.db.execute(
+        sql.raw(`create unique index test_clash_unique on "user" ((true))
+                 where email like '%@clash.test'`),
+      );
+      try {
+        await t.register('first@clash.test');
+        const registered = await register('second@clash.test');
+        expect(registered.statusCode).toBe(500);
+        expect(registered.body).not.toContain('Another account already uses');
+
+        const cookie = await t.register('mover@elsewhere.test');
+        const moved = await change(cookie, 'third@clash.test');
+        expect(moved.statusCode).toBe(500);
+        expect(moved.body).not.toContain('Another account already uses');
+      } finally {
+        await t.db.execute(sql.raw('drop index test_clash_unique'));
+      }
     });
   });
 
@@ -229,6 +350,17 @@ describe('auth, account and push statements (#171)', () => {
     expect(t.logs.messages('info', 'Web')).toContain(
       `Password changed for user ${id}: other sessions, 1 access tokens and 0 other push devices revoked`,
     );
+  });
+
+  it('a password written for an account that is gone is a 404, never a half-read row', async () => {
+    const gone = await updatePasswordHash(t.db, 999_999, 'not-a-hash').catch(
+      (error: unknown) => error,
+    );
+    expect(gone).toBeInstanceOf(HttpError);
+    expect(gone).toMatchObject({
+      statusCode: 404,
+      message: 'Account not found',
+    });
   });
 
   it('delete account is the lookup and its transaction', async () => {
