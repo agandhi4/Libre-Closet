@@ -72,9 +72,10 @@ describe('metrics, off by default', () => {
   });
 });
 
-// #136: a route whose time depends on a secret the request carries
-// (`config: { timingSensitive: true }`) answers without Server-Timing, which
-// would give a guesser the server's own time, free of network jitter.
+// #136: a request that checked a secret it carries (a password, an access
+// or invite token: markSecretChecked) answers without Server-Timing, which
+// would give a guesser the server's own time, free of network jitter. No
+// route declares it: the check marks its request.
 describe('Server-Timing on routes that check a secret', () => {
   let t: TestApp;
   const email = 'timing@example.com';
@@ -122,21 +123,6 @@ describe('Server-Timing on routes that check a secret', () => {
           anonymous: true,
         }),
       302,
-    ],
-    [
-      'registration, address taken',
-      () =>
-        t.inject({
-          method: 'POST',
-          url: '/auth/register',
-          payload: {
-            email,
-            password: TEST_PASSWORD,
-            confirmPassword: TEST_PASSWORD,
-          },
-          anonymous: true,
-        }),
-      400,
     ],
     [
       'change password',

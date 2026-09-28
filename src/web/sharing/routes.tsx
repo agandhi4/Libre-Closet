@@ -99,7 +99,7 @@ export const sharingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.get(
     '/wardrobe-share/invite/:token',
     {
-      config: { public: true, secretPath: true, timingSensitive: true },
+      config: { public: true, secretPath: true },
       schema: { params: InviteParams },
     },
     async (request, reply) => {
@@ -118,7 +118,7 @@ export const sharingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/wardrobe-share/invite/:token/accept',
     {
-      config: { secretPath: true, timingSensitive: true },
+      config: { secretPath: true },
       schema: { params: InviteParams },
     },
     async (request, reply) => {
@@ -140,7 +140,7 @@ export const sharingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   app.post(
     '/wardrobe-share/invite/:token/decline',
     {
-      config: { secretPath: true, timingSensitive: true },
+      config: { secretPath: true },
       schema: { params: InviteParams },
     },
     async (request, reply) => {

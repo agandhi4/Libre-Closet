@@ -9,9 +9,11 @@ function newMetrics(enabled = false) {
 
 /**
  * What a scraper depends on in an exposition, sorted: every family's
- * `# TYPE` line, and every series as its name and label names (label order
- * and values are free, except `le`, whose values name the buckets). Help
- * text and sample values are left out.
+ * `# TYPE` line, and every series as its name and label names. Label order
+ * and values are free, except the values the homelab selects by: `le` (the
+ * buckets) and job_duration_seconds' `outcome` (the JobFailed alert and the
+ * RED dashboard read `outcome="failure"`). Help text and sample values are
+ * left out.
  */
 function expositionContract(body: string): string[] {
   const lines = new Set<string>();
@@ -24,7 +26,12 @@ function expositionContract(body: string): string[] {
     const series = /^(\w+)(?:\{(.*)\})? \S+$/.exec(line);
     if (!series) throw new Error(`Unparsed exposition line: ${line}`);
     const labels = [...(series[2] ?? '').matchAll(/(\w+)="(?:[^"\\]|\\.)*"/g)]
-      .map(([pair, name]) => (name === 'le' ? pair : name))
+      .map(([pair, name]) =>
+        name === 'le' ||
+        (name === 'outcome' && series[1].startsWith('job_duration_seconds'))
+          ? pair
+          : name,
+      )
       .sort();
     lines.add(`${series[1]}{${labels.join(',')}}`);
   }
@@ -72,7 +79,7 @@ const DEFAULT_FAMILIES = [
 ];
 
 describe('Metrics', () => {
-  it('times a job as ok, or as error and rethrows', async () => {
+  it('times a job as success, or as failure and rethrows', async () => {
     const { metrics } = newMetrics();
     const doubled = metrics.timeJob('reconciliation', (n: number) =>
       Promise.resolve(n * 2),
@@ -85,10 +92,10 @@ describe('Metrics', () => {
 
     const { body } = await metrics.exposition();
     expect(body).toMatch(
-      /^job_duration_seconds_count\{name="reconciliation",outcome="ok"\} 1$/m,
+      /^job_duration_seconds_count\{name="reconciliation",outcome="success"\} 1$/m,
     );
     expect(body).toMatch(
-      /^job_duration_seconds_count\{name="replan",outcome="error"\} 1$/m,
+      /^job_duration_seconds_count\{name="replan",outcome="failure"\} 1$/m,
     );
   });
 
@@ -163,13 +170,16 @@ describe('Metrics', () => {
 
   // The homelab's dashboards and alerts (homelab #39) read these names,
   // types and labels: a client library change (#136: prom-client to
-  // @prometheus-io/client) or a refactor must not move them. `le` values are
-  // kept whole: histogram_quantile() and the alerts select buckets by them.
+  // @prometheus-io/client) or a refactor must not move them. The values
+  // they select by are kept whole: `le`, and a job's `outcome`.
   it("keeps the exposition's names, types and labels (the homelab contract)", async () => {
     const { metrics } = newMetrics();
     metrics.addRoute('/calendar');
     metrics.observeRequest('/calendar', 'GET', 200, 0.01);
-    metrics.observeJob('cutout', 'ok', 2.5);
+    await metrics.timeJob('reconciliation', () => Promise.resolve())();
+    await expect(
+      metrics.timeJob('replan', () => Promise.reject(new Error('down')))(),
+    ).rejects.toThrow('down');
     metrics.countPushSend('delivered');
     metrics.observeMcpCall('list_garments', 'ok', 0.02);
     metrics.observeClientTiming({
@@ -229,20 +239,34 @@ describe('Metrics', () => {
         "http_request_duration_seconds_bucket{le="5",method,route,status_class}",
         "http_request_duration_seconds_count{method,route,status_class}",
         "http_request_duration_seconds_sum{method,route,status_class}",
-        "job_duration_seconds_bucket{le="+Inf",name,outcome}",
-        "job_duration_seconds_bucket{le="0.01",name,outcome}",
-        "job_duration_seconds_bucket{le="0.05",name,outcome}",
-        "job_duration_seconds_bucket{le="0.25",name,outcome}",
-        "job_duration_seconds_bucket{le="1",name,outcome}",
-        "job_duration_seconds_bucket{le="10",name,outcome}",
-        "job_duration_seconds_bucket{le="120",name,outcome}",
-        "job_duration_seconds_bucket{le="2.5",name,outcome}",
-        "job_duration_seconds_bucket{le="30",name,outcome}",
-        "job_duration_seconds_bucket{le="300",name,outcome}",
-        "job_duration_seconds_bucket{le="5",name,outcome}",
-        "job_duration_seconds_bucket{le="60",name,outcome}",
-        "job_duration_seconds_count{name,outcome}",
-        "job_duration_seconds_sum{name,outcome}",
+        "job_duration_seconds_bucket{le="+Inf",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="+Inf",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="0.01",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="0.01",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="0.05",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="0.05",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="0.25",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="0.25",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="1",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="1",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="10",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="10",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="120",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="120",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="2.5",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="2.5",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="30",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="30",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="300",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="300",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="5",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="5",name,outcome="success"}",
+        "job_duration_seconds_bucket{le="60",name,outcome="failure"}",
+        "job_duration_seconds_bucket{le="60",name,outcome="success"}",
+        "job_duration_seconds_count{name,outcome="failure"}",
+        "job_duration_seconds_count{name,outcome="success"}",
+        "job_duration_seconds_sum{name,outcome="failure"}",
+        "job_duration_seconds_sum{name,outcome="success"}",
         "mcp_tool_call_duration_seconds_bucket{le="+Inf",outcome,tool}",
         "mcp_tool_call_duration_seconds_bucket{le="0.005",outcome,tool}",
         "mcp_tool_call_duration_seconds_bucket{le="0.01",outcome,tool}",

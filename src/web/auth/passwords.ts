@@ -1,5 +1,6 @@
 import * as bcrypt from 'bcryptjs';
 import type { Db } from '../../db/client';
+import { markSecretChecked } from '../../metrics/request-timing';
 import type { StringKey } from '../i18n';
 import { type PasswordChange, updatePasswordHash } from './queries';
 
@@ -27,6 +28,7 @@ export async function verifyPassword(
   password: string,
   hash: string | undefined,
 ): Promise<boolean> {
+  markSecretChecked();
   if (hash === undefined) {
     await bcrypt.compare(password, UNKNOWN_ACCOUNT_HASH);
     return false;
