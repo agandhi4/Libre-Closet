@@ -764,7 +764,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       } catch (error) {
         const states = savedStates(body);
         if (!(error instanceof OutfitGarmentsGone) || !states) throw error;
-        return refusedPage(reply, userId, body, { error, states });
+        return refusedPage(request, reply, body, { error, states });
       }
     },
   );
@@ -808,11 +808,12 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
    * garment of another's is cleared like a deleted one and never shown.
    */
   async function refusedPage(
+    request: FastifyRequest,
     reply: FastifyReply,
-    userId: number,
     body: Static<typeof SaveBody>,
     refused: Pick<RefusedSave, 'error' | 'states'>,
   ) {
+    const userId = sessionUserId(request);
     logger.info(
       `Styling save by user ${userId} refused (${refused.error.statusCode}): garments ${describeGone(refused.error.gone)}${body.outfit === undefined ? '' : ` for outfit ${body.outfit}`}; the page again`,
     );
@@ -825,17 +826,17 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     );
     const own: Wardrobe = { ownerId: userId, viewOwner: undefined };
     const [wardrobe, aim, opened] = await Promise.all([
-      scopeOf(userId, { capsule: body.capsule }),
+      scopeOf(request, { capsule: body.capsule }),
       aimIdeas(db, userId, postedDestination(body), today),
       openedWith(userId, own, { outfit: body.outfit }),
     ]);
     const { states, held } = await checkedStates(userId, cleared);
-    const [windows, capsules] = await Promise.all([
+    const [windows, { capsules }] = await Promise.all([
       roleWindows(db, userId, {
         capsuleId: wardrobe.capsule?.id,
         selected: states.flatMap((s) => s.garmentId ?? []),
       }),
-      capsuleNames(db, userId),
+      menus(userId, own),
     ]);
     const model = pageModel({
       wardrobe,
