@@ -828,9 +828,18 @@ describe('outfit gallery', () => {
   // trip (#156), so each route's count is pinned: a new read shows up here.
   // Every request's first statement is the session's user.
   describe('statements per request (#168)', () => {
-    it('the page: the pool, saved outfits, clashes and the capsule menu', async () => {
+    it('the page: the session, then the pool, saved outfits, clashes and the capsule menu in one', async () => {
       const read = await recordQueries(() => get('/outfits/ideas'));
-      expect(read.statements).toBe(5);
+      expect(read.statements).toBe(2);
+      const [, ideas] = read.sql;
+      for (const table of [
+        '"garment_wear"',
+        '"outfit_slot"',
+        '"generator_avoid"',
+        '"capsule"',
+      ]) {
+        expect(ideas).toContain(table);
+      }
       const more = await recordQueries(() =>
         t.inject({
           method: 'GET',
@@ -838,8 +847,20 @@ describe('outfit gallery', () => {
           headers: HX_FRAGMENT,
         }),
       );
-      // No capsule menu on a fragment.
-      expect(more.statements).toBe(4);
+      // The same, without the capsule menu: a fragment has none.
+      expect(more.statements).toBe(2);
+      expect(more.sql[1]).not.toContain('"capsule"');
+    });
+
+    it('?capsule= and ?with= each validate first, a statement before the ideas', async () => {
+      const scoped = await recordQueries(() =>
+        get(`/outfits/ideas?capsule=${capsuleId}`),
+      );
+      expect(scoped.statements).toBe(3);
+      const styled = await recordQueries(() =>
+        get(`/outfits/ideas?with=${tops[0]}`),
+      );
+      expect(styled.statements).toBe(3);
     });
 
     it('a clash is one statement, and refuses a wishlist item in it', async () => {
@@ -895,15 +916,16 @@ describe('outfit gallery', () => {
         expect(reads(record.sql)).toHaveLength(1);
         expect(reads(record.sql)[0]).toMatch(/for share of "garment"$/);
       }
-      // The session; begin, lock timeout and the owner lock; the read; the
-      // outfit within createOutfit's savepoint (savepoint, outfit, slots,
-      // release; #213); commit.
-      expect(first.statements).toBe(10);
+      // The session; begin, and the owner lock with its timeout (#215);
+      // the read; the outfit within createOutfit's savepoint (savepoint,
+      // outfit, slots, release; #213); commit.
+      expect(first.statements).toBe(9);
       expect(again.sql.some((q) => q.startsWith('insert into "outfit"'))).toBe(
         false,
       );
-      // Already saved: the read, then the planner's take-over, nothing else.
-      expect(again.statements).toBe(7);
+      // Already saved: the session; begin and the lock; the read; the
+      // planner's take-over; commit.
+      expect(again.statements).toBe(6);
     });
   });
 });
@@ -959,6 +981,20 @@ describe('outfit gallery with the weather', () => {
     expect(stub.hits.filter((hit) => hit.startsWith('/v1/archive'))).toEqual(
       [],
     );
+  });
+
+  it('reads the weather settings and the cached forecast in the ideas’ one statement (#168)', async () => {
+    await t.inject({ method: 'GET', url: '/outfits/ideas' });
+    const hits = stub.hits.length;
+    const read = await recordQueries(() =>
+      t.inject({ method: 'GET', url: '/outfits/ideas' }),
+    );
+    // The session, then the pool, the generator's memory, the capsule menu
+    // and the settings with their location's forecast row. A fresh row read
+    // back from JSON (its timestamps as strings) is served, not fetched.
+    expect(read.statements).toBe(2);
+    expect(read.sql[1]).toContain('"weather_forecast"');
+    expect(stub.hits).toHaveLength(hits);
   });
 
   it('"too warm" nudges the offset and comes back to the same ideas', async () => {

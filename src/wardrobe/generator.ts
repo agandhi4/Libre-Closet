@@ -196,15 +196,38 @@ export function generateIdeas<G extends IdeaGarment>(
     request.needs && !lockedRoles.has('layer')
       ? byLayerPreference(byRole.get('layer') ?? [])
       : [];
-  const draw = drawer(request.seed, templates, byRole, locked);
-  const bases = baseCount(templates, byRole, lockedRoles);
-  const floor = scoreFloor(
-    templates,
-    byRole,
-    locked,
-    lockedRoles,
-    request.formality,
-  );
+  return drawPage(request, {
+    draw: drawer(request.seed, templates, byRole, locked),
+    bases: baseCount(templates, byRole, lockedRoles),
+    floor: scoreFloor(
+      templates,
+      byRole,
+      locked,
+      lockedRoles,
+      request.formality,
+    ),
+    layers,
+    rules,
+  });
+}
+
+/** generateIdeas' draws: until the page is settled, then the page. */
+function drawPage<G extends IdeaGarment>(
+  request: IdeaRequest<G>,
+  {
+    draw,
+    bases,
+    floor,
+    layers,
+    rules,
+  }: {
+    draw: () => G[];
+    bases: number;
+    floor: number;
+    layers: readonly G[];
+    rules: HardRules;
+  },
+): IdeaPage<G> {
   const want = request.offset + request.limit + 1;
   const fitting: Idea<G>[] = [];
   const nearMisses: Idea<G>[] = [];

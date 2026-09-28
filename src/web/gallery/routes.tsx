@@ -3,7 +3,6 @@ import { type Static, Type } from '@sinclair/typebox';
 import { FEELINGS } from '../../weather/temperature';
 import { sessionUserId } from '../auth/require-session';
 import { type IsoDate, todayIn } from '../calendar/calendar-date';
-import { capsuleNames } from '../capsules/queries';
 import { HttpError } from '../errors';
 import { parseDestination } from '../outfits/destination';
 import type { WebOptions } from '../plugin';
@@ -118,6 +117,7 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   async function galleryFor(
     ownerId: number,
     query: Static<typeof GalleryQuery>,
+    options: { capsuleMenu: boolean },
   ) {
     const now = new Date();
     const today: IsoDate = todayIn(config.timeZone, now);
@@ -150,6 +150,7 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         seed: state.seed,
         page,
         pageSize: IDEAS_PAGE_SIZE,
+        capsuleMenu: options.capsuleMenu,
       },
       now,
     );
@@ -161,6 +162,7 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       planning,
       trip: trip && { id: trip.id, name: trip.name },
       capsule,
+      capsules: result.capsules,
       styled,
       cards: { state, planning, ...result, page },
     };
@@ -170,13 +172,10 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     IDEAS_PATH,
     { schema: { querystring: GalleryQuery } },
     async (request, reply) => {
-      const ownerId = sessionUserId(request);
-      // The menu's capsules alongside the ideas' reads, not after them: a
-      // round trip less on the page's critical path (#168).
-      const [gallery, capsules] = await Promise.all([
-        galleryFor(ownerId, request.query),
-        capsuleNames(db, ownerId),
-      ]);
+      // The capsule menu rides in the ideas' own statement (#168).
+      const gallery = await galleryFor(sessionUserId(request), request.query, {
+        capsuleMenu: true,
+      });
       return renderPage(
         reply,
         <IdeasPage
@@ -186,7 +185,7 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             planning: gallery.planning,
             trip: gallery.trip,
             capsule: gallery.capsule,
-            capsules,
+            capsules: gallery.capsules ?? [],
             styled: gallery.styled,
             cards: gallery.cards,
           }}
@@ -201,7 +200,9 @@ export const galleryRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     `${IDEAS_PATH}/more`,
     { schema: { querystring: GalleryQuery } },
     async (request, reply) => {
-      const gallery = await galleryFor(sessionUserId(request), request.query);
+      const gallery = await galleryFor(sessionUserId(request), request.query, {
+        capsuleMenu: false,
+      });
       return renderFragment(reply, <IdeaCards model={gallery.cards} />);
     },
   );

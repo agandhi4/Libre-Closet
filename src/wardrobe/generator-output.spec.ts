@@ -235,29 +235,19 @@ describe('the generator, pinned (#168)', () => {
   });
 
   it('a sweep of seeds, pages, weather and locks', () => {
-    const lines: string[] = [];
     const [top] = byRole(PERSON, 'top');
     const [dress] = byRole(PERSON, 'one-piece');
-    for (const seed of [1, 2, 3, 99, 2_147_483_647]) {
-      for (const needs of [null, COLD, MILD]) {
-        for (const locked of [[], [top], [dress]]) {
-          for (const offset of [0, 6, 60, 294]) {
-            lines.push(
-              ...digest(
-                generateIdeas({
-                  ...gallery,
-                  seed,
-                  needs,
-                  locked,
-                  offset,
-                  limit: 6,
-                }),
-              ),
-            );
-          }
-        }
-      }
-    }
+    // Every combination, in the order the pin was recorded in.
+    const requests = [1, 2, 3, 99, 2_147_483_647].flatMap((seed) =>
+      [null, COLD, MILD].flatMap((needs) =>
+        [[], [top], [dress]].flatMap((locked) =>
+          [0, 6, 60, 294].map((offset) => ({ seed, needs, locked, offset })),
+        ),
+      ),
+    );
+    const lines = requests.flatMap((varied) =>
+      digest(generateIdeas({ ...gallery, ...varied, limit: 6 })),
+    );
     expect(hashOf(lines)).toBe(PINNED.sweep);
   });
 });
