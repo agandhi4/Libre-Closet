@@ -139,6 +139,9 @@ export const getState = () => state;
 // navigation actually starting; document.hidden also covers a backgrounded
 // tab, where a cancelled request is just as unreliable and the banner is
 // not shown anyway.
+// A cancelled beforeunload (the user dismisses a confirm dialog) leaves this
+// true with no unload to clear it; bounded on purpose, since the heartbeat
+// (HEARTBEAT_MS) still probes while visible either way.
 let leaving = false;
 function isPageLeaving() {
   return leaving || document.hidden;

@@ -10,6 +10,10 @@ import { pageErrors } from './support/page-errors';
  * setState logs every transition (`[connectivity] x -> y`), so that line
  * proves the flip happened even when it is too quick for the banner's
  * `hidden` class to be worth polling for.
+ *
+ * Chromium never cancels the in-flight request this way, so this spec is
+ * green there before and after the fix; the regression only shows up (and
+ * was verified red on the pre-fix code) in the nightly WebKit projects.
  */
 test('a native form post during an in-flight htmx request never marks the app offline', async ({
   page,
