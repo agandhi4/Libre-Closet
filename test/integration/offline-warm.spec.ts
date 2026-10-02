@@ -12,15 +12,14 @@ import { addDays } from '../../src/web/calendar/calendar-date';
 import { weekOf } from '../../src/web/calendar/calendar-view';
 import {
   parseWarmList,
+  WARM_GARMENT_CAP,
   WARM_LIST_PATH,
+  WARM_OUTFIT_CAP,
+  WARM_PAGE_CAP,
   WARM_REQUEST_HEADER,
   type WarmList,
 } from '../../src/web/shell/offline-warm';
-import {
-  WARM_GARMENT_CAP,
-  WARM_OUTFIT_CAP,
-} from '../../src/web/shell/warm-list';
-import { GRID_PAGE_SIZE } from '../../src/web/wardrobe/queries';
+import { GRID_PAGE_SIZE } from '../../src/web/wardrobe/grid-page-size';
 import {
   createTestApp,
   PWA_ENV,
@@ -203,6 +202,45 @@ describe('GET /offline/warm', () => {
     );
   });
 
+  it('leaves a warm’s requests out of the request histogram', async () => {
+    const countOf = async (route: string) => {
+      const exposed = await t.metrics.registry.metrics();
+      const line = exposed
+        .split('\n')
+        .find(
+          (row) =>
+            row.startsWith('http_request_duration_seconds_count{') &&
+            row.includes(`route="${route}"`),
+        );
+      return Number(line?.split(' ').at(-1) ?? 0);
+    };
+    const before = await countOf('/outfits/:id');
+    await t.inject({
+      method: 'GET',
+      url: `/outfits/${outfitId}`,
+      headers: { cookie: t.owner.cookie, [WARM_REQUEST_HEADER]: '1' },
+    });
+    expect(await countOf('/outfits/:id')).toBe(before);
+    await t.inject({
+      method: 'GET',
+      url: `/outfits/${outfitId}`,
+      headers: { cookie: t.owner.cookie },
+    });
+    expect(await countOf('/outfits/:id')).toBe(before + 1);
+  });
+
+  // The worker's own fetch is no navigation (Sec-Fetch-Mode: cors): the
+  // gate refuses it, and the worker reads the 401 as the session's end.
+  it('refuses the worker’s signed-out request with a 401', async () => {
+    const res = await t.inject({
+      method: 'GET',
+      url: WARM_LIST_PATH,
+      anonymous: true,
+      headers: { 'sec-fetch-mode': 'cors', [WARM_REQUEST_HEADER]: '1' },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
   it('sends a signed-out request to the login page', async () => {
     const res = await t.inject({
       method: 'GET',
@@ -316,6 +354,9 @@ describe('GET /offline/warm', () => {
         `/wardrobe/${garments[WARM_GARMENT_CAP]}`,
         `/outfits/${outfits[WARM_OUTFIT_CAP]}`,
       ]);
+      expect(list.pages.length + list.fragments.length).toBeLessThanOrEqual(
+        WARM_PAGE_CAP,
+      );
       // Every grid page whose first garment is warmed, none past the cap.
       const pageCount = Math.ceil(WARM_GARMENT_CAP / GRID_PAGE_SIZE);
       expect(list.fragments).toEqual(

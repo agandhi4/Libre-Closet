@@ -1,10 +1,19 @@
-import { expect, type Page, test } from '@playwright/test';
+import { type BrowserContext, expect, type Page, test } from '@playwright/test';
+import {
+  parseWarmList,
+  WARM_LIST_PATH,
+  WARM_REQUEST_HEADER,
+  type WarmList,
+} from '../src/web/shell/offline-warm';
 import { addPhotographedGarment, createGarment } from './support/e2e-data';
 import {
+  changePasswordElsewhere,
   registerElsewhere,
   signIn,
+  signInAs,
   switchAccount,
 } from './support/e2e-session';
+import { seedDemoAs } from './support/seed-demo';
 import {
   ageCachedPage,
   cachedImages,
@@ -535,5 +544,153 @@ test.describe('a warmed wardrobe and the session', () => {
     }
     expect(keys).not.toContain(`/wardrobe/${garmentId}`);
     expect(images.filter((url) => url.startsWith('/file/thumb/'))).toEqual([]);
+  });
+
+  /** The signed-in account's warm list and its id (X-Page-Account). */
+  async function warmListOf(
+    page: Page,
+  ): Promise<{ list: WarmList; account: string }> {
+    const res = await page.request.get(WARM_LIST_PATH);
+    expect(res.ok()).toBe(true);
+    const list = parseWarmList(await res.json());
+    if (!list) throw new Error('not a warm list');
+    return { list, account: res.headers()['x-page-account'] };
+  }
+
+  /**
+   * Every warm fetch but the list goes out 100 ms late, so a warm is always
+   * between fetches and in the middle of some. Once ten have gone (`midway`),
+   * the next thumb is held (`held`) until `release` is called. The browser
+   * sends each (route.fallback), with its own Sec-Fetch-Mode: route.fetch
+   * would send none, and the gate would redirect it to the login page.
+   */
+  async function slowWarm(context: BrowserContext) {
+    let sent = 0;
+    let reachedMidway!: () => void;
+    const midway = new Promise<void>((resolve) => (reachedMidway = resolve));
+    let holding = false;
+    let heldThumb!: (path: string) => void;
+    const held = new Promise<string>((resolve) => (heldThumb = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await context.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      const warm =
+        route.request().headers()[WARM_REQUEST_HEADER.toLowerCase()] !==
+        undefined;
+      if (!warm || url.pathname === WARM_LIST_PATH) {
+        await route.fallback();
+        return;
+      }
+      if (holding && url.pathname.startsWith('/file/thumb/')) {
+        holding = false;
+        heldThumb(url.pathname);
+        await released;
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await route.fallback();
+      sent += 1;
+      if (sent === 10) {
+        holding = true;
+        reachedMidway();
+      }
+    });
+    return { midway, held, release };
+  }
+
+  /** The accounts the cached pages were rendered for, records aside. */
+  function cachedAccounts(page: Page): Promise<string[]> {
+    return page.evaluate(async (cacheName) => {
+      const cache = await caches.open(cacheName);
+      const accounts: string[] = [];
+      for (const key of await cache.keys()) {
+        if (key.url.startsWith('https://page-cache.invalid/')) continue;
+        const copy = await cache.match(key);
+        accounts.push(copy?.headers.get('X-Page-Account') ?? '');
+      }
+      return accounts;
+    }, PAGES_CACHE);
+  }
+
+  /** Nothing the warm list of `account` names is in either cache. */
+  async function expectNothingOf(
+    page: Page,
+    { list, account }: { list: WarmList; account: string },
+  ): Promise<void> {
+    expect(await cachedAccounts(page)).not.toContain(account);
+    const keys = await cachedKeys(page);
+    for (const path of [...list.pages, ...list.fragments]) {
+      if (!/^\/(?:wardrobe|outfits)\/\d+$|^\/wardrobe\/tiles/.test(path))
+        continue;
+      expect(keys).not.toContain(path);
+    }
+    const images = await cachedImages(page);
+    for (const thumb of list.images) expect(images).not.toContain(thumb);
+  }
+
+  test('a session dropped between a warm’s fetches and during a thumb’s leaves nothing of the account (#286)', async ({
+    page,
+    context,
+    playwright,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', WEBKIT_CANNOT_WATCH_WORKER);
+    await signInAs(page, await seedDemoAs('swr-dropwarm-a'));
+    const first = await warmListOf(page);
+    const second = await registerElsewhere(playwright, 'swr-dropwarm-b');
+    const { midway, held, release } = await slowWarm(context);
+    await page.goto('/auth/profile');
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await page.reload();
+    await midway;
+
+    // The other worker loop keeps starting fetches while the account
+    // changes; one thumb is in flight across the drop (the sign-out post's),
+    // and the run ends once it lands.
+    const other = await context.newPage();
+    await other.goto('/auth/profile');
+    await switchAccount(other, second);
+    const heldPath = await held;
+    const refused = workerLogs(context, `${heldPath} answered from generation`);
+    const stopped = workerLogs(
+      context,
+      '[sw] warm stopped, the session changed',
+    );
+    release();
+    await refused;
+    await stopped;
+
+    await expectNothingOf(other, first);
+  });
+
+  test('a session revoked elsewhere mid-warm drops what the warm stored (#286)', async ({
+    page,
+    context,
+    browser,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', WEBKIT_CANNOT_WATCH_WORKER);
+    const email = await seedDemoAs('swr-revokewarm');
+    await signInAs(page, email);
+    const warmed = await warmListOf(page);
+    const { midway, release } = await slowWarm(context);
+    release();
+    await page.goto('/auth/profile');
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await page.reload();
+    await midway;
+
+    // The next page the warm asks for carries the revoked cookie: a 401
+    // with X-Session-Ended, which drops the session caches.
+    const ended = workerLogs(context, '(warm): the session ended');
+    const stopped = workerLogs(context, '[sw] warm stopped, the session ended');
+    const elsewhere = await changePasswordElsewhere(browser, email);
+    await ended;
+    await stopped;
+    await elsewhere.close();
+
+    await expectNothingOf(page, warmed);
+    expect(await cachedImages(page)).toEqual([]);
   });
 });

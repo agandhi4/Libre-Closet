@@ -6,6 +6,9 @@
  * every garment and outfit offline (src/web/shell/offline-warm.md).
  */
 
+import { TAB_ROOTS } from '../page-cache';
+import { GRID_PAGE_SIZE } from '../wardrobe/grid-page-size';
+
 /** The warm list's route (src/web/shell/routes.tsx). */
 export const WARM_LIST_PATH = '/offline/warm';
 
@@ -15,11 +18,56 @@ export const WARM_LIST_PATH = '/offline/warm';
  */
 export const WARM_REQUEST_HEADER = 'X-Closet-Warm';
 
+/**
+ * Whether a request is a warm's: the request log marks it, the request
+ * histogram leaves it out (src/metrics/http.ts). Node's lower-cased headers.
+ */
+export function isWarmRequest(
+  headers: Record<string, string | string[] | undefined>,
+): boolean {
+  return headers[WARM_REQUEST_HEADER.toLowerCase()] !== undefined;
+}
+
 /** A warm re-fetches a copy older than this, and runs at most this often. */
 export const WARM_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-/** A warm stops once the origin's storage use passes this. */
+/**
+ * A warm stops once it has added this much to the origin's storage use
+ * (what it was at the run's start, so photos visited before never stop it).
+ */
 export const WARM_USAGE_BUDGET_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Caps on what one device warms (docs/plans/2026-09-28-caching-and-offline.md,
+ * section 2): the newest first, about 20 MB at the cap. The demo wardrobe
+ * (83 garments, 26 outfits) is well under both.
+ */
+export const WARM_GARMENT_CAP = 300;
+export const WARM_OUTFIT_CAP = 80;
+
+/**
+ * The most pages a warm list names (pages and fragments): the tab roots,
+ * next week, a page per capped garment and outfit, and the grid's later
+ * pages, one per GRID_PAGE_SIZE warmed garments at most. The worker sizes
+ * its page cache from it.
+ */
+export const WARM_PAGE_CAP =
+  TAB_ROOTS.size +
+  1 +
+  WARM_GARMENT_CAP +
+  WARM_OUTFIT_CAP +
+  Math.ceil(WARM_GARMENT_CAP / GRID_PAGE_SIZE);
+
+// Thumbs an outfit shows that no warmed garment page does: its archived
+// pieces, or ones past the garment cap.
+const WARM_OUTFIT_ONLY_THUMBS = 100;
+
+/**
+ * The most thumbs a warm list names (the server cuts the list there): the
+ * capped garments' and their outfits' others. The worker sizes its image
+ * cache from it.
+ */
+export const WARM_IMAGE_CAP = WARM_GARMENT_CAP + WARM_OUTFIT_ONLY_THUMBS;
 
 /**
  * The warm list: same-origin paths with their query, nothing else.

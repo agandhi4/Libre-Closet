@@ -132,18 +132,27 @@ export async function warmFinished(context: BrowserContext): Promise<string> {
 }
 
 /**
- * The context's pages say the user asked to save data
- * (`navigator.connection.saveData`), so none asks the worker to warm the
- * wardrobe (pwa.js, #286). For a spec whose cache contents or offline
+ * The context's pages never post WARM_PAGES (pwa.js, #286), so the worker
+ * never warms the wardrobe. For a spec whose cache contents or offline
  * pages are its own visits' alone: a warm running beside it would fill the
- * caches with every page and thumb.
+ * caches with every page and thumb. The message itself is held back, not a
+ * record in the cache: every sign-in drops the caches, and the next page
+ * would warm again.
  */
 export async function withoutWarming(context: BrowserContext): Promise<void> {
   await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'connection', {
-      value: { saveData: true },
-      configurable: true,
-    });
+    const post = Reflect.get(ServiceWorker.prototype, 'postMessage') as (
+      ...args: unknown[]
+    ) => void;
+    ServiceWorker.prototype.postMessage = function (
+      this: ServiceWorker,
+      message: unknown,
+      ...rest: unknown[]
+    ) {
+      const type = (message as { type?: unknown } | null)?.type;
+      if (type === 'WARM_PAGES') return;
+      Reflect.apply(post, this, [message, ...rest]);
+    };
   });
 }
 

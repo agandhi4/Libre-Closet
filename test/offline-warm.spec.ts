@@ -138,7 +138,7 @@ test.describe('warming the wardrobe for offline reading', () => {
     await signInAs(page, await seedDemoAs('warm-demo'));
     const line = await firstWarm(page, context);
     expect(line).toMatch(
-      /^\[sw\] warmed \d+ pages, \d+ images in [\d.]+ s \(\d+ fresh, 0 removed, 0 refused, usage [\d.]+ MB of [\d.]+ [MG]B\)$/,
+      /^\[sw\] warmed \d+ pages, \d+ images in [\d.]+ s \(\d+ fresh, 0 removed, 0 refused, added [\d.]+ MB, usage [\d.]+ MB of [\d.]+ [MG]B\)$/,
     );
 
     const list = await warmListOf(page);

@@ -11,19 +11,16 @@ import { photoRefJson } from '../files/queries';
 import { savedOutfitsSql } from '../outfits/queries';
 import { outfitUrl } from '../outfits/urls';
 import { TAB_ROOTS } from '../page-cache';
-import { GRID_PAGE_SIZE } from '../wardrobe/queries';
+import { GRID_PAGE_SIZE } from '../wardrobe/grid-page-size';
 import { inCloset, onWishlist } from '../wardrobe/status';
 import { garmentUrl } from '../wardrobe/urls';
 import { EMPTY_SEARCH, tilesUrl } from '../wardrobe/wardrobe-page';
-import type { WarmList } from './offline-warm';
-
-/**
- * Caps on what one device warms (docs/plans/2026-09-28-caching-and-offline.md,
- * section 2): the newest first, about 20 MB at the cap. The demo wardrobe
- * (83 garments, 26 outfits) is well under both.
- */
-export const WARM_GARMENT_CAP = 300;
-export const WARM_OUTFIT_CAP = 80;
+import {
+  WARM_GARMENT_CAP,
+  WARM_IMAGE_CAP,
+  WARM_OUTFIT_CAP,
+  type WarmList,
+} from './offline-warm';
 
 /**
  * The warm list of `ownerId`'s own wardrobe (#286): the tab roots, this
@@ -66,7 +63,9 @@ export async function warmList(
     fragments: gridPageCursors(closet.map((row) => row.id))
       .filter((before) => warmedIds.has(before))
       .map((before) => tilesUrl(undefined, EMPTY_SEARCH, before)),
-    images: [...thumbs],
+    // The garments' thumbs come first (warmed before the outfits'), so a
+    // cut falls on outfit pieces the closet pages never show.
+    images: [...thumbs].slice(0, WARM_IMAGE_CAP),
     keep: [
       ...garments
         .filter((row) => !warmedIds.has(row.id))

@@ -31,7 +31,7 @@ import {
 } from './web/security/outbound-fetch';
 import { registerRateLimit } from './web/security/rate-limit';
 import { createSameOriginHook } from './web/security/same-origin';
-import { WARM_REQUEST_HEADER } from './web/shell/offline-warm';
+import { isWarmRequest } from './web/shell/offline-warm';
 import { createViewContextBuilder } from './web/view-context';
 import { createJmapClient } from './web/wardrobe/order-mail/jmap';
 import type { OrderMailDeps } from './web/wardrobe/order-mail/poll';
@@ -304,9 +304,7 @@ export async function createApp(
   const http = logger.child({ context: 'Http' });
   app.addHook('onResponse', (request, reply, done) => {
     if (!isStaticPath(request.url)) {
-      const warm = request.headers[WARM_REQUEST_HEADER.toLowerCase()]
-        ? ' (warm)'
-        : '';
+      const warm = isWarmRequest(request.headers) ? ' (warm)' : '';
       http.info(
         `${request.method} ${loggableUrl(request)} ${reply.statusCode} ${reply.elapsedTime.toFixed(1)}ms${warm}`,
       );

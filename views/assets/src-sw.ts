@@ -16,7 +16,10 @@ import {
   Strategy,
   StrategyHandler,
 } from 'workbox-strategies';
-import { pageCacheKey } from '../../src/htmx/fragment-request';
+import {
+  pageCacheKey,
+  pageUrlOfCacheKey,
+} from '../../src/htmx/fragment-request';
 import {
   bypassesWorker,
   CACHED_AT_HEADER,
@@ -35,7 +38,9 @@ import {
   isWarmedDetailPage,
   parseWarmList,
   WARM_LIST_PATH,
+  WARM_IMAGE_CAP,
   WARM_MAX_AGE_MS,
+  WARM_PAGE_CAP,
   WARM_REQUEST_HEADER,
   WARM_USAGE_BUDGET_BYTES,
   type WarmList,
@@ -156,6 +161,23 @@ interface RevalidationResult {
  */
 let generation = 0;
 
+/**
+ * The generation each warm request belongs to: its run's (#286). drainWarm
+ * awaits between its generation check and a job's start, so a drop can fall
+ * there; a job stamped with the generation current at its start would then
+ * be the next session's, and store the previous account's page or thumb in
+ * it. Keyed by the Request handed to handleAll, which handlerWillStart gets.
+ */
+const warmRunOf = new WeakMap<Request, number>();
+
+/**
+ * What a page or image request records in handlerWillStart: a warm's run,
+ * else the generation it starts in.
+ */
+function generationFor(request: Request): number {
+  return warmRunOf.get(request) ?? generation;
+}
+
 /** The generation a request recorded in its handlerWillStart. */
 function startedIn(state: { generation?: unknown } | undefined): number {
   return Number(state?.generation ?? -1);
@@ -210,7 +232,10 @@ async function emptySessionCaches(
 async function rewarmOfflinePage(event: ExtendableEvent): Promise<void> {
   try {
     await Promise.all(
-      pages.handleAll({ event, request: new Request(FALLBACK_HTML_URL) }),
+      offlinePage.handleAll({
+        event,
+        request: new Request(FALLBACK_HTML_URL),
+      }),
     );
   } catch (error) {
     console.warn('[sw] could not re-warm the offline page', error);
@@ -271,11 +296,12 @@ function claimPageCache(
 //
 // The generation is taken in handlerWillStart, before the request (the
 // navigation preload included, which skips requestWillFetch), into the state
-// Workbox keeps per plugin and request; a StrategyHandler built by hand
-// (revalidateForPage) must run handlerWillStart itself.
+// Workbox keeps per plugin and request (generationFor: a warm's request takes
+// its run's); a StrategyHandler built by hand (revalidateForPage) must run
+// handlerWillStart itself.
 const pageStore: WorkboxPlugin = {
-  handlerWillStart: async ({ state }) => {
-    if (state) state.generation = generation;
+  handlerWillStart: async ({ request, state }) => {
+    if (state) state.generation = generationFor(request);
   },
   cacheWillUpdate: async ({ request, response, event, state }) => {
     const since = startedIn(state);
@@ -302,7 +328,10 @@ const pageStore: WorkboxPlugin = {
       // REVALIDATE_PAGE itself once it does.
       const timing = headers.get('Server-Timing');
       const cacheEntry = `${CACHED_AT_TIMING_NAME};desc="${cachedAtMs}"`;
-      headers.set('Server-Timing', timing ? `${timing}, ${cacheEntry}` : cacheEntry);
+      headers.set(
+        'Server-Timing',
+        timing ? `${timing}, ${cacheEntry}` : cacheEntry,
+      );
       return { ...init, headers };
     });
   },
@@ -328,10 +357,9 @@ async function isOwned(copy: Response, path: string): Promise<boolean> {
   return false;
 }
 
-// Shared by both page strategies, which share the cache: the key rule (a
-// fragment `|hx` never answers a page and the other way round), the store
-// and read rules and one expiration.
-const pagePlugins: WorkboxPlugin[] = [
+// Every page the cache holds follows these: the key rule (a fragment `|hx`
+// never answers a page and the other way round), the store and read rules.
+const pageRules: WorkboxPlugin[] = [
   {
     cacheKeyWillBeUsed: async ({ request }) =>
       pageCacheKey(request.url, request.headers),
@@ -339,16 +367,36 @@ const pagePlugins: WorkboxPlugin[] = [
   new CacheableResponsePlugin({ statuses: [200] }),
   pageStore,
   ownedCopies,
-  // A warmed wardrobe (#286): the warm list's caps (300 garments, 80
-  // outfits) plus the tab roots, weeks and grid pages, and room for what
-  // the user visits besides.
-  new ExpirationPlugin({ maxEntries: 400, purgeOnQuotaError: true }),
+];
+
+// Pages a user visits beyond a warmed wardrobe: shared wardrobes, filtered
+// grids, other weeks, wishlist items, the other tabs' pages.
+const VISITED_PAGES = 100;
+
+// Shared by both page strategies, which share the cache: the rules and one
+// expiration, sized for a warm at its caps (WARM_PAGE_CAP, #286) and the
+// pages visited besides, so a warm never evicts what the user opened.
+const pagePlugins: WorkboxPlugin[] = [
+  ...pageRules,
+  new ExpirationPlugin({
+    maxEntries: WARM_PAGE_CAP + VISITED_PAGES,
+    purgeOnQuotaError: true,
+  }),
 ];
 
 const pages = new NetworkFirst({
   cacheName: PAGES_CACHE,
   networkTimeoutSeconds: 3,
   plugins: pagePlugins,
+});
+
+// The offline page is stored by the page rules alone, never the expiration:
+// ExpirationPlugin only expires what it saw stored, so the fallback, written
+// at install and before any warm, is never the oldest entry it evicts. Only
+// the install and a drop's re-warm write it.
+const offlinePage = new NetworkFirst({
+  cacheName: PAGES_CACHE,
+  plugins: pageRules,
 });
 
 /**
@@ -629,8 +677,8 @@ registerRoute(
 // the new generation, or the write finished before the drop began, which
 // deletes it with the cache.
 const imageStore: WorkboxPlugin = {
-  handlerWillStart: async ({ state }) => {
-    if (state) state.generation = generation;
+  handlerWillStart: async ({ request, state }) => {
+    if (state) state.generation = generationFor(request);
   },
   cacheWillUpdate: async ({ request, response, state }) =>
     isStale(startedIn(state), new URL(request.url).pathname) ? null : response,
@@ -643,6 +691,9 @@ const imageStore: WorkboxPlugin = {
     );
   },
 };
+
+// Cutouts and photos a user opens beyond a warm's thumbs.
+const VISITED_IMAGES = 200;
 
 const CUTOUT_PREFIX = '/file/nobg/';
 const THUMB_PREFIX = '/file/thumb/';
@@ -669,10 +720,10 @@ const cutoutStandIn: WorkboxPlugin = {
 // immutable under a versioned URL (src/web/files/routes.ts), so cached bytes
 // are never stale and nothing ages out (an age limit only forced a refetch,
 // each a statement on the server), but a session's all the same
-// (SESSION_CACHES). Sized for a warmed wardrobe's thumbs (#286) and the
-// cutouts and photos visited besides. Only <img> loads are routed here, so a
-// watermark preview fetched by a share scraper never fills the quota; a
-// warm's thumbs go through images.handleAll. Outfit selfies (/selfies/**,
+// (SESSION_CACHES). Sized for a warmed wardrobe's thumbs (WARM_IMAGE_CAP,
+// #286) and the cutouts and photos visited besides. Only <img> loads are
+// routed here, so a watermark preview fetched by a share scraper never
+// fills the quota; a warm's thumbs go through images.handleAll. Outfit selfies (/selfies/**,
 // their owner's alone) match no route: the worker never stores one.
 const images = new CacheFirst({
   cacheName: IMAGES_CACHE,
@@ -680,7 +731,10 @@ const images = new CacheFirst({
     new CacheableResponsePlugin({ statuses: [200] }),
     imageStore,
     cutoutStandIn,
-    new ExpirationPlugin({ maxEntries: 600, purgeOnQuotaError: true }),
+    new ExpirationPlugin({
+      maxEntries: WARM_IMAGE_CAP + VISITED_IMAGES,
+      purgeOnQuotaError: true,
+    }),
   ],
 });
 
@@ -722,7 +776,7 @@ self.addEventListener('activate', (event) => {
 
 // The offline page is a rendered view, not a public/ file, so it cannot be
 // precached; warm it into the pages cache at install instead.
-warmStrategyCache({ urls: [FALLBACK_HTML_URL], strategy: pages });
+warmStrategyCache({ urls: [FALLBACK_HTML_URL], strategy: offlinePage });
 
 // https://developer.chrome.com/docs/workbox/managing-fallback-responses
 // Runs when a matched route's handler fails: for a page (navigation or a
@@ -801,13 +855,19 @@ async function revalidateForPage(
  * a time, every page and thumb it lacks or holds older than a day, through
  * the session caches' own plugins: a page is owner-checked and stamped, and
  * nothing a request of an older generation brought back is stored. A drop
- * (sign-out, sign-in, another account's page) mid-warm stops it, and what
- * was in flight is refused by the generation check. Runs at most once a
+ * (sign-out, sign-in, another account's page) mid-warm stops it, and every
+ * request of the run, in flight or started after, is refused by the
+ * generation check (warmRunOf). An answer saying the session is over (the
+ * gate's 401, X-Session-Ended) is a drop of its own. Runs at most once a
  * day (WARMED_AT_KEY, which a drop takes with the cache, so a new session
- * warms at once); one that stopped unreachable or on a drop is not
- * recorded, so the next page resumes it, skipping what is already fresh.
+ * warms at once); only a run that reached its end is recorded, so the next
+ * page resumes any other, skipping what is already fresh.
  */
-type WarmStop = 'the session changed' | 'unreachable' | 'storage budget reached';
+type WarmStop =
+  | 'the session changed'
+  | 'the session ended'
+  | 'unreachable'
+  | 'storage budget reached';
 
 interface WarmTally {
   pages: number;
@@ -868,6 +928,7 @@ async function runWarm(event: ExtendableMessageEvent): Promise<void> {
     return;
   }
   const startedAt = Date.now();
+  const { usage: usageAtStart = 0 } = await storageEstimate();
   const listed = await fetchWarmList(event);
   if (!listed) return;
   // The claim may have started a generation (another account's caches
@@ -882,27 +943,55 @@ async function runWarm(event: ExtendableMessageEvent): Promise<void> {
   };
   tally.removed = await removeGonePages(listed.list, run);
   const jobs = await dueJobs(listed.list, listed.account, tally);
-  const stop = await drainWarm(event, jobs, run, tally);
-  if (stop === undefined || stop === 'storage budget reached') {
-    await recordWarmed(run);
-  }
+  const stop = await drainWarm(event, jobs, run, tally, usageAtStart);
+  if (stop === undefined) await recordWarmed(run);
   const { usage = 0, quota = 0 } = await storageEstimate();
   const summary =
     `${tally.pages} pages, ${tally.images} images in ` +
     `${((Date.now() - startedAt) / 1000).toFixed(1)} s (${tally.fresh} fresh, ` +
     `${tally.removed} removed, ${tally.refused} refused, ` +
+    `added ${formatBytes(usage - usageAtStart)}, ` +
     `usage ${formatBytes(usage)} of ${formatBytes(quota)})`;
-  console.info(
-    stop ? `[sw] warm stopped, ${stop}: warmed ${summary}` : `[sw] warmed ${summary}`,
-  );
+  if (stop === undefined) console.info(`[sw] warmed ${summary}`);
+  else if (stop === 'storage budget reached') {
+    // Not recorded: the next page warms on from here, with a budget of its
+    // own. The list's caps bound what all of them store.
+    console.warn(`[sw] warm stopped, ${stop}: warmed ${summary}`);
+  } else console.info(`[sw] warm stopped, ${stop}: warmed ${summary}`);
+}
+
+/**
+ * Whether a warm's answer says this device's session is over. A worker's
+ * fetch is no navigation (Sec-Fetch-Mode: cors), so the session gate
+ * refuses it with a 401, never a redirect to the login page; a revoked
+ * cookie's answer also says X-Session-Ended and clears it, which the
+ * worker sees nowhere else (handleAll bypasses sessionBoundaryHandler).
+ */
+function sessionEndedBy(response: Response): boolean {
+  return response.status === 401 || endedSession(response.headers);
+}
+
+/**
+ * The warm's half of what sessionBoundaryHandler does for a revoked
+ * session: the session caches and the push subscription go. Only while the
+ * generation the answer was asked in lasts: a later one is another
+ * session's, whose caches an older answer must not empty.
+ */
+async function endWarmedSession(
+  event: ExtendableEvent,
+  since: number,
+  path: string,
+): Promise<void> {
+  if (since !== generation) return;
+  await changeSession(event, `${path} (warm): the session ended`, true);
 }
 
 /**
  * The server's warm list, once the session caches are claimed for its
  * account (it says whose it is, like a page): undefined, with nothing
- * stored, when it cannot be had or a drop overtook it. A list answered by
- * the login page means the session ended away from this device: the caches
- * are claimed for nobody, as a page landing there does (pageStore).
+ * stored, when it cannot be had or a drop overtook it. A list refused for
+ * want of a session means it ended away from this device: the session's
+ * caches go (endWarmedSession).
  */
 async function fetchWarmList(
   event: ExtendableEvent,
@@ -918,8 +1007,8 @@ async function fetchWarmList(
     console.info('[sw] warm list unreachable: nothing warmed', error);
     return undefined;
   }
-  if (sentToLogin(response)) {
-    await claimPageCache('', since, WARM_LIST_PATH, event);
+  if (sessionEndedBy(response)) {
+    await endWarmedSession(event, since, WARM_LIST_PATH);
     console.info('[sw] warm list: signed out, nothing warmed');
     return undefined;
   }
@@ -952,8 +1041,9 @@ function removeGonePages(list: WarmList, run: number): Promise<number> {
   return serialized(async () => {
     if (generation !== run) return 0;
     const cache = await self.caches.open(PAGES_CACHE);
+    // A fragment's key (`/wardrobe/12|hx`) is its page's fate too.
     const gone = (await cache.keys()).filter((key) => {
-      const url = new URL(key.url);
+      const url = new URL(pageUrlOfCacheKey(key.url));
       return (
         url.origin === self.location.origin &&
         isWarmedDetailPage(url) &&
@@ -1022,32 +1112,37 @@ async function dueJobs(
 
 /**
  * Runs the jobs WARM_CONCURRENCY at a time, through each cache's strategy
- * (handleAll: its plugins, the generation taken in handlerWillStart). Stops
- * at the first fetch that fails (the device went offline: the next page
- * resumes), at a drop, or past the storage budget.
+ * (handleAll: its plugins, each request stamped with the run's generation,
+ * warmRunOf). Stops at the first fetch that fails (the device went offline:
+ * the next page resumes), at a drop, at an answer saying the session ended,
+ * or once the warm has added WARM_USAGE_BUDGET_BYTES to `usageAtStart`.
  */
 async function drainWarm(
   event: ExtendableMessageEvent,
   jobs: WarmJob[],
   run: number,
   tally: WarmTally,
+  usageAtStart: number,
 ): Promise<WarmStop | undefined> {
   let stop: WarmStop | undefined;
   let started = 0;
   const worker = async () => {
     for (let job = jobs.shift(); job && !stop; job = jobs.shift()) {
-      if (generation !== run) {
-        stop = 'the session changed';
-        return;
-      }
       if (started % USAGE_CHECK_EVERY === 0) {
         const { usage = 0 } = await storageEstimate();
-        if (usage > WARM_USAGE_BUDGET_BYTES) {
+        if (usage - usageAtStart > WARM_USAGE_BUDGET_BYTES) {
           stop ??= 'storage budget reached';
           return;
         }
       }
+      // After the await: a drop meanwhile ends the run here. One that falls
+      // later still finds the job stamped with the run (warmRunOf).
+      if (generation !== run) {
+        stop ??= 'the session changed';
+        return;
+      }
       started += 1;
+      warmRunOf.set(job.request, run);
       try {
         const [response, done] = job.strategy.handleAll({
           event,
@@ -1055,6 +1150,11 @@ async function drainWarm(
         });
         const answer = await response;
         await done;
+        if (sessionEndedBy(answer)) {
+          stop ??= 'the session ended';
+          await endWarmedSession(event, run, new URL(job.request.url).pathname);
+          return;
+        }
         if (answer.ok) tally[job.tally] += 1;
         else tally.refused += 1;
       } catch {
@@ -1063,14 +1163,19 @@ async function drainWarm(
     }
   };
   await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
-  if (generation !== run) stop = 'the session changed';
+  // A drop outranks the failures it causes; the run's own drop keeps its
+  // reason.
+  if (generation !== run && stop !== 'the session ended') {
+    stop = 'the session changed';
+  }
   return stop;
 }
 
 /** Under the lock: never written into the next session's cache. */
 function recordWarmed(run: number): Promise<void> {
   return serialized(async () => {
-    if (generation === run) await writeRecord(WARMED_AT_KEY, String(Date.now()));
+    if (generation === run)
+      await writeRecord(WARMED_AT_KEY, String(Date.now()));
   });
 }
 

@@ -196,9 +196,10 @@ async function installPullToRefresh() {
 // whether a run is due (at most one a day, its warmed-at record) and what it
 // lacks, so asking is cheap: after load, and again whenever the app comes
 // back to the foreground or online (iOS has no background sync, so a warm
-// only runs while the app is open, and resumes where it stopped). Never in
-// the background, offline (the heartbeat's state, never navigator.onLine)
-// or when the user asked to save data.
+// only runs while the app is open, and resumes where it stopped), and when
+// a worker takes control: the app's first load has no controller to ask.
+// Never in the background, offline (the heartbeat's state, never
+// navigator.onLine) or when the user asked to save data.
 function warmForOffline() {
   const ask = () => {
     const online =
@@ -210,6 +211,7 @@ function warmForOffline() {
   if (document.readyState === 'complete') ask();
   else window.addEventListener('load', ask, { once: true });
   document.addEventListener('visibilitychange', ask);
+  navigator.serviceWorker.addEventListener('controllerchange', ask);
   document.addEventListener('connectivity:change', (event) => {
     if (event.detail.state === 'online') ask();
   });
