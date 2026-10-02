@@ -257,6 +257,7 @@ export interface GarmentSummary {
   brand: string | null;
   /** A set in GARMENT_COLORS order; null for none. */
   colors: GarmentColor[] | null;
+  materials: Material[] | null;
   size: string | null;
   warmth: Warmth | null;
   formality: Formality | null;
@@ -286,6 +287,7 @@ export async function garmentSummaries(
       type: garment.type,
       brand: garment.brand,
       colors: garment.colors,
+      materials: garment.materials,
       size: garment.size,
       warmth: garment.warmth,
       formality: garment.formality,

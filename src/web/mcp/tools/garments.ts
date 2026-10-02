@@ -57,7 +57,7 @@ import {
   withCarePresets,
   withPresets,
 } from '../../wardrobe/validation';
-import { wearSummarySql } from '../../wears/queries';
+import { type WearSummary, wearSummarySql } from '../../wears/queries';
 import { wishlistItems } from '../../wishlist/queries';
 import {
   defineTool,
@@ -69,6 +69,9 @@ import { ownerIdInput, rowId } from './common';
 import { addGarmentFromLink } from './link-import';
 
 const GARMENT_NOT_FOUND = 'Garment not found';
+
+/** garmentSummaries' limit for get_wardrobe: a page that is the whole closet. */
+const NO_PAGE_LIMIT = 2_147_483_647;
 
 /** A search or capsule hit, as the tools answer it. */
 export function summaryOut(garment: GarmentSummary) {
@@ -451,6 +454,28 @@ async function refuseSearch(
   }
 }
 
+/**
+ * get_wardrobe's garment: what it is and, on the caller's own wardrobe,
+ * how it is worn. No photo, no link; a grantee gets no wear data (the
+ * owner's own records, as get_garment).
+ */
+function wardrobeGarmentOut(garment: GarmentSummary, wears?: WearSummary) {
+  return {
+    id: garment.id,
+    name: garment.name,
+    category: garment.category,
+    type: garment.type,
+    colors: garment.colors ?? [],
+    materials: garment.materials ?? [],
+    warmth: garment.warmth,
+    formality: garment.formality,
+    brand: garment.brand,
+    condition: garment.condition,
+    copies: garment.quantity,
+    ...(wears && { wears: wears.worn, lastWorn: wears.lastWorn }),
+  };
+}
+
 export const garmentTools = [
   defineTool({
     name: 'search_garments',
@@ -473,6 +498,51 @@ export const garmentTools = [
         total,
         garments: page.garments.map(summaryOut),
         next: page.before ?? null,
+      };
+    },
+  }),
+
+  defineTool({
+    name: 'get_wardrobe',
+    title: 'Get the whole closet',
+    description:
+      "A wardrobe's whole closet in one compact answer, no paging (search_garments pages and filters): each garment's id, name, category, type, colours, materials, warmth, formality, brand, condition (good, needs_repair, replace_soon), copies and, on your own wardrobe, the days it was worn and when it was last worn (0 and null: never). Archived garments only with `includeArchived`; never the wishlist (list_wishlist). No photos: get_garment_photo. Read this before proposing anything to buy.",
+    input: z.object({
+      ownerId: ownerIdInput,
+      includeArchived: z
+        .boolean()
+        .default(false)
+        .describe('Also garments no longer in the closet (archived).'),
+    }),
+    writes: false,
+    async run({ ownerId, includeArchived }, ctx) {
+      const access = await wardrobeFor(ctx, ownerId, 'view');
+      const { garments } = await garmentSummaries(
+        ctx.db,
+        access.ownerId,
+        {
+          scope: includeArchived ? 'owned' : 'closet',
+          needsWash: false,
+          attention: false,
+        },
+        { limit: NO_PAGE_LIMIT },
+      );
+      // One statement for every garment's wears (the garment page's own
+      // fragment per garment), none for a grantee.
+      const today = todayIn(ctx.timeZone, new Date());
+      const wears = access.isOwner
+        ? await selectScalars(
+            ctx.db,
+            Object.fromEntries(
+              garments.map(({ id }) => [`g${id}`, wearSummarySql(id, today)]),
+            ),
+          )
+        : undefined;
+      return {
+        total: garments.length,
+        garments: garments.map((garment) =>
+          wardrobeGarmentOut(garment, wears?.[`g${garment.id}`]),
+        ),
       };
     },
   }),
