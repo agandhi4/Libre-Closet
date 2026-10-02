@@ -194,12 +194,12 @@ function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
       </div>
       {entry.candidates.length > 0 && (
         // Full card width (the body's padding undone), so the end spacers can
-        // centre the first and last tile. Nothing is posted: the list has no
-        // form, and the strip's hidden input only records the centred tile.
+        // centre the first and last tile. Not a listbox, and no input: the
+        // tiles hold links (an `option` hides them from screen readers) and
+        // the list has no form to post a choice.
         <SnapStrip
-          name="candidate"
-          value={String(entry.candidates[0].candidate.garmentId)}
           size="regular"
+          listbox={false}
           label={t('shopping.STRIP_LABEL', { item: itemTitle(item) })}
         >
           {entry.candidates.map(({ candidate, budget }, index) => (
@@ -250,6 +250,7 @@ function CandidateTile(props: {
         value: String(candidate.garmentId),
         selected,
         size: 'regular',
+        listbox: false,
         class: TILE,
       })}
       id={`candidate-${candidate.garmentId}`}

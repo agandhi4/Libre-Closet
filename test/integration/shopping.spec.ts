@@ -631,9 +631,10 @@ describe('the shopping loop', () => {
       expect(strip(items.boots)).not.toMatch(
         new RegExp(`data-snap-value="${wish.navyBoots}" data-selected`),
       );
-      expect(strip(items.boots)).toContain(
-        `<input type="hidden" name="candidate" value="${wish.blackBoots}"/>`,
-      );
+      // Not a choice: a group of tiles holding links, and nothing hidden to post.
+      expect(strip(items.boots)).toContain('role="group"');
+      expect(strip(items.boots)).not.toContain('role="option"');
+      expect(strip(items.boots)).not.toContain('type="hidden"');
       expect(strip(items.oxford)).toContain('+ Add a product');
       expect(strip(items.merino)).toContain('+ Add a candidate');
       expect(html).not.toContain('<form');

@@ -128,9 +128,11 @@ test('shop for a plan’s gap on the phone, buy the candidate', async ({
   const tiles = merino.locator('[data-snap-item]');
   await expect(tiles).toHaveCount(2);
   await expect(tiles.first()).toHaveAttribute('data-selected', '');
+  // The links are reachable by role: the tile is not an `option`.
   await expect(
     tiles.first().getByRole('link', { name: 'Bought it' }),
   ).toBeVisible();
+  await expect(merino.getByRole('link', { name: 'Bought it' })).toHaveCount(1);
   await expect(
     tiles.nth(1).getByRole('link', { name: 'Bought it' }),
   ).toBeHidden();
@@ -140,9 +142,6 @@ test('shop for a plan’s gap on the phone, buy the candidate', async ({
   await expect(
     tiles.nth(1).getByRole('link', { name: 'Bought it' }),
   ).toBeVisible();
-  await expect(merino.locator('input[name="candidate"]')).toHaveValue(
-    (await tiles.nth(1).getAttribute('data-snap-value'))!,
-  );
   await tiles
     .first()
     .getByRole('link', { name: /Uniqlo merino/ })
