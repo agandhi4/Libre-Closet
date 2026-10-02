@@ -75,6 +75,8 @@ export interface PlanItemRow extends PlanItemFields {
   review: PlanItemReview;
   /** The owner's word to the agent with Change this or Don't buy; apart from the agent's `note`. */
   ownerNote: string | null;
+  /** When its content or review last moved: a rejection after it is news to the agent (get_plan_feedback). */
+  changedAt: Date;
 }
 
 /** A stored item's fields, as a write takes them (duplicating a plan). */
@@ -167,6 +169,7 @@ const ITEM_COLUMNS = {
   note: planItem.note,
   review: planItem.review,
   ownerNote: planItem.ownerNote,
+  changedAt: planItem.changedAt,
 };
 
 /** The items of the plans `planIds` (the owner's, checked by the caller), oldest first. */
