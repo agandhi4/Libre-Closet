@@ -267,6 +267,50 @@ test.describe('warming the wardrobe for offline reading', () => {
     expect(await cachedPaths(page)).not.toContain(`/wardrobe/${deleted}`);
   });
 
+  test('a saved edit evicts the warmed tab roots and the garment’s copies', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, 'warm-write');
+    const coat = await createGarment(page, 'Before coat', 'coats');
+    await firstWarm(page, context);
+    const warmed = await cachedPaths(page);
+    expect(warmed).toContain('/wardrobe');
+    expect(warmed).toContain(`/wardrobe/${coat}`);
+
+    const cachedBody = (path: string) =>
+      page.evaluate(
+        async ({ cacheName, path }) => {
+          const copy = await (await caches.open(cacheName)).match(path);
+          return copy ? copy.text() : null;
+        },
+        { cacheName: PAGES_CACHE, path },
+      );
+
+    await page.goto(`/wardrobe/${coat}/edit`);
+    await page.getByRole('textbox', { name: 'Name' }).fill('After coat');
+    const evicted = workerLogs(context, `[sw] POST under /wardrobe/${coat}:`);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await evicted;
+    await expect(page.locator('h1')).toHaveText('After coat');
+
+    // The tab roots went (next week's calendar is no root and stays); the
+    // garment's page is the one the save landed on.
+    const keys = await cachedKeys(page);
+    for (const root of ['/wardrobe', '/styling', '/outfits', '/calendar']) {
+      expect(keys).not.toContain(root);
+    }
+    expect(keys).not.toContain(`/wardrobe/${coat}/edit`);
+    await expect
+      .poll(() => cachedBody(`/wardrobe/${coat}`))
+      .toContain('After coat');
+
+    // Opened from the cache before the fix: Back's reload showed the old name.
+    await page.goto('/wardrobe');
+    await expect(page.locator('main')).toContainText('After coat');
+    await expect(page.locator('main').getByText('Before coat')).toHaveCount(0);
+  });
+
   test('a new worker warms again within the day: the copies are an older build’s', async ({
     page,
     context,

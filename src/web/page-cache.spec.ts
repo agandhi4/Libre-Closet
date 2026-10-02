@@ -11,9 +11,55 @@ import {
   sentToLogin,
   servesStaleWhileRevalidate,
   SESSION_ENDED_HEADER,
+  staleAfterWrite,
+  writtenPage,
 } from './page-cache';
 
 const ORIGIN = 'https://closet.test';
+
+describe('writtenPage', () => {
+  it.each([
+    ['/wardrobe/39/edit', '/wardrobe/39'],
+    ['/wardrobe/39', '/wardrobe/39'],
+    ['/outfits/12/selfie/3', '/outfits/12'],
+    ['/wardrobe', '/wardrobe'],
+    ['/', '/'],
+  ])('%s belongs to %s', (path, page) => {
+    expect(writtenPage(path)).toBe(page);
+  });
+});
+
+describe('staleAfterWrite', () => {
+  const stale = (write: string, page: string) =>
+    staleAfterWrite(write)(new URL(`${ORIGIN}${page}`));
+
+  it.each(['/wardrobe', '/styling', '/outfits', '/calendar'])(
+    'a write makes the tab root %s stale',
+    (root) => {
+      expect(stale('/capsules/4', root)).toBe(true);
+      expect(stale('/capsules/4', `${root}?week=2026-10-04`)).toBe(false);
+    },
+  );
+
+  it.each(['/wardrobe/39', '/wardrobe/39/edit', '/wardrobe/39?ownerId=7'])(
+    'a write under /wardrobe/39 makes %s stale',
+    (page) => {
+      expect(stale('/wardrobe/39/edit', page)).toBe(true);
+    },
+  );
+
+  it.each(['/wardrobe/3', '/wardrobe/390', '/outfits/39', '/'])(
+    'a write under /wardrobe/39 leaves %s',
+    (page) => {
+      expect(stale('/wardrobe/39/edit', page)).toBe(false);
+    },
+  );
+
+  it('a one-segment write leaves the section past its root', () => {
+    expect(stale('/wardrobe', '/wardrobe/39')).toBe(false);
+    expect(stale('/wardrobe', '/wardrobe')).toBe(true);
+  });
+});
 
 describe('bypassesWorker', () => {
   it.each([

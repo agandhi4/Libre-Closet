@@ -33,6 +33,8 @@ import {
   revalidationOutcome,
   sentToLogin,
   servesStaleWhileRevalidate,
+  staleAfterWrite,
+  writtenPage,
 } from '../../src/web/page-cache';
 import {
   isWarmedDetailPage,
@@ -75,7 +77,11 @@ import { parsePushPayload, type PushPayload } from '../../src/web/push/payload';
  *  - WARM_PAGES (from pwa.js, at most once a day): the account's whole
  *    wardrobe, its pages and thumbs, fetched into the session caches through
  *    the same plugins, so it reads offline (src/web/shell/offline-warm.md).
- *  - Anything unmatched (other POSTs, /healthz) goes straight to the network.
+ *  - A page's write (a form post, an htmx POST or DELETE) goes through the
+ *    worker, which deletes the copies a successful one made stale (the tab
+ *    roots and the write's own page) before answering it.
+ *  - Anything unmatched (a beacon, a script's fetch, /healthz) goes straight
+ *    to the network.
  *
  * Built by `npm run generate:sw` with NODE_ENV=production, which strips
  * Workbox's development logging and assertions; the console.* calls here are
@@ -652,6 +658,44 @@ async function dropPushSubscription(): Promise<void> {
 // link to, and GET /auth/login the form; neither changes a session.
 registerRoute(isSessionBoundary, sessionBoundaryHandler, 'POST');
 
+/**
+ * Every other write a page makes (a native form post, an htmx request:
+ * isPageRequest) passes through the worker so a successful one can delete
+ * the cached copies it made stale before its answer reaches the page
+ * (staleAfterWrite, page-cache.ts: the tab roots and the write's own page).
+ * Without it the warmed /wardrobe outlived a garment's edit: Back reloads
+ * the tab root, which opens from the cache. Fetched as the auth posts are,
+ * following the redirect (#239: a revoked cookie's redirect carries
+ * Clear-Site-Data, which hangs an opaque one in WebKit), so a native post's
+ * landing page is fetched twice. Evicted pages come back on the next visit
+ * or the next due warm. A beacon or a script's fetch (vitals, push, the mask
+ * editor) is no page request and goes straight to the network.
+ */
+const writeHandler = async ({
+  request,
+  url,
+  event,
+}: RouteHandlerCallbackOptions) => {
+  const since = generation;
+  const response = await fetchFollowingRedirects(request);
+  if (response.ok || response.redirected) {
+    const evicted = await deleteCachedPages(
+      since,
+      staleAfterWrite(url.pathname),
+    );
+    if (evicted > 0) {
+      console.info(
+        `[sw] ${request.method} under ${writtenPage(url.pathname)}: ${evicted} cached copies evicted`,
+      );
+    }
+  }
+  return answerFor(request, response);
+};
+
+for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+  registerRoute(isPageRequest, writeHandler, method);
+}
+
 registerRoute(
   ({ request }) => servesStaleWhileRevalidate(request, self.location.origin),
   tabRoots,
@@ -1070,8 +1114,9 @@ function removeGonePages(list: WarmList, run: number): Promise<number> {
 
 /**
  * Deletes the cached pages (and their `|hx` fragments) whose URL `isGone`
- * accepts, under the ownership lock and only while the run's generation
- * lasts. A fragment's key (`/wardrobe/12|hx`) is its page's fate too.
+ * accepts, under the ownership lock and only while the generation `run`
+ * lasts (a warm's, a write's). A fragment's key (`/wardrobe/12|hx`) is its
+ * page's fate too.
  */
 function deleteCachedPages(
   run: number,
@@ -1212,8 +1257,7 @@ async function drainWarm(
               (url) => url.href === href,
             );
           }
-        }
-        else tally.failed += 1;
+        } else tally.failed += 1;
       } catch {
         stop ??= 'unreachable';
       }

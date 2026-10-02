@@ -123,8 +123,9 @@ The following are **not** warmed:
 makes a page shown online older. Offline, a warmed copy is at most about 24 h old, and the freshness
 indicator already says how old it is ("Updated 5 hours ago"). A write made online (Wore today swaps a
 fragment) leaves that garment's warmed full page stale until the next visit or warm. That is acceptable
-while offline writes stay disabled. Evicting a page's copy after a successful write under its path is a
-follow-up if it bites.
+while offline writes stay disabled. It bit (PR #287: Back after an edit reloaded the warmed `/wardrobe`),
+so a successful write now evicts the tab roots and its own page before it is answered
+(`src/web/shell/offline-warm.md`, Invalidation).
 
 **Storage budget.** The demo wardrobe is the owner's target size. Cache Storage keeps decoded bodies.
 
