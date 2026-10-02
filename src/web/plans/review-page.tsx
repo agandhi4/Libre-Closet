@@ -15,6 +15,7 @@ import { differencesText, itemFacts, itemTitle, priorityLabel } from './labels';
 import type { PlanDetail } from './queries';
 import {
   defaultPick,
+  offeredValue,
   pickValue,
   type ReviewPick,
   type ReviewStrip,
@@ -42,8 +43,8 @@ initSnapStrips(document.getElementById('review-form'));`;
  * GET /wardrobe/plans/:id/review (#271): what the owner's agent proposed,
  * one strip per item (review.ts has the rule and the order), the centred
  * tile its pick, and one native post, "Accept these", deciding them all.
- * Each strip posts its item in `shown` beside its pick, so only what the
- * page showed is decided. Private: the signed-in owner's plan only.
+ * Each strip posts its item in `shown` beside its pick and the candidates
+ * it drew in `offered`, so only what the page showed is decided or removed. Private: the signed-in owner's plan only.
  */
 export function ReviewPage(props: {
   ctx: ViewContext;
@@ -97,7 +98,6 @@ export function ReviewPage(props: {
                     type="checkbox"
                     name="removeUnpicked"
                     value="1"
-                    checked
                     class="checkbox checkbox-sm mt-0.5"
                   />
                   <span>
@@ -142,9 +142,9 @@ export function ReviewPage(props: {
 
 /**
  * An item's strip: what it is (title, quantity, facts, budget, priority,
- * the agent's note), then Skip, Keep (only without candidates) and its
- * candidates. The strip's input is the item's `pick`; `shown` says the
- * page showed it.
+ * the agent's note), then Skip, Keep and its candidates. The strip's input
+ * is the item's `pick`; `shown` says the page showed it, `offered` which
+ * candidates it drew.
  */
 function ItemStrip({ strip }: { strip: ReviewStrip }) {
   const { item, candidates } = strip;
@@ -191,6 +191,13 @@ function ItemStrip({ strip }: { strip: ReviewStrip }) {
         {item.note && <p class="text-xs italic">{item.note}</p>}
       </div>
       <input type="hidden" name="shown" value={String(item.id)} />
+      {candidates.map(({ candidate }) => (
+        <input
+          type="hidden"
+          name="offered"
+          value={offeredValue(item.id, candidate.garmentId)}
+        />
+      ))}
       <SnapStrip
         name="pick"
         value={chosen}
@@ -209,20 +216,18 @@ function ItemStrip({ strip }: { strip: ReviewStrip }) {
           <span class="text-xs font-medium">{t('plans.REVIEW_SKIP')}</span>
           <span class={DETAILS}>{t('plans.REVIEW_SKIP_HINT')}</span>
         </button>
-        {candidates.length === 0 && (
-          <button
-            type="button"
-            {...snapItem({ ...tile({ kind: 'keep' }), class: TILE })}
+        <button
+          type="button"
+          {...snapItem({ ...tile({ kind: 'keep' }), class: TILE })}
+        >
+          <span
+            class={`${PLINTH} border border-dashed border-base-300 text-2xl text-primary`}
           >
-            <span
-              class={`${PLINTH} border border-dashed border-base-300 text-2xl text-primary`}
-            >
-              ✓
-            </span>
-            <span class="text-xs font-medium">{t('plans.REVIEW_KEEP')}</span>
-            <span class={DETAILS}>{t('plans.REVIEW_KEEP_HINT')}</span>
-          </button>
-        )}
+            ✓
+          </span>
+          <span class="text-xs font-medium">{t('plans.REVIEW_KEEP')}</span>
+          <span class={DETAILS}>{t('plans.REVIEW_KEEP_HINT')}</span>
+        </button>
         {candidates.map(({ candidate, budget }) => (
           <CandidateTile
             candidate={candidate}

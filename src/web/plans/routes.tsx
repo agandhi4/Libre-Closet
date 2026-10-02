@@ -278,7 +278,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const plan = await requirePlan(request, request.params.id);
-      const { created, saved, reviewed } = request.query;
+      const { created, saved, reviewed, removed } = request.query;
       const [gaps, candidates] = await Promise.all([
         planGaps(db, plan, userId),
         candidatesOfPlan(db, userId, plan.id),
@@ -298,6 +298,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
                   : reviewed === '1'
                     ? 'reviewed'
                     : undefined,
+            removed: reviewed === '1' ? removed : undefined,
           }}
         />,
       );
@@ -339,16 +340,16 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const { id } = request.params;
-      const { shown, pick, removeUnpicked, activate } = request.body;
-      const picks = readPicks(shown, pick);
-      if (!picks) {
+      const { shown, pick, offered, removeUnpicked, activate } = request.body;
+      const choices = readPicks(shown, pick, offered ?? []);
+      if (!choices) {
         const plan = await requirePlan(request, id);
         logger.warn(`Plan ${id} review refused: picks do not match shown`);
         return renderReview(reply, plan, userId, true);
       }
       const outcome = await applyReview(options, userId, id, {
-        shown: [...picks.keys()],
-        picks,
+        shown: [...choices.keys()],
+        choices,
         removeUnpicked: removeUnpicked === '1',
         activate: activate === '1',
       });
@@ -364,7 +365,11 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           true,
         );
       }
-      return reply.redirect(`${planUrl(id)}?reviewed=1`, 303);
+      const removed = outcome.removed.length;
+      return reply.redirect(
+        `${planUrl(id)}?reviewed=1${removed > 0 ? `&removed=${removed}` : ''}`,
+        303,
+      );
     },
   );
 

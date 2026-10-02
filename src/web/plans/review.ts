@@ -27,22 +27,24 @@ import { type ListedCandidate, listedCandidate } from './shopping';
 /**
  * The plan review (#271, epic #268): what an agent proposed, reviewed the
  * way Styling composes. One strip per proposed item (the shared snap
- * strip, src/web/strip/), its tiles Skip, Keep (only without candidates)
- * and the item's wishlist candidates; the centred tile is the pick. One
- * post, "Accept these", decides every item the page showed, in one owner
- * transaction through the plans' own writers:
+ * strip, src/web/strip/), its tiles Skip, Keep and the item's wishlist
+ * candidates; the centred tile is the pick. One post, "Accept these",
+ * decides every item the page showed, in one owner transaction through the
+ * plans' own writers:
  *
  * - A candidate or Keep accepts the item (acceptItems); Skip dismisses it
  *   (deleteItems). Only items in `shown` that are still proposed are
  *   touched: one proposed after the page was drawn is left for the next
  *   review, one decided meanwhile (a second post, the item form) is not
  *   decided again.
- * - With "Remove the products I didn't pick" ticked, the unpicked
- *   candidates of a picked item and every candidate of a skipped one are
- *   deleted from the wishlist (deleteGarment, 'wishlist'), but only one
- *   that stands for no other plan item of the owner's (any plan, accepted
- *   items and the active plan's included: candidaciesOf) and is picked for
- *   no item of this post; one bought meanwhile is kept (the delete judges
+ * - With "Remove the products I didn't pick" ticked (it starts unticked),
+ *   the unpicked candidates of a picked item and every candidate of a
+ *   skipped one are deleted from the wishlist (deleteGarment, 'wishlist'),
+ *   but only one its strip offered (each strip posts the candidates it
+ *   drew, so one linked after the page was drawn is never judged by a
+ *   choice made without it), that stands for no other plan item of the
+ *   owner's (any plan, accepted items and the active plan's included:
+ *   candidaciesOf) and is picked for no item of this post; one bought meanwhile is kept (the delete judges
  *   the status under the row lock), and logged. One kept because it stands
  *   for something else is unlinked from the item the owner picked against
  *   (changeCandidates), so that item's candidates are its pick.
@@ -57,6 +59,15 @@ export type ReviewPick =
   | { kind: 'skip' }
   | { kind: 'keep' }
   | { kind: 'candidate'; garmentId: number };
+
+/**
+ * An item's posted choice: the pick, and the candidates its strip offered,
+ * the only ones the pick can let go.
+ */
+export interface ReviewChoice {
+  pick: ReviewPick;
+  offered: number[];
+}
 
 /** An item's strip: the item and its candidates, the likeliest first. */
 export interface ReviewStrip {
@@ -103,7 +114,7 @@ export async function planReview(
     }));
 }
 
-/** The pick a strip starts on: its best candidate, else Keep. */
+/** The pick a strip starts on: its best candidate, else Keep (on every strip). */
 export function defaultPick(strip: ReviewStrip): ReviewPick {
   const [best] = strip.candidates;
   return best
@@ -116,35 +127,49 @@ export function pickValue(itemId: number, pick: ReviewPick): string {
   return `${itemId}:${pick.kind === 'candidate' ? pick.garmentId : pick.kind}`;
 }
 
+/** A candidate a strip offered, as its hidden input posts it: `12:345`. */
+export function offeredValue(itemId: number, garmentId: number): string {
+  return `${itemId}:${garmentId}`;
+}
+
 /**
- * The posted picks by item id, every shown item with exactly one, or
- * undefined when the post is not one the page could have sent (a pick for
- * an item not shown, two for one, a shown item without one): the route
- * re-renders the page 400. Its keys are the shown items, each once. A
- * garment id is only compared with the item's candidates, never queried,
- * so one past the column's range is simply not one of them.
+ * The posted choices by item id, every shown item with exactly one pick, or
+ * undefined when the post is not one the page could have sent (a pick or
+ * an offered candidate for an item not shown, two picks for one, a shown
+ * item without one): the route re-renders the page 400. Its keys are the
+ * shown items, each once. A garment id is only compared with the item's
+ * candidates, never queried, so one past the column's range is simply not
+ * one of them.
  */
 export function readPicks(
   shown: readonly number[],
-  values: readonly string[],
-): Map<number, ReviewPick> | undefined {
-  const picks = new Map<number, ReviewPick>();
-  for (const value of values) {
+  picks: readonly string[],
+  offered: readonly string[],
+): Map<number, ReviewChoice> | undefined {
+  const choices = new Map<number, ReviewChoice>();
+  for (const value of picks) {
     const [item, choice] = value.split(':');
     const itemId = Number(item);
-    if (picks.has(itemId) || !shown.includes(itemId)) return undefined;
-    if (choice === 'skip' || choice === 'keep') {
-      picks.set(itemId, { kind: choice });
-      continue;
-    }
-    picks.set(itemId, { kind: 'candidate', garmentId: Number(choice) });
+    if (choices.has(itemId) || !shown.includes(itemId)) return undefined;
+    const pick: ReviewPick =
+      choice === 'skip' || choice === 'keep'
+        ? { kind: choice }
+        : { kind: 'candidate', garmentId: Number(choice) };
+    choices.set(itemId, { pick, offered: [] });
   }
-  return new Set(shown).size === picks.size ? picks : undefined;
+  if (new Set(shown).size !== choices.size) return undefined;
+  for (const value of offered) {
+    const [itemId, garmentId] = value.split(':').map(Number);
+    const choice = choices.get(itemId);
+    if (!choice) return undefined;
+    choice.offered.push(garmentId);
+  }
+  return choices;
 }
 
 export interface ReviewDecision {
   shown: number[];
-  picks: Map<number, ReviewPick>;
+  choices: Map<number, ReviewChoice>;
   removeUnpicked: boolean;
   activate: boolean;
 }
@@ -201,11 +226,11 @@ export async function applyReview(
       const open = decision.shown.filter((id) => items.get(id)!.proposed);
       const decided = decision.shown.filter((id) => !items.get(id)!.proposed);
       const removals = decision.removeUnpicked
-        ? await unpickedCandidates(tx, ownerId, open, decision.picks)
+        ? await unpickedCandidates(tx, ownerId, open, decision.choices)
         : { deletable: [], unlink: [] };
 
       const skipped = open.filter(
-        (id) => decision.picks.get(id)!.kind === 'skip',
+        (id) => decision.choices.get(id)!.pick.kind === 'skip',
       );
       const accepted = await acceptItems(
         tx,
@@ -262,22 +287,22 @@ export async function applyReview(
 }
 
 /**
- * What "Remove the products I didn't pick" takes, among the `open` items'
- * candidates: the garments to delete from the wishlist (id order, as every
- * multi-row garment locker takes them), and the links to drop of those
- * kept because they stand for another item. A garment is deletable when
+ * What "Remove the products I didn't pick" takes, among the candidates the
+ * `open` items' strips offered that are still theirs: the garments to
+ * delete from the wishlist (id order, as every multi-row garment locker
+ * takes them), and the links to drop of those kept because they stand for
+ * another item. A garment is deletable when
  * every plan item it is a candidate of is one of these whose pick lets it
  * go (an unpicked candidate of a picked item, any candidate of a skipped
- * one) and no item here picked it. Keep (an item without candidates) lets
- * nothing go, nor does a pick that is not one of the item's candidates
- * (one bought since the page was drawn): which to remove was not shown
- * against it.
+ * one) and no item here picked it. Keep lets nothing go, nor does a pick
+ * that is not one of those (one bought or unlinked since the page was
+ * drawn): which to remove was not shown against it.
  */
 async function unpickedCandidates(
   tx: Queryable,
   ownerId: number,
   open: readonly number[],
-  picks: ReadonlyMap<number, ReviewPick>,
+  choices: ReadonlyMap<number, ReviewChoice>,
 ): Promise<{
   deletable: number[];
   unlink: { itemIds: number[]; garmentIds: number[] }[];
@@ -287,8 +312,10 @@ async function unpickedCandidates(
   // Each unpicked garment, with the items whose pick lets it go.
   const releasedBy = new Map<number, Set<number>>();
   for (const itemId of open) {
-    const pick = picks.get(itemId)!;
-    const held = (candidates.get(itemId) ?? []).map((c) => c.garmentId);
+    const { pick, offered } = choices.get(itemId)!;
+    const held = (candidates.get(itemId) ?? [])
+      .map((c) => c.garmentId)
+      .filter((garmentId) => offered.includes(garmentId));
     if (pick.kind === 'keep') continue;
     if (pick.kind === 'candidate') {
       if (!held.includes(pick.garmentId)) continue;
@@ -314,7 +341,7 @@ async function unpickedCandidates(
   // A kept one leaves the items picked against it; a skipped item's links
   // go with the item.
   const unlink = open.flatMap((itemId) => {
-    if (picks.get(itemId)!.kind !== 'candidate') return [];
+    if (choices.get(itemId)!.pick.kind !== 'candidate') return [];
     const garmentIds = [...releasedBy]
       .filter(
         ([garmentId, items]) =>

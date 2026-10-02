@@ -15,14 +15,14 @@ import { createTestApp, type TestApp, unescapeHtml, userIdOf } from './harness';
 import { expectFullPage } from './pages';
 
 /**
- * The plan review (#271): an agent's proposals as strips (Skip, Keep only
- * without candidates, the candidates in the shopping list's order), and
- * "Accept these", which accepts, dismisses, removes the unpicked
- * candidates that stand for nothing else and activates the plan, in one
- * owner transaction. The data-safety cases each have an `it` below: a
- * candidate of another item is kept, a pick is never deleted, only `shown`
- * items are touched, a candidate bought meanwhile is kept, a second post
- * deletes nothing new. Matrix rows: authorization-plans.spec.ts.
+ * The plan review (#271): an agent's proposals as strips (Skip, Keep, the
+ * candidates in the shopping list's order), and "Accept these", which
+ * accepts, dismisses, removes the unpicked candidates that stand for
+ * nothing else and activates the plan, in one owner transaction. The
+ * data-safety cases each have an `it` below: a candidate of another item
+ * is kept, a pick is never deleted, only `shown` items are touched, only
+ * `offered` candidates are removed, a candidate bought meanwhile is kept, a
+ * second post deletes nothing new. Matrix rows: authorization-plans.spec.ts.
  */
 describe('the plan review', () => {
   let t: TestApp;
@@ -144,18 +144,44 @@ describe('the plan review', () => {
         .where(eq(wardrobePlan.id, planId))
     )[0]?.active;
 
-  /** A post as the page sends it: each item's pick, every item shown. */
-  const review = (
+  /** Every candidate link of `itemIds` now: what a page drawn now offers, and more. */
+  const linkedNow = async (itemIds: number[]) =>
+    (
+      await t.db
+        .select({
+          itemId: planItemCandidate.planItemId,
+          garmentId: planItemCandidate.garmentId,
+        })
+        .from(planItemCandidate)
+        .where(inArray(planItemCandidate.planItemId, itemIds))
+    ).map((row) => `${row.itemId}:${row.garmentId}`);
+
+  /** The candidates a drawn review page offers, as its strips post them. */
+  const offeredOn = (html: string) =>
+    [...html.matchAll(/name="offered" value="([^"]+)"/g)].map((m) => m[1]);
+
+  /**
+   * A post as the page sends it: each item's pick, every item shown, the
+   * removal box ticked, and the candidates offered those linked now unless
+   * `offered` says what an earlier draw showed.
+   */
+  const review = async (
     planId: number,
     picks: [number, string | number][],
     cookie: string,
-    boxes: { removeUnpicked?: boolean; activate?: boolean } = {},
+    boxes: {
+      removeUnpicked?: boolean;
+      activate?: boolean;
+      offered?: string[];
+    } = {},
   ) =>
     post(
       `/wardrobe/plans/${planId}/review`,
       {
         shown: picks.map(([itemId]) => String(itemId)),
         pick: picks.map(([itemId, pick]) => `${itemId}:${pick}`),
+        offered:
+          boxes.offered ?? (await linkedNow(picks.map(([itemId]) => itemId))),
         ...(boxes.removeUnpicked === false ? {} : { removeUnpicked: '1' }),
         ...(boxes.activate ? { activate: '1' } : {}),
       },
@@ -253,7 +279,7 @@ describe('the plan review', () => {
       expect(html).toMatch(/Oxford shirt<span class="text-muted"> ×2/);
     });
 
-    it('offers Skip on every strip, Keep only without candidates, the candidates in the shopping list’s order', async () => {
+    it('offers Skip and Keep on every strip, then the candidates in the shopping list’s order', async () => {
       const html = unescapeHtml(
         (await get(`/wardrobe/plans/${planId}/review`, owner.cookie)).body,
       );
@@ -268,6 +294,7 @@ describe('the plan review', () => {
       // Matching first, within budget before over, then cheapest.
       expect(values(items.boots)).toEqual([
         `${items.boots}:skip`,
+        `${items.boots}:keep`,
         `${items.boots}:${wish.cheapBlack}`,
         `${items.boots}:${wish.black}`,
         `${items.boots}:${wish.navy}`,
@@ -286,6 +313,13 @@ describe('the plan review', () => {
       expect(strip(items.boots)).toContain(
         `name="shown" value="${items.boots}"`,
       );
+      // Each strip posts the candidates it drew, and only those.
+      expect(offeredOn(strip(items.boots)).sort()).toEqual(
+        [wish.navy, wish.black, wish.cheapBlack]
+          .map((id) => `${items.boots}:${id}`)
+          .sort(),
+      );
+      expect(offeredOn(strip(items.coat))).toEqual([]);
       expect(strip(items.boots)).toContain(
         'Doesn’t match the item: blue vs black',
       );
@@ -293,8 +327,9 @@ describe('the plan review', () => {
       expect(strip(items.boots)).toContain(
         `hx-get="/wardrobe/${wish.navy}/outfit-count" hx-trigger="intersect once"`,
       );
-      // The removal box (ticked) and, for an inactive plan, Make this my plan.
-      expect(html).toMatch(/name="removeUnpicked" value="1" checked/);
+      // The removal box (unticked: the owner opts in) and, for an inactive
+      // plan, Make this my plan.
+      expect(html).toMatch(/name="removeUnpicked" value="1" class=/);
       expect(html).toMatch(/name="activate" value="1" checked/);
       expect(html).toContain(`import { initSnapStrips } from 'snap-strip'`);
     });
@@ -413,7 +448,9 @@ describe('the plan review', () => {
         { activate: true },
       );
       expect(res.statusCode, res.body).toBe(303);
-      expect(res.headers.location).toBe(`/wardrobe/plans/${planId}?reviewed=1`);
+      expect(res.headers.location).toBe(
+        `/wardrobe/plans/${planId}?reviewed=1&removed=2`,
+      );
 
       const states = await proposedOf([picked, skipped, kept, second]);
       expect(states.get(picked)).toBe(false);
@@ -435,7 +472,9 @@ describe('the plan review', () => {
       expect(await activeOf(mine)).toBe(false);
 
       const page = await get(res.headers.location!, owner.cookie);
-      expect(page.body).toContain('Review saved');
+      expect(page.body).toContain(
+        'Review saved. 2 products removed from your wishlist',
+      );
       expect(page.body).not.toContain('id="plan-review"');
       expect(t.logs.messages('info', 'Web')).toContain(
         `Plan ${planId} reviewed by user ${owner.id}: accepted ${[picked, kept, second].sort((a, b) => a - b).join(', ')}, dismissed ${skipped}, candidates ${[loser, skippedOnly].sort((a, b) => a - b).join(', ')} removed from the wishlist, made active`,
@@ -476,6 +515,10 @@ describe('the plan review', () => {
         { removeUnpicked: false },
       );
       expect(res.statusCode, res.body).toBe(303);
+      expect(res.headers.location).toBe(`/wardrobe/plans/${planId}?reviewed=1`);
+      const page = await get(res.headers.location!, owner.cookie);
+      expect(page.body).toContain('Review saved');
+      expect(page.body).not.toContain('removed from your wishlist');
       expect(await existing([a, b, c])).toEqual(
         [a, b, c].sort((x, y) => x - y),
       );
@@ -514,6 +557,88 @@ describe('the plan review', () => {
       expect((await proposedOf([later])).get(later)).toBe(true);
       expect(await existing([both])).toEqual([both]);
       expect(await candidatesOf(later)).toEqual([both]);
+    });
+
+    it('removes only the candidates the page offered: one linked after it was drawn stays, linked', async () => {
+      const owner = await newOwner();
+      const planId = await createPlan('Draft', owner.cookie);
+      const picked = await addItem(
+        planId,
+        { name: 'Tee', category: 'tops' },
+        owner.cookie,
+      );
+      const skipped = await addItem(
+        planId,
+        { name: 'Shirt', category: 'tops' },
+        owner.cookie,
+      );
+      const w = (name: string) =>
+        addWishlist(name, { category: 'tops' }, owner.cookie);
+      const pick = await w('The pick');
+      const loser = await w('Unpicked, drawn');
+      const ofSkipped = await w('Of the skipped item, drawn');
+      await link(owner.id, picked, [pick, loser]);
+      await link(owner.id, skipped, [ofSkipped]);
+      const drawn = await get(`/wardrobe/plans/${planId}/review`, owner.cookie);
+      const offered = offeredOn(unescapeHtml(drawn.body));
+      expect(offered).toHaveLength(3);
+
+      // After the draw (as add_candidate would), one product for both items.
+      const late = await w('Linked after the draw');
+      await link(owner.id, picked, [late]);
+      await link(owner.id, skipped, [late]);
+
+      const res = await review(
+        planId,
+        [
+          [picked, pick],
+          [skipped, 'skip'],
+        ],
+        owner.cookie,
+        { offered },
+      );
+      expect(res.statusCode, res.body).toBe(303);
+      // The drawn unpicked ones go; the late one, never shown, survives
+      // Accept (still linked to the picked item) and Skip (its link to the
+      // dismissed item goes with the item).
+      expect(await existing([pick, loser, ofSkipped, late])).toEqual(
+        [pick, late].sort((a, b) => a - b),
+      );
+      expect(await candidatesOf(picked)).toEqual(
+        [pick, late].sort((a, b) => a - b),
+      );
+      expect((await proposedOf([skipped])).has(skipped)).toBe(false);
+
+      // An offered candidate of an item the post did not show: a 400.
+      const refused = await post(
+        `/wardrobe/plans/${planId}/review`,
+        {
+          shown: [String(picked)],
+          pick: [`${picked}:keep`],
+          offered: [`${skipped}:${late}`],
+        },
+        owner.cookie,
+      );
+      expect(refused.statusCode).toBe(400);
+    });
+
+    it('releases nothing on Keep, even where the strip offered candidates', async () => {
+      const owner = await newOwner();
+      const planId = await createPlan('Draft', owner.cookie);
+      const item = await addItem(
+        planId,
+        { name: 'Tee', category: 'tops' },
+        owner.cookie,
+      );
+      const a = await addWishlist('A', { category: 'tops' }, owner.cookie);
+      const b = await addWishlist('B', { category: 'tops' }, owner.cookie);
+      await link(owner.id, item, [a, b]);
+
+      const res = await review(planId, [[item, 'keep']], owner.cookie);
+      expect(res.statusCode, res.body).toBe(303);
+      expect((await proposedOf([item])).get(item)).toBe(false);
+      expect(await existing([a, b])).toEqual([a, b].sort((x, y) => x - y));
+      expect(await candidatesOf(item)).toEqual([a, b].sort((x, y) => x - y));
     });
 
     it('keeps a candidate bought while the review removes it, and says so', async () => {

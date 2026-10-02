@@ -109,13 +109,18 @@ test('review an agent’s proposals as strips, swipe to a candidate, accept', as
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
 
-  await expect(
-    page.getByLabel('Remove the products I didn’t pick from my wishlist'),
-  ).toBeChecked();
+  // The removal is opted into: the box starts unticked.
+  const removeUnpicked = page.getByLabel(
+    'Remove the products I didn’t pick from my wishlist',
+  );
+  await expect(removeUnpicked).not.toBeChecked();
+  await removeUnpicked.check();
   await page.getByRole('button', { name: 'Accept these' }).click();
 
   await expect(page).toHaveURL(plan);
-  await expect(page.locator('#plan-toast')).toContainText('Review saved');
+  await expect(page.locator('#plan-toast')).toContainText(
+    'Review saved. 1 product removed from your wishlist',
+  );
   await expect(page.locator('#plan-review')).toHaveCount(0);
   const bootsCard = page.locator(`#plan-item-${boots}`);
   await expect(bootsCard).toHaveAttribute('data-status', 'missing');

@@ -28,10 +28,23 @@ export interface PlanPageModel {
   candidates: CandidatesByItem;
   /** The one-shot toast after a write (PlanPageQuery). */
   toast?: 'created' | 'saved' | 'reviewed';
+  /** With the review's toast: the products it removed from the wishlist. */
+  removed?: number;
+}
+
+/** The toast's text: the review's names the products it removed, if any. */
+function toastText(
+  toast: NonNullable<PlanPageModel['toast']>,
+  removed: number | undefined,
+): string {
+  if (removed === undefined) return t(TOASTS[toast]);
+  return removed === 1
+    ? t('plans.REVIEWED_REMOVED_ONE')
+    : t('plans.REVIEWED_REMOVED_MANY', { count: removed });
 }
 
 /** The page's one-shot flags, stripped from the address once shown. */
-const FLAGS = ['created', 'saved', 'reviewed'] as const;
+const FLAGS = ['created', 'saved', 'reviewed', 'removed'] as const;
 
 const TOASTS = {
   created: 'plans.CREATED',
@@ -161,7 +174,10 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
         )}
       </main>
       {model.toast && (
-        <SavedToast id="plan-toast" text={t(TOASTS[model.toast])} />
+        <SavedToast
+          id="plan-toast"
+          text={toastText(model.toast, model.removed)}
+        />
       )}
       <StripFlags names={FLAGS} />
       <Dock ctx={ctx} />
