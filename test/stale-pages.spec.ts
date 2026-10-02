@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { createGarment } from './support/e2e-data';
+import { addPhotographedGarment, createGarment } from './support/e2e-data';
 import {
   registerElsewhere,
   signIn,
@@ -7,11 +7,15 @@ import {
 } from './support/e2e-session';
 import {
   ageCachedPage,
+  cachedImages,
+  cachedKeys,
   cachedPaths,
   cachePage,
   networkSwitch,
   PAGES_CACHE,
   waitForServiceWorker,
+  warmFinished,
+  withoutWarming,
   workerLogs,
 } from './support/service-worker';
 import {
@@ -36,17 +40,6 @@ async function ageCopy(page: Page, path: string, ageMs: number) {
     },
     { cacheName: PAGES_CACHE, ageMs },
   );
-}
-
-/** Every key in the page cache, query and fragment suffix included. */
-function cachedKeys(page: Page): Promise<string[]> {
-  return page.evaluate(async (cacheName) => {
-    const cache = await caches.open(cacheName);
-    return (await cache.keys()).map((request) => {
-      const url = new URL(request.url);
-      return `${url.pathname}${url.search}`;
-    });
-  }, PAGES_CACHE);
 }
 
 /** Searches the wardrobe: an htmx fragment into #wardrobe-main. */
@@ -77,6 +70,10 @@ test.describe('stale-while-revalidate tab roots', () => {
     ({ browserName }) => browserName === 'firefox',
     'service workers are untested in Firefox here',
   );
+  // What this spec caches is its own visits' alone (withoutWarming).
+  test.beforeEach(async ({ context }) => {
+    await withoutWarming(context);
+  });
 
   const FIVE_MINUTES = 5 * 60_000;
 
@@ -422,5 +419,121 @@ test.describe('stale-while-revalidate tab roots', () => {
       timeout: 10_000,
     });
     await expect(page.locator('#wardrobe-main')).toBeVisible();
+  });
+});
+
+/**
+ * The offline warm (#286, src/web/shell/offline-warm.md) fills both session
+ * caches with a whole wardrobe: they go together at every session boundary,
+ * like a visited page, and a warm under way when one passes stores nothing
+ * more (the generation check).
+ */
+test.describe('a warmed wardrobe and the session', () => {
+  test.skip(
+    process.env.PWA_ENABLED !== 'true',
+    'needs a server started with PWA_ENABLED=true',
+  );
+  test.skip(
+    ({ browserName }) => browserName === 'firefox',
+    'service workers are untested in Firefox here',
+  );
+
+  test('a warmed wardrobe’s pages and photos go when another account signs in', async ({
+    page,
+    context,
+    playwright,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', WEBKIT_CANNOT_WATCH_WORKER);
+    await signIn(page, 'swr-warm-a');
+    const garmentId = await addPhotographedGarment(page, 'Warmed coat');
+    const warmed = warmFinished(context);
+    await waitForServiceWorker(page);
+    await page.goto('/outfits');
+    await warmed;
+    const thumbs = (await cachedImages(page)).filter((url) =>
+      url.startsWith('/file/thumb/'),
+    );
+    expect(thumbs).toHaveLength(1);
+    expect(await cachedPaths(page)).toContain(`/wardrobe/${garmentId}`);
+
+    await switchAccount(
+      page,
+      await registerElsewhere(playwright, 'swr-warm-b'),
+    );
+    await expect
+      .poll(() => cachedPaths(page))
+      .not.toContain(`/wardrobe/${garmentId}`);
+    expect(await cachedImages(page)).not.toContain(thumbs[0]);
+  });
+
+  test('a warm under way when the account changes stores nothing more (#286)', async ({
+    page,
+    context,
+    playwright,
+    browserName,
+  }) => {
+    test.skip(browserName === 'webkit', WEBKIT_CANNOT_WATCH_WORKER);
+    await signIn(page, 'swr-midwarm-a');
+    const garmentId = await addPhotographedGarment(page, 'Mid-warm coat');
+    const second = await registerElsewhere(playwright, 'swr-midwarm-b');
+    const network = await networkSwitch(context);
+
+    // Every fetch of the warm (but its list) is answered by the server at
+    // once and reaches the worker only after the other tab has switched
+    // accounts and the device has gone offline. Registered after
+    // networkSwitch, so it goes first.
+    const held: string[] = [];
+    let answered!: () => void;
+    const rendered = new Promise<void>((resolve) => (answered = resolve));
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await context.route('**/*', async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        !route.request().headers()['x-closet-warm'] ||
+        url.pathname === '/offline/warm'
+      ) {
+        await route.fallback();
+        return;
+      }
+      held.push(`${url.pathname}${url.search}`);
+      const response = await route.fetch();
+      answered();
+      await released;
+      await route.fulfill({ response });
+    });
+    // Profile shows no photo, so the garment's thumb is the warm's to fetch.
+    // The worker installs on the first load; the warm starts on whichever
+    // load it controls.
+    await page.goto('/auth/profile');
+    await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+    await page.reload();
+    await rendered;
+
+    const other = await context.newPage();
+    await other.goto('/auth/profile');
+    await switchAccount(other, second);
+    await expect.poll(() => cachedPaths(other)).toContain('/auth/profile');
+    await network('offline');
+
+    const stopped = workerLogs(
+      context,
+      '[sw] warm stopped, the session changed',
+    );
+    release();
+    await stopped;
+
+    // Pages and thumbs side by side: both kinds were in flight.
+    expect(held.some((url) => url.startsWith('/file/thumb/'))).toBe(true);
+    expect(held.some((url) => !url.startsWith('/file/'))).toBe(true);
+    const keys = await cachedKeys(other);
+    const images = await cachedImages(other);
+    for (const url of held) {
+      expect(keys).not.toContain(url);
+      expect(images).not.toContain(url);
+    }
+    expect(keys).not.toContain(`/wardrobe/${garmentId}`);
+    expect(images.filter((url) => url.startsWith('/file/thumb/'))).toEqual([]);
   });
 });
