@@ -5,7 +5,7 @@
  * IntersectionObserver per strip, rooted on the strip with its margins
  * pulled in to a line down the middle, says which item crosses that line,
  * and that item becomes the choice: its `data-snap-value` goes into the
- * strip's hidden input (`data-snap-field`, the sibling input of that name),
+ * strip's hidden input (the element right after the strip),
  * and `data-selected` and `aria-selected` move to it.
  *
  * - initSnapStrips(root) centres each strip on its `data-selected` item and
@@ -72,10 +72,12 @@ function chooseFrom(strip, entries) {
 }
 
 function choose(strip, item) {
-  const field = strip.parentElement?.querySelector(
-    `:scope > input[name="${CSS.escape(strip.dataset.snapField)}"]`,
-  );
-  if (!field) return;
+  // SnapStrip emits its input directly after the strip, so strips sharing a
+  // container each write to their own.
+  const field = strip.nextElementSibling;
+  if (!(field instanceof HTMLInputElement)) {
+    throw new Error('snap-strip: the strip is not followed by its input');
+  }
   // A hidden input's value is its attribute, so htmx's history snapshot
   // keeps the choice too.
   field.value = item.dataset.snapValue;

@@ -36,8 +36,9 @@ export type SnapSize = keyof typeof SIZES;
 
 /**
  * The strip and, right after it, the hidden input the observer writes the
- * chosen item's value into: the two are siblings, so a page's own wrapper
- * (a row's section) is what pairs them. `value` is the item chosen on the
+ * chosen item's value into. The observer pairs them by position (the input is
+ * the strip's `nextElementSibling`), so any number of strips can share a
+ * container. `value` is the item chosen on the
  * server (`data-selected`, see `snapItem`); "" when none is.
  *
  * `class` adds to the strip (a page's own freezing or hooks); the strip is
@@ -63,7 +64,6 @@ export function SnapStrip(props: {
         role="listbox"
         aria-label={props.label}
         data-snap-strip=""
-        data-snap-field={props.name}
       >
         {props.children}
       </div>

@@ -221,7 +221,7 @@ function NoGarment(props: {
 /**
  * A garment on the plinth, its cutout contained (never cropped). A tap on
  * the centred one opens its page; a tap on a neighbour centres it
- * (styling.js). The strips show the 400 px thumb, made from the cutout.
+ * (snap-strip.js). The strips show the 400 px thumb, made from the cutout.
  */
 function GarmentItem(props: {
   garment: RowGarment;
