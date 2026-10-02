@@ -138,7 +138,7 @@ test.describe('warming the wardrobe for offline reading', () => {
     await signInAs(page, await seedDemoAs('warm-demo'));
     const line = await firstWarm(page, context);
     expect(line).toMatch(
-      /^\[sw\] warmed \d+ pages, \d+ images in [\d.]+ s \(\d+ fresh, 0 removed, 0 refused, added [\d.]+ MB, usage [\d.]+ MB of [\d.]+ [MG]B\)$/,
+      /^\[sw\] warmed \d+ pages, \d+ images in [\d.]+ s \(\d+ fresh, 0 removed, 0 refused, 0 failed, added [\d.]+ MB, usage [\d.]+ MB of [\d.]+ [MG]B\)$/,
     );
 
     const list = await warmListOf(page);
@@ -238,5 +238,51 @@ test.describe('warming the wardrobe for offline reading', () => {
     const paths = await cachedPaths(page);
     expect(paths).not.toContain(`/wardrobe/${deleted}`);
     expect(paths).toContain(`/wardrobe/${kept}`);
+  });
+
+  test('a new worker warms again within the day: the copies are an older build’s', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, 'warm-new-build');
+    const coat = await createGarment(page, 'New build coat', 'coats');
+    await firstWarm(page, context);
+
+    // As if a new build's worker had activated after that warm.
+    await page.evaluate(async (cacheName) => {
+      const cache = await caches.open(cacheName);
+      await cache.put(
+        'https://page-cache.invalid/activated-at',
+        new Response(String(Date.now())),
+      );
+    }, PAGES_CACHE);
+    const finished = warmFinished(context);
+    await page.goto('/calendar');
+    expect(await finished).toMatch(/^\[sw\] warmed \d+ pages/);
+    expect(await cachedPaths(page)).toContain(`/wardrobe/${coat}`);
+  });
+
+  test('a warm with a failed answer is not recorded: the next page warms again', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, 'warm-503');
+    const coat = await createGarment(page, 'Unlucky coat', 'coats');
+    let failing = true;
+    await context.route(`**/wardrobe/${coat}`, async (route) => {
+      if (failing && route.request().headers()['x-closet-warm']) {
+        await route.fulfill({ status: 503, body: '' });
+      } else await route.fallback();
+    });
+    expect(await firstWarm(page, context)).toMatch(
+      /^\[sw\] warm incomplete, 1 failed: .* 1 failed,/,
+    );
+    expect(await cachedPaths(page)).not.toContain(`/wardrobe/${coat}`);
+
+    failing = false;
+    const finished = warmFinished(context);
+    await page.goto('/calendar');
+    expect(await finished).toMatch(/^\[sw\] warmed 1 pages, 0 images/);
+    expect(await cachedPaths(page)).toContain(`/wardrobe/${coat}`);
   });
 });

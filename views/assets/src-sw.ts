@@ -341,14 +341,31 @@ const pageStore: WorkboxPlugin = {
 // writes an answer after cacheWillUpdate has claimed for it, so a drop can
 // still fall between the two: the copy then lands in the emptied cache,
 // rendered for an account that no longer (or not yet) owns it, and this is
-// what keeps it from ever being served.
-const ownedCopies: WorkboxPlugin = {
-  cachedResponseWillBeUsed: async ({ request, cachedResponse }) =>
-    cachedResponse &&
-    (await isOwned(cachedResponse, new URL(request.url).pathname))
-      ? cachedResponse
-      : null,
+// what keeps it from ever being served. Nor is a copy stored before this
+// worker activated, by any strategy: an older build rendered it, and its
+// <head> (the importmap, the asset URLs) must not meet this build's
+// precached scripts, not even as NetworkFirst's offline answer (the offline
+// page answers then, read by the catch handler, not through here). Such a
+// copy is deleted: the next visit or warm stores this build's. `request` is
+// the cache key here (cacheKeyWillBeUsed has run).
+const servedCopies: WorkboxPlugin = {
+  cachedResponseWillBeUsed: async ({ cacheName, request, cachedResponse }) => {
+    if (!cachedResponse) return null;
+    const path = new URL(request.url).pathname;
+    if (!(await isOwned(cachedResponse, path))) return null;
+    if (await isFromAnOlderBuild(cachedResponse)) {
+      await (await self.caches.open(cacheName)).delete(request);
+      console.info(`[sw] ${path}: copy from before activation deleted`);
+      return null;
+    }
+    return cachedResponse;
+  },
 };
+
+async function isFromAnOlderBuild(copy: Response): Promise<boolean> {
+  const activatedAt = Number((await readRecord(ACTIVATED_AT_KEY)) ?? 0);
+  return cachedAt(copy.headers) <= activatedAt;
+}
 
 async function isOwned(copy: Response, path: string): Promise<boolean> {
   const owner = await readRecord(OWNER_KEY);
@@ -366,7 +383,7 @@ const pageRules: WorkboxPlugin[] = [
   },
   new CacheableResponsePlugin({ statuses: [200] }),
   pageStore,
-  ownedCopies,
+  servedCopies,
 ];
 
 // Pages a user visits beyond a warmed wardrobe: shared wardrobes, filtered
@@ -459,11 +476,8 @@ async function revalidate(
 
 /**
  * The tab roots on a document load (servesStaleWhileRevalidate): the cached
- * copy at once. Without a copy it is NetworkFirst. So is a copy stored
- * before this worker activated, once deleted: an older build rendered it,
- * and its <head> (the importmap, the asset URLs) must not meet this build's
- * precached scripts, not even as NetworkFirst's answer when the network is
- * slow or gone (the offline page answers then).
+ * copy at once. Without a copy it is NetworkFirst, and so it is for a copy
+ * stored before this worker activated, which servedCopies never hands back.
  *
  * Nothing here starts a revalidation: public/js/freshness.js reads the
  * served-from-cache stamp itself, through Navigation Timing (Server-Timing,
@@ -481,16 +495,10 @@ class StaleTabRoot extends Strategy {
   ): Promise<Response> {
     const cached = await handler.cacheMatch(request);
     if (!cached) return pages.handle({ event: handler.event, request });
-    const stamp = cachedAt(cached.headers);
-    const activatedAt = Number((await readRecord(ACTIVATED_AT_KEY)) ?? 0);
     const path = new URL(request.url).pathname;
-    if (stamp <= activatedAt) {
-      const cache = await self.caches.open(PAGES_CACHE);
-      await cache.delete(pageCacheKey(request.url, request.headers));
-      console.info(`[sw] ${path}: copy from before activation deleted`);
-      return pages.handle({ event: handler.event, request });
-    }
-    const ageSeconds = Math.round((Date.now() - stamp) / 1000);
+    const ageSeconds = Math.round(
+      (Date.now() - cachedAt(cached.headers)) / 1000,
+    );
     console.info(`[sw] ${path} opened from the cache (${ageSeconds} s old)`);
     return cached;
   }
@@ -860,8 +868,10 @@ async function revalidateForPage(
  * generation check (warmRunOf). An answer saying the session is over (the
  * gate's 401, X-Session-Ended) is a drop of its own. Runs at most once a
  * day (WARMED_AT_KEY, which a drop takes with the cache, so a new session
- * warms at once); only a run that reached its end is recorded, so the next
- * page resumes any other, skipping what is already fresh.
+ * warms at once, and so does a new worker: WARMED_AT_KEY older than
+ * ACTIVATED_AT_KEY is due); only a run that reached its end with no answer
+ * but a 200 or a 404 is recorded, so the next page resumes any other,
+ * skipping what is already fresh.
  */
 type WarmStop =
   | 'the session changed'
@@ -876,8 +886,10 @@ interface WarmTally {
   fresh: number;
   /** Pages of garments and outfits gone from the list. */
   removed: number;
-  /** Answered, but not with a 200 (a garment deleted meanwhile). */
+  /** Answered 404: deleted since the list was made. */
   refused: number;
+  /** Answered with another error (a 500, a 503): retried by the next run. */
+  failed: number;
 }
 
 interface WarmJob {
@@ -920,8 +932,11 @@ function warmPages(event: ExtendableMessageEvent): Promise<void> {
 
 async function runWarm(event: ExtendableMessageEvent): Promise<void> {
   const lastRun = Number((await readRecord(WARMED_AT_KEY)) ?? 0);
+  const activatedAt = Number((await readRecord(ACTIVATED_AT_KEY)) ?? 0);
   const sinceLastRun = Date.now() - lastRun;
-  if (sinceLastRun < WARM_MAX_AGE_MS) {
+  // A warm before this worker activated stored an older build's pages,
+  // which servedCopies no longer serves: due at once, whatever its age.
+  if (sinceLastRun < WARM_MAX_AGE_MS && lastRun > activatedAt) {
     console.debug(
       `[sw] warm not due: last ran ${Math.round(sinceLastRun / 60_000)} min ago`,
     );
@@ -940,20 +955,29 @@ async function runWarm(event: ExtendableMessageEvent): Promise<void> {
     fresh: 0,
     removed: 0,
     refused: 0,
+    failed: 0,
   };
   tally.removed = await removeGonePages(listed.list, run);
   const jobs = await dueJobs(listed.list, listed.account, tally);
   const stop = await drainWarm(event, jobs, run, tally, usageAtStart);
-  if (stop === undefined) await recordWarmed(run);
+  // Complete only when it reached its end with every answer a 200 or a 404
+  // (deleted since): a 500 or a 503 leaves the run unrecorded, so the next
+  // page fetches what failed.
+  const complete = stop === undefined && tally.failed === 0;
+  if (complete) await recordWarmed(run);
   const { usage = 0, quota = 0 } = await storageEstimate();
   const summary =
     `${tally.pages} pages, ${tally.images} images in ` +
     `${((Date.now() - startedAt) / 1000).toFixed(1)} s (${tally.fresh} fresh, ` +
     `${tally.removed} removed, ${tally.refused} refused, ` +
-    `added ${formatBytes(usage - usageAtStart)}, ` +
+    `${tally.failed} failed, added ${formatBytes(usage - usageAtStart)}, ` +
     `usage ${formatBytes(usage)} of ${formatBytes(quota)})`;
-  if (stop === undefined) console.info(`[sw] warmed ${summary}`);
-  else if (stop === 'storage budget reached') {
+  if (complete) console.info(`[sw] warmed ${summary}`);
+  else if (stop === undefined) {
+    console.warn(
+      `[sw] warm incomplete, ${tally.failed} failed: warmed ${summary}`,
+    );
+  } else if (stop === 'storage budget reached') {
     // Not recorded: the next page warms on from here, with a budget of its
     // own. The list's caps bound what all of them store.
     console.warn(`[sw] warm stopped, ${stop}: warmed ${summary}`);
@@ -1151,12 +1175,23 @@ async function drainWarm(
         const answer = await response;
         await done;
         if (sessionEndedBy(answer)) {
-          stop ??= 'the session ended';
-          await endWarmedSession(event, run, new URL(job.request.url).pathname);
+          // Ended by a drop the worker already made (a sign-out between two
+          // fetches) is the session changing; one only this answer tells of
+          // is ended here.
+          if (generation !== run) stop ??= 'the session changed';
+          else {
+            stop ??= 'the session ended';
+            await endWarmedSession(
+              event,
+              run,
+              new URL(job.request.url).pathname,
+            );
+          }
           return;
         }
         if (answer.ok) tally[job.tally] += 1;
-        else tally.refused += 1;
+        else if (answer.status === 404) tally.refused += 1;
+        else tally.failed += 1;
       } catch {
         stop ??= 'unreachable';
       }

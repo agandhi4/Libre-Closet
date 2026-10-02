@@ -120,12 +120,13 @@ export function cachedImages(page: Page): Promise<string[]> {
 
 /**
  * Resolves with the worker's one line for a warm (WARM_PAGES, src-sw.ts):
- * `[sw] warmed ...` or `[sw] warm stopped, <why>: ...`. A longer wait than
+ * `[sw] warmed ...`, `[sw] warm incomplete, ...` or `[sw] warm stopped, <why>: ...`. A longer wait than
  * workerLogs': the demo wardrobe's first warm is about 200 fetches.
  */
 export async function warmFinished(context: BrowserContext): Promise<string> {
   const message = await context.waitForEvent('console', {
-    predicate: (line) => /^\[sw\] warm(ed| stopped)\b/.test(line.text()),
+    predicate: (line) =>
+      /^\[sw\] warm(ed| stopped| incomplete)\b/.test(line.text()),
     timeout: 120_000,
   });
   return message.text();

@@ -60,9 +60,10 @@ export async function warmList(
       ...warmed.map((row) => garmentUrl(row.id, undefined)),
       ...warmedOutfits.map((row) => outfitUrl(row.id)),
     ],
-    fragments: gridPageCursors(closet.map((row) => row.id))
-      .filter((before) => warmedIds.has(before))
-      .map((before) => tilesUrl(undefined, EMPTY_SEARCH, before)),
+    fragments: gridPageCursors(
+      closet.map((row) => row.id),
+      warmed.length,
+    ).map((before) => tilesUrl(undefined, EMPTY_SEARCH, before)),
     // The garments' thumbs come first (warmed before the outfits'), so a
     // cut falls on outfit pieces the closet pages never show.
     images: [...thumbs].slice(0, WARM_IMAGE_CAP),
@@ -107,11 +108,18 @@ function ownGarmentsSql(ownerId: number): SQL<OwnGarment[]> {
 /**
  * Each later grid page's `before`, as gridPage pages the closet: newest
  * first, GRID_PAGE_SIZE a page, and a page after every full one that has
- * more behind it. `ids` is the whole closet, newest first.
+ * more behind it. `ids` is the whole closet, newest first; only pages whose
+ * every tile is among the first `warmed` are listed, so an offline scroll
+ * never shows a tile whose page and thumb were not warmed (it stops at the
+ * last whole page, its sentinel failing like any uncached fragment).
  */
-function gridPageCursors(ids: number[]): number[] {
+function gridPageCursors(ids: number[], warmed: number): number[] {
   const cursors: number[] = [];
-  for (let end = GRID_PAGE_SIZE; end < ids.length; end += GRID_PAGE_SIZE) {
+  for (
+    let end = GRID_PAGE_SIZE;
+    end < ids.length && Math.min(end + GRID_PAGE_SIZE, ids.length) <= warmed;
+    end += GRID_PAGE_SIZE
+  ) {
     cursors.push(ids[end - 1]);
   }
   return cursors;

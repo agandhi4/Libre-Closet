@@ -357,15 +357,27 @@ describe('GET /offline/warm', () => {
       expect(list.pages.length + list.fragments.length).toBeLessThanOrEqual(
         WARM_PAGE_CAP,
       );
-      // Every grid page whose first garment is warmed, none past the cap.
-      const pageCount = Math.ceil(WARM_GARMENT_CAP / GRID_PAGE_SIZE);
+      // Every later grid page whose every tile is warmed: none renders a
+      // garment past the cap.
+      const wholePages = Math.floor(WARM_GARMENT_CAP / GRID_PAGE_SIZE);
       expect(list.fragments).toEqual(
         Array.from(
-          { length: pageCount - 1 },
+          { length: wholePages - 1 },
           (_, i) =>
             `/wardrobe/tiles?before=${garments[(i + 1) * GRID_PAGE_SIZE - 1]}`,
         ),
       );
+      // The last listed grid page renders only warmed garments.
+      const last = await t.inject({
+        method: 'GET',
+        url: list.fragments.at(-1)!,
+        headers: { cookie, 'hx-request': 'true' },
+      });
+      const shown = [
+        ...unescapeHtml(last.body).matchAll(/href="(\/wardrobe\/\d+)"/g),
+      ].map((match) => match[1]);
+      expect(shown.length).toBeGreaterThan(0);
+      expect(warmedGarments).toEqual(expect.arrayContaining(shown));
     });
   });
 });
