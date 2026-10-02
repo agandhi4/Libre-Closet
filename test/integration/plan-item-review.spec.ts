@@ -314,6 +314,10 @@ describe('the plan item review', () => {
       expect(answer.isError).toBe(true);
       expect(String(answer.value.error)).toContain('You declined this item');
       expect(await candidatesOf(item)).toEqual([]);
+      // The garment form refuses it before any photo or page is fetched.
+      const form = await get(`/wardrobe/new?to=wishlist&planItem=${item}`);
+      expect(form.statusCode).toBe(409);
+      expect(unescapeHtml(form.body)).toContain('You declined this item');
     });
   });
 
@@ -343,41 +347,49 @@ describe('the plan item review', () => {
       expect(page).toContain('id="review-declined"');
     });
 
-    it('refuses Change this without a note and a rejected pick: the page as posted, 400, nothing written', async () => {
+    it('refuses Change this without a note: the page as posted, 400, nothing written', async () => {
       const planId = await createPlan();
       const changed = await propose(planId);
-      const picked = await propose(planId, { category: 'bottoms' });
-      const product = await addWishlist('Chinos');
-      await link(picked, [product]);
       const res = await review(planId, [
         { itemId: changed, pick: 'change', note: '  ' },
-        {
-          itemId: picked,
-          pick: product,
-          offered: [product],
-          rejects: [[product, 'Too pale']],
-        },
       ]);
       expect(res.statusCode).toBe(400);
       const html = unescapeHtml(res.body);
       expect(html).toContain('Say what to change');
-      expect(html).toContain('You turned this product down');
-      // As posted: the strip starts on the change tile, the box ticked, the reason kept.
       expect(html).toMatch(
         new RegExp(`name="pick"[^>]*value="${changed}:change"`),
       );
-      expect(html).toMatch(
-        new RegExp(`value="${picked}:${product}"[^>]*checked`),
-      );
-      expect(html).toContain('value="Too pale"');
       expect((await rowOf(changed)).review).toBe('proposed');
+    });
+
+    it('reads a rejected pick as Keep: accepted without a product, the rejection recorded, nothing else deleted', async () => {
+      const planId = await createPlan();
+      const item = await propose(planId);
+      const pick = await addWishlist('Chinos');
+      const other = await addWishlist('Other chinos');
+      await link(item, [pick, other]);
+      const res = await review(
+        planId,
+        [
+          {
+            itemId: item,
+            pick,
+            offered: [pick, other],
+            rejects: [[pick, 'Too pale']],
+          },
+        ],
+        { removeUnpicked: '1' },
+      );
+      expect(res.statusCode, res.body).toBe(303);
+      expect((await rowOf(item)).review).toBe('accepted');
+      expect(await existing([pick, other])).toEqual([other]);
+      expect(await candidatesOf(item)).toEqual([other]);
       expect(
         await t.db.$count(
           planItemRejection,
-          inArray(planItemRejection.planItemId, [changed, picked]),
+          eq(planItemRejection.planItemId, item),
         ),
-      ).toBe(0);
-      expect(await existing([product])).toEqual([product]);
+      ).toBe(1);
     });
 
     it('Not this one records the product and reason, deletes it when it stands for nothing else, else unlinks it', async () => {

@@ -41,7 +41,6 @@ export interface ReviewPageModel {
 
 const ERROR_TEXT = {
   'note-required': 'plans.REVIEW_NOTE_REQUIRED',
-  'rejected-pick': 'plans.REVIEW_REJECTED_PICK',
 } as const;
 
 export const REVIEW_FORM_ID = 'review-form';
@@ -491,7 +490,6 @@ function CandidateTile(props: {
             value={offeredValue(props.itemId, candidate.garmentId)}
             checked={props.rejected}
             class="checkbox checkbox-xs"
-            data-reject
           />
           {t('plans.NOT_THIS_ONE')}
         </label>

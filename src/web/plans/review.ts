@@ -43,8 +43,7 @@ import { type ListedCandidate, listedCandidate } from './shopping';
  *   proposed are touched: one proposed after the page was drawn is left
  *   for the next review, one decided meanwhile (a second post, the item
  *   form) is not decided again.
- * - "Not this one" (a candidate cannot be both rejected and the pick: a
- *   400) records the product and the reason (plan_item_rejection,
+ * - "Not this one" records the product and the reason (plan_item_rejection,
  *   rejections.ts) and lets the candidate go, ticked box or not.
  * - With "Remove the products I didn't pick" ticked (it starts unticked),
  *   the unpicked candidates of a picked item and every candidate of a
@@ -87,7 +86,7 @@ export interface ReviewChoice {
 }
 
 /** Why a post the page could have sent is still refused, per item: the page again, 400. */
-export type ReviewError = 'note-required' | 'rejected-pick';
+export type ReviewError = 'note-required';
 
 /** An item's strip: the item and its candidates, the likeliest first. */
 export interface ReviewStrip {
@@ -198,7 +197,7 @@ const text = (value: string | undefined): string | null =>
  * of a candidate its strip did not offer, two picks for one, a shown item
  * without one, notes or reasons that do not pair with their strips and
  * tiles): the route re-renders the page 400. Then each item's own errors:
- * Change this without a note, a rejected candidate as the pick. A garment
+ * Change this without a note. A garment
  * id is only compared with the item's candidates, never queried, so one
  * past the column's range is simply not one of them.
  */
@@ -259,20 +258,20 @@ function readChoices(post: ReviewPost): Map<number, ReviewChoice> | undefined {
     const choice = choices.get(itemId);
     if (!choice?.offered.includes(garmentId)) return undefined;
     choice.rejected.set(garmentId, reasons.get(value) ?? null);
+    // A rejected pick reads as Keep: the item is accepted without a product.
+    if (
+      choice.pick.kind === 'candidate' &&
+      choice.pick.garmentId === garmentId
+    ) {
+      choice.pick = { kind: 'keep' };
+    }
   }
   return choices;
 }
 
 /** Why an item's choice, one the page could send, is still refused. */
-function choiceError({
-  pick,
-  note,
-  rejected,
-}: ReviewChoice): ReviewError | undefined {
+function choiceError({ pick, note }: ReviewChoice): ReviewError | undefined {
   if (pick.kind === 'change' && note === null) return 'note-required';
-  if (pick.kind === 'candidate' && rejected.has(pick.garmentId)) {
-    return 'rejected-pick';
-  }
   return undefined;
 }
 

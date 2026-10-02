@@ -203,8 +203,8 @@ test('Change this with a note, and Not this one on a candidate, in one post', as
   await expect(coatPick).toHaveValue(`${coat}:change`);
   await page.locator(`#review-note-${coat}`).fill('Wool, and longer');
 
-  // The boots: the cheaper pair starts centred; turn it down with a reason,
-  // then swipe to the other and keep that.
+  // The boots: the cheaper pair starts centred; turn that very pair down with
+  // a reason, without swiping away. A rejected pick reads as Keep.
   const bootsPick = page.locator(`#review-item-${boots} input[name="pick"]`);
   await expect(bootsPick).toHaveValue(`${boots}:${shiny}`);
   const shinyTile = page.locator(
@@ -225,8 +225,6 @@ test('Change this with a note, and Not this one on a candidate, in one post', as
   await shinyTile
     .getByRole('textbox', { name: 'Why not Shiny black boots' })
     .fill('Too shiny');
-  await swipe(boots, 1);
-  await expect(bootsPick).toHaveValue(`${boots}:${matte}`);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);

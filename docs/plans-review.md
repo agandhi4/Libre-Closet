@@ -40,7 +40,7 @@ The detail behind `src/web/plans/CLAUDE.md`'s review bullets (#271, #278, epic #
 - **A post the page could not have sent** is the page as it stands now, with a 400.
 - **Refused as posted** (400, with every pick, box and reason kept and nothing written):
   - Change this without a note.
-  - A rejected candidate as the pick.
+- **A rejected pick reads as Keep**: the item is accepted without a product, the rejection still records and releases that product, Keep releases nothing else.
 
 **`applyReview` is one owner transaction.**
 
