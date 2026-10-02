@@ -240,6 +240,33 @@ test.describe('warming the wardrobe for offline reading', () => {
     expect(paths).toContain(`/wardrobe/${kept}`);
   });
 
+  test('a garment deleted after the list was made loses its cached page', async ({
+    page,
+    context,
+  }) => {
+    await signIn(page, 'warm-404');
+    const deleted = await createGarment(page, 'Vanishing coat', 'coats');
+    await firstWarm(page, context);
+    expect(await cachedPaths(page)).toContain(`/wardrobe/${deleted}`);
+
+    // Due again, and gone between the list and the page's own fetch.
+    await ageCachedPage(page, `/wardrobe/${deleted}`, DAY + 60_000);
+    await ageLastWarm(page, DAY + 60_000);
+    await context.route(`**/wardrobe/${deleted}`, async (route) => {
+      if (route.request().headers()['x-closet-warm']) {
+        const response = await page.request.delete(`/wardrobe/${deleted}`, {
+          headers: SAME_ORIGIN,
+        });
+        expect(response.ok()).toBe(true);
+      }
+      await route.fallback();
+    });
+    const finished = warmFinished(context);
+    await page.goto('/outfits');
+    expect(await finished).toMatch(/1 refused/);
+    expect(await cachedPaths(page)).not.toContain(`/wardrobe/${deleted}`);
+  });
+
   test('a new worker warms again within the day: the copies are an older build’s', async ({
     page,
     context,

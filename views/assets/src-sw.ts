@@ -1062,17 +1062,27 @@ function removeGonePages(list: WarmList, run: number): Promise<number> {
       (path) => new URL(path, self.location.origin).href,
     ),
   );
+  return deleteCachedPages(
+    run,
+    (url) => isWarmedDetailPage(url) && !listed.has(url.href),
+  );
+}
+
+/**
+ * Deletes the cached pages (and their `|hx` fragments) whose URL `isGone`
+ * accepts, under the ownership lock and only while the run's generation
+ * lasts. A fragment's key (`/wardrobe/12|hx`) is its page's fate too.
+ */
+function deleteCachedPages(
+  run: number,
+  isGone: (url: URL) => boolean,
+): Promise<number> {
   return serialized(async () => {
     if (generation !== run) return 0;
     const cache = await self.caches.open(PAGES_CACHE);
-    // A fragment's key (`/wardrobe/12|hx`) is its page's fate too.
     const gone = (await cache.keys()).filter((key) => {
       const url = new URL(pageUrlOfCacheKey(key.url));
-      return (
-        url.origin === self.location.origin &&
-        isWarmedDetailPage(url) &&
-        !listed.has(url.href)
-      );
+      return url.origin === self.location.origin && isGone(url);
     });
     await Promise.all(gone.map((key) => cache.delete(key)));
     return gone.length;
@@ -1190,7 +1200,19 @@ async function drainWarm(
           return;
         }
         if (answer.ok) tally[job.tally] += 1;
-        else if (answer.status === 404) tally.refused += 1;
+        else if (answer.status === 404) {
+          tally.refused += 1;
+          // Deleted since the list was made: the 200-only plugin keeps the
+          // old copy, which offline would be served for another day.
+          // (A thumb's URL is immutable: nothing to delete.)
+          if (job.tally === 'pages') {
+            const { href } = new URL(job.request.url);
+            tally.removed += await deleteCachedPages(
+              run,
+              (url) => url.href === href,
+            );
+          }
+        }
         else tally.failed += 1;
       } catch {
         stop ??= 'unreachable';
