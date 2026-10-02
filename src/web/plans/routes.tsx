@@ -21,14 +21,16 @@ import { ItemFormPage, type ItemFormModel } from './item-form-page';
 import { PlansPage } from './list-page';
 import { PlanFormPage, type PlanFormModel } from './plan-form-page';
 import { PlanPage } from './plan-page';
+import { applyReview, planReview, readPicks } from './review';
+import { ReviewPage } from './review-page';
 import {
-  acceptItem,
+  acceptItems,
   addItems,
   closetCategories,
   closetPieces,
   createGeneratedPlan,
   createPlan,
-  deleteItem,
+  deleteItems,
   deletePlan,
   findPlan,
   insertItems,
@@ -62,6 +64,7 @@ import {
   PlanPageQuery,
   PlanParams,
   readPlanForm,
+  ReviewBody,
   readPlanItemForm,
   readStyleProfileForm,
   storedItemValues,
@@ -275,7 +278,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const plan = await requirePlan(request, request.params.id);
-      const { created, saved } = request.query;
+      const { created, saved, reviewed } = request.query;
       const [gaps, candidates] = await Promise.all([
         planGaps(db, plan, userId),
         candidatesOfPlan(db, userId, plan.id),
@@ -288,10 +291,80 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             gaps,
             candidates,
             toast:
-              created === '1' ? 'created' : saved === '1' ? 'saved' : undefined,
+              created === '1'
+                ? 'created'
+                : saved === '1'
+                  ? 'saved'
+                  : reviewed === '1'
+                    ? 'reviewed'
+                    : undefined,
           }}
         />,
       );
+    },
+  );
+
+  // ---- The review (#271) -------------------------------------------------------
+
+  async function renderReview(
+    reply: FastifyReply,
+    plan: PlanDetail,
+    userId: number,
+    changed = false,
+  ): Promise<FastifyReply> {
+    const strips = await planReview(db, plan, userId);
+    return renderPage(
+      reply,
+      <ReviewPage ctx={viewContext(reply)} model={{ plan, strips, changed }} />,
+      { status: changed ? 400 : 200 },
+    );
+  }
+
+  app.get(
+    `${PLANS_PATH}/:id/review`,
+    { schema: { params: PlanParams } },
+    async (request, reply) => {
+      const plan = await requirePlan(request, request.params.id);
+      return renderReview(reply, plan, sessionUserId(request));
+    },
+  );
+
+  // "Accept these" (review.ts has the rule): a post the page could not have
+  // sent, or naming an item no longer the plan's (a skip already done by a
+  // first tap), comes back as the page as it stands now, 400, with nothing
+  // written; another user's plan is a 404 first.
+  app.post(
+    `${PLANS_PATH}/:id/review`,
+    { schema: { params: PlanParams, body: ReviewBody } },
+    async (request, reply) => {
+      const userId = sessionUserId(request);
+      const { id } = request.params;
+      const { shown, pick, removeUnpicked, activate } = request.body;
+      const picks = readPicks(shown, pick);
+      if (!picks) {
+        const plan = await requirePlan(request, id);
+        logger.warn(`Plan ${id} review refused: picks do not match shown`);
+        return renderReview(reply, plan, userId, true);
+      }
+      const outcome = await applyReview(options, userId, id, {
+        shown: [...picks.keys()],
+        picks,
+        removeUnpicked: removeUnpicked === '1',
+        activate: activate === '1',
+      });
+      if (!outcome.ok) {
+        if (outcome.reason === 'not-found') throw planNotFound();
+        logger.warn(
+          `Plan ${id} review refused: items ${outcome.itemIds.join(', ')} are not the plan's`,
+        );
+        return renderReview(
+          reply,
+          await requirePlan(request, id),
+          userId,
+          true,
+        );
+      }
+      return reply.redirect(`${planUrl(id)}?reviewed=1`, 303);
     },
   );
 
@@ -549,7 +622,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const { id, itemId } = request.params;
-      if (!(await acceptItem(db, itemId, id, userId))) {
+      if ((await acceptItems(db, [itemId], id, userId)).length === 0) {
         throw await itemMiss(request, id);
       }
       logger.info(
@@ -566,7 +639,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const { id, itemId } = request.params;
-      if (!(await deleteItem(db, itemId, id, userId))) {
+      if ((await deleteItems(db, [itemId], id, userId)).length === 0) {
         throw await itemMiss(request, id);
       }
       logger.info(

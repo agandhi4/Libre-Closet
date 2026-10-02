@@ -18,6 +18,7 @@ import {
   itemUrl,
   planUrl,
   PLANS_PATH,
+  reviewUrl,
   shoppingUrl,
 } from './urls';
 
@@ -26,11 +27,17 @@ export interface PlanPageModel {
   /** Each item's candidate products (34b): wishlist garments, by item id. */
   candidates: CandidatesByItem;
   /** The one-shot toast after a write (PlanPageQuery). */
-  toast?: 'created' | 'saved';
+  toast?: 'created' | 'saved' | 'reviewed';
 }
 
 /** The page's one-shot flags, stripped from the address once shown. */
-const FLAGS = ['created', 'saved'] as const;
+const FLAGS = ['created', 'saved', 'reviewed'] as const;
+
+const TOASTS = {
+  created: 'plans.CREATED',
+  saved: 'plans.SAVED',
+  reviewed: 'plans.REVIEWED',
+} as const;
 
 /** The groups in the order the page shows them: the gaps first. */
 const GROUPS: readonly ItemStatus[] = ['missing', 'partly', 'owned'];
@@ -47,7 +54,8 @@ const GROUP_TITLES = {
  * (the gaps first: what the page is for), each with what fulfils it and,
  * when it is not owned, why. A plan an agent drafted (create_plan) names
  * its token. Items the owner's agent proposed come first, unmatched, with
- * Accept and Dismiss, their count in the heading. Private: the signed-in owner's plan
+ * Accept and Dismiss, their count in the heading, and Review (#271) to
+ * decide them all as strips. Private: the signed-in owner's plan
  * and closet only. A gap shows its candidate products (34b) and links to
  * adding one; the shopping list is the gaps with their candidates.
  */
@@ -73,7 +81,13 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
         </p>
         {plan.draftedBy !== null && (
           <p class="text-sm text-muted" id="plan-drafted-by">
-            {t('plans.DRAFTED_BY', { name: plan.draftedBy })}
+            {proposed.length > 0 ? (
+              <a href={reviewUrl(plan.id)} class="link link-hover">
+                {t('plans.DRAFTED_BY', { name: plan.draftedBy })}
+              </a>
+            ) : (
+              t('plans.DRAFTED_BY', { name: plan.draftedBy })
+            )}
           </p>
         )}
         {plan.notes && (
@@ -97,7 +111,16 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             <GroupHeading id="group-proposed" count={proposed.length}>
               {t('plans.PROPOSED')}
             </GroupHeading>
-            <p class="text-xs text-muted mb-2">{t('plans.PROPOSED_HINT')}</p>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <p class="text-xs text-muted">{t('plans.PROPOSED_HINT')}</p>
+              <a
+                href={reviewUrl(plan.id)}
+                class="btn btn-primary btn-sm shrink-0"
+                id="plan-review"
+              >
+                {t('plans.REVIEW')}
+              </a>
+            </div>
             <ul class="flex flex-col gap-2">
               {proposed.map((item) => (
                 <ProposedCard item={item} />
@@ -138,10 +161,7 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
         )}
       </main>
       {model.toast && (
-        <SavedToast
-          id="plan-toast"
-          text={t(model.toast === 'created' ? 'plans.CREATED' : 'plans.SAVED')}
-        />
+        <SavedToast id="plan-toast" text={t(TOASTS[model.toast])} />
       )}
       <StripFlags names={FLAGS} />
       <Dock ctx={ctx} />

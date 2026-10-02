@@ -111,6 +111,30 @@ export const FromWardrobeBody = Type.Object({ ownerId: RowId });
 export const PlanPageQuery = Type.Object({
   created: Type.Optional(Type.String({ maxLength: 5 })),
   saved: Type.Optional(Type.String({ maxLength: 5 })),
+  reviewed: Type.Optional(Type.String({ maxLength: 5 })),
+});
+
+// ---- The plan review (#271) -------------------------------------------------
+
+/** Proposals one review posts at most: far past any agent's plan. */
+const REVIEW_MAX = 500;
+
+/**
+ * "Accept these": the items the page showed (`shown`, the capsule picker's
+ * rule: only these are touched) and each one's pick, its strip's hidden
+ * input, `<itemId>:skip|keep|<garmentId>` (review.ts, pickValue; readPicks
+ * holds them to `shown`). The boxes post "1" when ticked.
+ */
+export const ReviewBody = Type.Object({
+  shown: Type.Array(RowId, { minItems: 1, maxItems: REVIEW_MAX }),
+  pick: Type.Array(
+    Type.String({
+      pattern: '^[1-9][0-9]{0,9}:(skip|keep|[1-9][0-9]{0,9})$',
+    }),
+    { minItems: 1, maxItems: REVIEW_MAX },
+  ),
+  removeUnpicked: Type.Optional(Type.Literal('1')),
+  activate: Type.Optional(Type.Literal('1')),
 });
 
 // ---- The plan item form -----------------------------------------------------
