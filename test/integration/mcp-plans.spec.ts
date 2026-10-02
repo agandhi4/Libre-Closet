@@ -323,19 +323,24 @@ describe('MCP: wardrobe plans', () => {
       await propose('Declined'),
       await propose('Replace products'),
     ];
-    const long = new Date('2026-01-01T00:00:00Z');
+    // When the agent last wrote the items, between the two rejection times (the real review post is plan-item-review.spec.ts's).
+    const wrote = new Date('2026-01-01T00:00:00Z');
     const item = (id: number) => eq(planItem.id, id);
     await t.db
       .update(planItem)
-      .set({ review: 'revise', ownerNote: 'Warmer', changedAt: long })
+      .set({ review: 'revise', ownerNote: 'Warmer', agentChangedAt: wrote })
       .where(item(revise));
     await t.db
       .update(planItem)
-      .set({ review: 'declined', ownerNote: 'Not my style', changedAt: long })
+      .set({
+        review: 'declined',
+        ownerNote: 'Not my style',
+        agentChangedAt: wrote,
+      })
       .where(item(declined));
     await t.db
       .update(planItem)
-      .set({ review: 'accepted', changedAt: long })
+      .set({ review: 'accepted', agentChangedAt: wrote })
       .where(item(replace));
     await t.db.insert(planItemRejection).values([
       {

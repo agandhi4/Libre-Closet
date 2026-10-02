@@ -378,6 +378,11 @@ function gapItemOut(
   };
 }
 
+/** A rejection the agent has not answered: made after it last wrote the item, or it never has. */
+function isNewRejection(rejection: Rejection, item: PlanItemRow): boolean {
+  return item.agentChangedAt === null || rejection.at > item.agentChangedAt;
+}
+
 function planOut(gaps: PlanGaps) {
   const { plan } = gaps;
   return {
@@ -481,12 +486,12 @@ export const planTools = [
         ...itemOut(item),
         rejected: (rejections.get(item.id) ?? []).map((rejection) => ({
           ...rejectionOut(rejection),
-          new: rejection.at > item.changedAt,
+          new: isNewRejection(rejection, item),
         })),
       });
       const hasNew = (item: PlanItemRow) =>
-        (rejections.get(item.id) ?? []).some(
-          (rejection) => rejection.at > item.changedAt,
+        (rejections.get(item.id) ?? []).some((rejection) =>
+          isNewRejection(rejection, item),
         );
       return {
         planId: plan.id,
