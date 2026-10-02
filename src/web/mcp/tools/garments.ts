@@ -57,7 +57,11 @@ import {
   withCarePresets,
   withPresets,
 } from '../../wardrobe/validation';
-import { type WearSummary, wearSummarySql } from '../../wears/queries';
+import {
+  type WearSummary,
+  wearCountsByGarment,
+  wearSummarySql,
+} from '../../wears/queries';
 import { wishlistItems } from '../../wishlist/queries';
 import {
   defineTool,
@@ -69,9 +73,6 @@ import { ownerIdInput, rowId } from './common';
 import { addGarmentFromLink } from './link-import';
 
 const GARMENT_NOT_FOUND = 'Garment not found';
-
-/** garmentSummaries' limit for get_wardrobe: a page that is the whole closet. */
-const NO_PAGE_LIMIT = 2_147_483_647;
 
 /** A search or capsule hit, as the tools answer it. */
 export function summaryOut(garment: GarmentSummary) {
@@ -459,7 +460,10 @@ async function refuseSearch(
  * how it is worn. No photo, no link; a grantee gets no wear data (the
  * owner's own records, as get_garment).
  */
-function wardrobeGarmentOut(garment: GarmentSummary, wears?: WearSummary) {
+function wardrobeGarmentOut(
+  garment: GarmentSummary,
+  wears?: Pick<WearSummary, 'worn' | 'lastWorn'>,
+) {
   return {
     id: garment.id,
     name: garment.name,
@@ -517,31 +521,22 @@ export const garmentTools = [
     writes: false,
     async run({ ownerId, includeArchived }, ctx) {
       const access = await wardrobeFor(ctx, ownerId, 'view');
-      const { garments } = await garmentSummaries(
-        ctx.db,
-        access.ownerId,
-        {
-          scope: includeArchived ? 'owned' : 'closet',
-          needsWash: false,
-          attention: false,
-        },
-        { limit: NO_PAGE_LIMIT },
-      );
-      // One statement for every garment's wears (the garment page's own
-      // fragment per garment), none for a grantee.
-      const today = todayIn(ctx.timeZone, new Date());
+      const { garments } = await garmentSummaries(ctx.db, access.ownerId, {
+        scope: includeArchived ? 'owned' : 'closet',
+        needsWash: false,
+        attention: false,
+      });
+      // The owner's wears in one grouped read; none for a grantee.
       const wears = access.isOwner
-        ? await selectScalars(
-            ctx.db,
-            Object.fromEntries(
-              garments.map(({ id }) => [`g${id}`, wearSummarySql(id, today)]),
-            ),
-          )
+        ? await wearCountsByGarment(ctx.db, access.ownerId)
         : undefined;
       return {
         total: garments.length,
         garments: garments.map((garment) =>
-          wardrobeGarmentOut(garment, wears?.[`g${garment.id}`]),
+          wardrobeGarmentOut(
+            garment,
+            wears && (wears.get(garment.id) ?? { worn: 0, lastWorn: null }),
+          ),
         ),
       };
     },

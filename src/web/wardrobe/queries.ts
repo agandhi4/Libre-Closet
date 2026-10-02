@@ -277,9 +277,21 @@ export async function garmentSummaries(
   ownerId: number,
   filters: GridFilters,
   options: { before?: number; limit: number },
-): Promise<{ garments: GarmentSummary[]; before: number | undefined }> {
+): Promise<{ garments: GarmentSummary[]; before: number | undefined }>;
+/** Without a `limit`: every match, no page and so no `before`. */
+export async function garmentSummaries(
+  db: Db,
+  ownerId: number,
+  filters: GridFilters,
+): Promise<{ garments: GarmentSummary[] }>;
+export async function garmentSummaries(
+  db: Db,
+  ownerId: number,
+  filters: GridFilters,
+  options: { before?: number; limit?: number } = {},
+): Promise<{ garments: GarmentSummary[]; before?: number }> {
   const { before, limit } = options;
-  const rows = await db
+  const query = db
     .select({
       id: garment.id,
       name: garment.name,
@@ -305,7 +317,9 @@ export async function garmentSummaries(
       ),
     )
     .orderBy(desc(garment.id))
-    .limit(limit + 1);
+    .$dynamic();
+  if (limit === undefined) return { garments: await query };
+  const rows = await query.limit(limit + 1);
   const garments = rows.slice(0, limit);
   return {
     garments,

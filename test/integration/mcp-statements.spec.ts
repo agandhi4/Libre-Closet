@@ -254,7 +254,7 @@ describe('MCP statements per tool (#172)', () => {
     ['get_today', () => ({}), 3], // 6: the weather twice, worn apart
     ['search_garments', () => ({ category: 'tops' }), 3],
     // get_wardrobe: the garments, then every garment's wears in one
-    // statement; a grantee's has the share read and no wears.
+    // grouped statement (`wearCountsByGarment`); a grantee's has the share read and no wears.
     ['get_wardrobe', () => ({}), 3],
     ['get_wardrobe', () => ({ ownerId: ids.dana }), 3],
     ['get_garment', () => ({ id: ids.garment }), 3], // 5
