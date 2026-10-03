@@ -113,6 +113,54 @@ export class TooManyCandidates extends HttpError {
 }
 
 /**
+ * A candidate note past CANDIDATE_NOTE_MAX: nothing was written. A 400 with
+ * the reason; the writer enforces the cap so no caller (MCP's input schema
+ * is only the first line) can store a note the tiles cannot hold.
+ */
+export class CandidateNoteTooLong extends HttpError {
+  constructor() {
+    super(
+      400,
+      t('shopping.CANDIDATE_NOTE_TOO_LONG', { max: CANDIDATE_NOTE_MAX }),
+    );
+    this.name = 'CandidateNoteTooLong';
+  }
+}
+
+/** A note as stored: trimmed, null when blank; CandidateNoteTooLong past the cap. */
+function checkedNote(
+  note: string | null | undefined,
+): string | null | undefined {
+  if (note === undefined || note === null) return note;
+  const trimmed = note.trim();
+  if (trimmed.length > CANDIDATE_NOTE_MAX) throw new CandidateNoteTooLong();
+  return trimmed === '' ? null : trimmed;
+}
+
+/** `change`'s adds and updates with every note checked (checkedNote). */
+function checkedNotes(change: CandidateChange): {
+  adds: CandidateAdd[];
+  updates: CandidateResearchUpdate[];
+} {
+  const adds = [change.add ?? []].flat().map((set) => ({
+    ...set,
+    research:
+      set.research &&
+      new Map(
+        [...set.research].map(([garmentId, research]) => [
+          garmentId,
+          { ...research, note: checkedNote(research.note) ?? null },
+        ]),
+      ),
+  }));
+  const updates = (change.update ?? []).map((u) => ({
+    ...u,
+    note: checkedNote(u.note),
+  }));
+  return { adds, updates };
+}
+
+/**
  * An add to an item the owner declined ("Don't buy", #278): nothing was
  * written. A 409 with the reason; the owner reconsiders the item first,
  * and the agent never works on a declined item. Thrown, like
@@ -156,8 +204,8 @@ export function changeCandidates(
   // The owner lock first, before the rows below: the cap's count must see
   // every other change of this owner's candidates committed.
   return ownerTransaction(db, ownerId, 'changeCandidates', async (tx) => {
-    const adds = [change.add ?? []].flat();
-    const updates = change.update ?? [];
+    // Before any statement past the lock: a refused note writes nothing.
+    const { adds, updates } = checkedNotes(change);
     const sets = [
       ...adds,
       ...(change.remove ? [change.remove] : []),
@@ -248,11 +296,13 @@ function addedPairings(
     if (garmentIds.length === 0) continue;
     for (const itemId of set.itemIds) {
       if (!items.has(itemId)) continue;
-      const held = byItem.get(itemId) ?? new Map();
-      for (const garmentId of garmentIds) {
-        if (!held.has(garmentId))
-          held.set(garmentId, set.research?.get(garmentId));
-      }
+      const held =
+        byItem.get(itemId) ?? new Map<number, CandidateResearch | undefined>();
+      garmentIds
+        .filter((garmentId) => !held.has(garmentId))
+        .forEach((garmentId) =>
+          held.set(garmentId, set.research?.get(garmentId)),
+        );
       byItem.set(itemId, held);
     }
   }

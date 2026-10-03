@@ -295,6 +295,43 @@ describe('candidate research notes', () => {
       expect(foreign.updated).toBe(0);
     });
 
+    it('the writer refuses a note past the cap, on add and update, writing nothing', async () => {
+      const item = await propose();
+      const a = await wishlist('Cap A');
+      const b = await wishlist('Cap B');
+      const long = 'x'.repeat(CANDIDATE_NOTE_MAX + 1);
+      await expect(
+        changeCandidates(t.db, t.owner.id, {
+          add: {
+            itemIds: [item],
+            garmentIds: [a],
+            research: new Map([[a, { note: long, rank: null }]]),
+          },
+        }),
+      ).rejects.toMatchObject({
+        name: 'CandidateNoteTooLong',
+        statusCode: 400,
+      });
+      expect(await rowOf(item, a)).toBeUndefined();
+      await changeCandidates(t.db, t.owner.id, {
+        add: { itemIds: [item], garmentIds: [b] },
+      });
+      await expect(
+        changeCandidates(t.db, t.owner.id, {
+          update: [{ itemId: item, garmentId: b, note: long }],
+        }),
+      ).rejects.toMatchObject({ name: 'CandidateNoteTooLong' });
+      // Blank is no note; spaces around one are trimmed.
+      await changeCandidates(t.db, t.owner.id, {
+        update: [{ itemId: item, garmentId: b, note: '  fine  ', rank: 2 }],
+      });
+      expect(await rowOf(item, b)).toEqual({ note: 'fine', rank: 2 });
+      await changeCandidates(t.db, t.owner.id, {
+        update: [{ itemId: item, garmentId: b, note: '   ' }],
+      });
+      expect(await rowOf(item, b)).toEqual({ note: null, rank: 2 });
+    });
+
     it('a duplicated plan keeps the research', async () => {
       const item = await propose();
       const garmentId = await wishlist('Duplicated');
