@@ -10,6 +10,7 @@ import {
 import type { GarmentStatus } from '../../src/wardrobe/status';
 import { addDays } from '../../src/web/calendar/calendar-date';
 import { weekOf } from '../../src/web/calendar/calendar-view';
+import { TAB_ROOTS } from '../../src/web/page-cache';
 import {
   parseWarmList,
   WARM_GARMENT_CAP,
@@ -124,7 +125,7 @@ describe('GET /offline/warm', () => {
 
   afterAll(() => t?.cleanup());
 
-  it('lists the tab roots, the next week, every closet garment and outfit, uncacheable and owned', async () => {
+  it('lists the next week, every closet garment and outfit, uncacheable and owned', async () => {
     const res = await t.inject({
       method: 'GET',
       url: WARM_LIST_PATH,
@@ -135,14 +136,15 @@ describe('GET /offline/warm', () => {
     expect(res.headers['cache-control']).toBe('no-store');
     // Whose list it is: the worker claims its caches for this account.
     expect(res.headers['x-page-account']).toBe(String(t.owner.id));
+    // Never a tab root, as the server sends it (parseWarmList would drop
+    // one): they open stale-while-revalidate, so a warmed copy would open
+    // stale after the user's own edits. Cached when first opened.
+    const sent = res.json<WarmList>();
+    for (const root of TAB_ROOTS) expect(sent.pages).not.toContain(root);
 
     const list = await warmList(t.owner.cookie);
     const nextSunday = addDays(weekOf(t.today()).start, 7);
     expect(list.pages).toEqual([
-      '/wardrobe',
-      '/styling',
-      '/outfits',
-      '/calendar',
       `/calendar?week=${nextSunday}`,
       ...closet.map((id) => `/wardrobe/${id}`),
       `/outfits/${outfitId}`,

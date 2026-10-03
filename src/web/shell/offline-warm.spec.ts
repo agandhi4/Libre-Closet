@@ -5,7 +5,7 @@ const ORIGIN = 'https://closet.test';
 
 describe('parseWarmList', () => {
   const valid = {
-    pages: ['/wardrobe', '/wardrobe/12'],
+    pages: ['/calendar?week=2026-10-04', '/wardrobe/12'],
     fragments: ['/wardrobe/tiles?before=40'],
     images: ['/file/thumb/a.webp?v=1&s=x'],
     keep: [],
@@ -13,6 +13,21 @@ describe('parseWarmList', () => {
 
   it('takes a list of root-relative paths', () => {
     expect(parseWarmList(valid)).toEqual(valid);
+  });
+
+  it('drops a tab root: those are cached only when opened', () => {
+    expect(
+      parseWarmList({
+        ...valid,
+        pages: [
+          '/wardrobe',
+          '/styling',
+          '/outfits',
+          '/calendar',
+          ...valid.pages,
+        ],
+      }),
+    ).toEqual(valid);
   });
 
   it.each([

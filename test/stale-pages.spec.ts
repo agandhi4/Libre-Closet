@@ -644,14 +644,17 @@ test.describe('a warmed wardrobe and the session', () => {
     await page.waitForFunction(() => !!navigator.serviceWorker.controller);
     await page.reload();
     await midway;
+    // A thumb of this account's run is held before the account changes:
+    // dropping first would let the run stop with none in flight (no
+    // "answered from generation" line), or hold the next account's thumb.
+    const heldPath = await held;
 
     // The other worker loop keeps starting fetches while the account
-    // changes; one thumb is in flight across the drop (the sign-out post's),
-    // and the run ends once it lands.
+    // changes; the held thumb is in flight across the drop (the sign-out
+    // post's), and the run ends once it lands.
     const other = await context.newPage();
     await other.goto('/auth/profile');
     await switchAccount(other, second);
-    const heldPath = await held;
     const refused = workerLogs(context, `${heldPath} answered from generation`);
     const stopped = workerLogs(
       context,

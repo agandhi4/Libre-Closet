@@ -10,7 +10,6 @@ import { imageUrl, type SignablePhotoRef } from '../files/image-url';
 import { photoRefJson } from '../files/queries';
 import { savedOutfitsSql } from '../outfits/queries';
 import { outfitUrl } from '../outfits/urls';
-import { TAB_ROOTS } from '../page-cache';
 import { GRID_PAGE_SIZE } from '../wardrobe/grid-page-size';
 import { inCloset, onWishlist } from '../wardrobe/status';
 import { garmentUrl } from '../wardrobe/urls';
@@ -23,9 +22,11 @@ import {
 } from './offline-warm';
 
 /**
- * The warm list of `ownerId`'s own wardrobe (#286): the tab roots, this
- * week and the next, every closet garment's page and every outfit's (newest
- * first, capped), the closet grid's later pages, and the thumbs they show.
+ * The warm list of `ownerId`'s own wardrobe (#286): next week, every closet
+ * garment's page and every outfit's (newest first, capped), the closet
+ * grid's later pages, and the thumbs they show. Never a tab root
+ * (TAB_ROOTS): they open stale-while-revalidate, so a warmed copy would open
+ * stale after the user's own edits; they are cached when first opened.
  * Always the requester's own: a grantee's device never warms a wardrobe
  * shared with them. One statement: the garments still owned or wished for,
  * and every outfit with its garments' photos (what the Saved tab reads).
@@ -55,7 +56,6 @@ export async function warmList(
 
   return {
     pages: [
-      ...TAB_ROOTS,
       weekUrl(addDays(weekOf(today).start, 7)),
       ...warmed.map((row) => garmentUrl(row.id, undefined)),
       ...warmedOutfits.map((row) => outfitUrl(row.id)),

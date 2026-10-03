@@ -46,13 +46,11 @@ export const WARM_GARMENT_CAP = 300;
 export const WARM_OUTFIT_CAP = 80;
 
 /**
- * The most pages a warm list names (pages and fragments): the tab roots,
- * next week, a page per capped garment and outfit, and the grid's later
+ * The most pages a warm list names (pages and fragments): next week, a page per capped garment and outfit, and the grid's later
  * pages, one per GRID_PAGE_SIZE warmed garments at most. The worker sizes
  * its page cache from it.
  */
 export const WARM_PAGE_CAP =
-  TAB_ROOTS.size +
   1 +
   WARM_GARMENT_CAP +
   WARM_OUTFIT_CAP +
@@ -71,7 +69,7 @@ export const WARM_IMAGE_CAP = WARM_GARMENT_CAP + WARM_OUTFIT_ONLY_THUMBS;
 
 /**
  * The warm list: same-origin paths with their query, nothing else.
- *  - pages: whole pages (tab roots, weeks, garments, outfits);
+ *  - pages: whole pages (next week, garments, outfits), never a tab root;
  *  - fragments: the wardrobe grid's later pages, fetched as htmx requests so
  *    they land under the `|hx` key the grid's own scroll reads;
  *  - images: the thumbs those pages show;
@@ -104,7 +102,11 @@ const LIST_KEYS = ['pages', 'fragments', 'images', 'keep'] as const;
 /**
  * The server's answer, checked at the worker's boundary: undefined unless
  * every list is an array of root-relative paths (never another origin, never
- * a protocol-relative `//host`).
+ * a protocol-relative `//host`). A tab root among the pages is dropped: the
+ * worker opens those stale-while-revalidate, so a copy the warm stored or
+ * refreshed would be shown stale after the user's own edits (the Back
+ * button after a save, test/back-navigation.spec.ts). They are cached only
+ * when opened.
  */
 export function parseWarmList(value: unknown): WarmList | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
@@ -112,7 +114,12 @@ export function parseWarmList(value: unknown): WarmList | undefined {
   const lists = LIST_KEYS.map((key) => record[key]);
   if (!lists.every(isPathList)) return undefined;
   const [pages, fragments, images, keep] = lists;
-  return { pages, fragments, images, keep };
+  return {
+    pages: pages.filter((path) => !TAB_ROOTS.has(path)),
+    fragments,
+    images,
+    keep,
+  };
 }
 
 function isPathList(value: unknown): value is string[] {

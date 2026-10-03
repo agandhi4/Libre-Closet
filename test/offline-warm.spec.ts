@@ -150,6 +150,12 @@ test.describe('warming the wardrobe for offline reading', () => {
     expect(await cachedImages(page)).toEqual(
       expect.arrayContaining(list.images),
     );
+    // No tab root is warmed: they open stale-while-revalidate, so they are
+    // cached when opened (/outfits by firstWarm; /wardrobe's first load
+    // came before the worker controlled the page).
+    expect(keys).not.toContain('/wardrobe');
+    expect(keys).not.toContain('/styling');
+    expect(keys).not.toContain('/calendar');
 
     // The storage budget (docs/plans/2026-09-28-caching-and-offline.md,
     // section 2): the whole origin, precache included.
@@ -160,6 +166,9 @@ test.describe('warming the wardrobe for offline reading', () => {
       `demo wardrobe warmed: ${(usage / 1024 / 1024).toFixed(1)} MB`,
     );
     expect(usage).toBeLessThan(10 * 1024 * 1024);
+
+    // The grid's first page is a tab root: offline only once opened.
+    await page.goto('/wardrobe');
 
     // Two hours on, offline: every page from the cache, saying how old it
     // is, with its photos (a cutout never viewed drawn from its thumb).
@@ -190,6 +199,12 @@ test.describe('warming the wardrobe for offline reading', () => {
     );
     await expect(page.locator('a[data-tile]')).toHaveCount(garmentPages.length);
     await expectPhotosShown(page, '/wardrobe scrolled');
+
+    // A tab root never opened: the offline page.
+    await page.goto('/styling');
+    await expect(
+      page.getByRole('heading', { level: 1, name: 'Offline.' }),
+    ).toBeVisible();
   });
 
   test('warms at most once a day, then only what went stale, and drops a deleted garment’s page', async ({
