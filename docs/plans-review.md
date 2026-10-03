@@ -115,7 +115,7 @@ A look is an outfit the agent designs from a plan, mixing closet garments with t
 **The writers**, all run under the owner lock:
 
 - `proposeLook` and `updateLook` (the agent's).
-- `reactToLooks` (the owner's moves, `reviewItems`' shape: two statements).
+- `reactToLooks` (the owner's moves, `reviewItems`' shape: two statements). Notes are stored trimmed, a blank one null. Change this without a note is `LookNoteRequired` (400) before any statement.
 - `copyLooks` (the duplicate).
 
 **A piece is valid** when it is the plan owner's garment and either in the closet or a current candidate of this plan: on the wishlist and linked to an item of this plan that is not declined. Every writer of candidacy holds the owner lock too: `changeCandidates`, the review moves and post, `deleteItems`, `deletePlan`, the duplicate. The garments are locked `FOR SHARE` in id order, so a delete, Bought it or an archive outside the lock waits for the write.
@@ -127,10 +127,10 @@ A look is an outfit the agent designs from a plan, mixing closet garments with t
 
 **Sets and caps.** A look with an emptied slot is nobody's exact set.
 
-- A proposal of exactly the pieces of a look already in the plan answers that look (`alreadyProposed`): a retry writes nothing.
+- A proposal of exactly the pieces of a look already in the plan answers that look (`alreadyProposed`): a retry writes nothing. The pieces are judged first, so a retry whose set no longer passes (a piece archived meanwhile) is refused, as a fresh proposal would be.
 - Exactly a declined look's set is refused (`LookSetDeclined`), to a proposal and to an update.
 - An update to another look's exact set is refused (`LookSetTaken`).
-- At most `LOOKS_PER_PLAN_MAX` (30) looks not declined (`TooManyLooks`). "Not for me" frees a place.
+- At most `LOOKS_PER_PLAN_MAX` (30) looks not declined (`TooManyLooks`). "Not for me" frees a place. Reconsider takes one back, counted in `reactToLooks`' read under the lock: past the cap the whole call is refused and nothing moves.
 - Two garments of one role are allowed, as in an outfit. So is a look of closet pieces only.
 
 **Reads.** `looksOfPlan` is one statement. Each slot's state is derived, never stored (`lookSlotState`):

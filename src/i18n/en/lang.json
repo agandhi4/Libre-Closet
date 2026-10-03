@@ -1506,6 +1506,7 @@
     "DECLINED_SET": "The owner declined a look of exactly these pieces: never propose it again",
     "SAME_SET": "Look {id} already has exactly these pieces",
     "TOO_MANY": "A plan holds at most {max} looks the owner has not declined",
-    "DECLINED_LOOK": "The owner declined this look: they reconsider it first"
+    "DECLINED_LOOK": "The owner declined this look: they reconsider it first",
+    "NOTE_REQUIRED": "Say what to change: Change this needs a note"
   }
 }

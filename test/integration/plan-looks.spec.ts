@@ -7,6 +7,7 @@ import {
   copyLooks,
   LOOKS_PER_PLAN_MAX,
   LookDeclined,
+  LookNoteRequired,
   LookPiecesRefused,
   looksOfPlan,
   LookSetDeclined,
@@ -298,6 +299,17 @@ describe('plan looks', () => {
       expect((await lookOf(f.planId, first.id)).name).toBe('Office Tuesday');
     });
 
+    it('a retry whose pieces no longer pass is refused as a fresh proposal', async () => {
+      const f = await fixture();
+      await proposeLook(t.db, t.owner.id, f.planId, FIELDS, [f.top, f.bottom]);
+      await setGarmentStatus(t.db, f.bottom, t.owner.id, { event: 'archive' });
+      const error = await refusal(
+        proposeLook(t.db, t.owner.id, f.planId, FIELDS, [f.top, f.bottom]),
+      );
+      expect(error).toBeInstanceOf(LookPiecesRefused);
+      expect(error.statusCode).toBe(409);
+    });
+
     it('a declined look’s set is refused, to a proposal and to an update', async () => {
       const f = await fixture();
       const declined = await proposeLook(t.db, t.owner.id, f.planId, FIELDS, [
@@ -366,6 +378,15 @@ describe('plan looks', () => {
       { lookId: ids[0] },
     ]);
     await proposeLook(t.db, t.owner.id, f.planId, FIELDS, [f.bottom, extra]);
+    // Back at the cap, Reconsider is refused whole: nothing moves.
+    const error = await refusal(
+      reactToLooks(t.db, t.owner.id, f.planId, 'reconsider', [
+        { lookId: ids[0] },
+      ]),
+    );
+    expect(error).toBeInstanceOf(TooManyLooks);
+    expect(error.statusCode).toBe(409);
+    expect((await lookOf(f.planId, ids[0])).reaction).toBe('declined');
   });
 
   describe('the agent’s update and the owner’s reactions', () => {
@@ -414,6 +435,38 @@ describe('plan looks', () => {
         [{ lookId: id }],
       );
       expect(reconsidered).toEqual({ moved: [id], refused: [] });
+    });
+
+    it('Change this needs a note: missing or blank is a 400 with nothing written; notes are stored trimmed', async () => {
+      const f = await fixture();
+      const { id } = await proposeLook(t.db, t.owner.id, f.planId, FIELDS, [
+        f.top,
+        f.bottom,
+      ]);
+      for (const note of [undefined, '   ']) {
+        const error = await refusal(
+          reactToLooks(t.db, t.owner.id, f.planId, 'change', [
+            { lookId: id, note },
+          ]),
+        );
+        expect(error).toBeInstanceOf(LookNoteRequired);
+        expect(error.statusCode).toBe(400);
+        expect(await lookOf(f.planId, id)).toMatchObject({
+          reaction: 'proposed',
+          ownerNote: null,
+        });
+      }
+      await reactToLooks(t.db, t.owner.id, f.planId, 'change', [
+        { lookId: id, note: '  Brighter top  ' },
+      ]);
+      expect((await lookOf(f.planId, id)).ownerNote).toBe('Brighter top');
+      await reactToLooks(t.db, t.owner.id, f.planId, 'decline', [
+        { lookId: id, note: '   ' },
+      ]);
+      expect(await lookOf(f.planId, id)).toMatchObject({
+        reaction: 'declined',
+        ownerNote: null,
+      });
     });
 
     it('refuses a move the reaction does not take, and leaves another plan’s look out', async () => {

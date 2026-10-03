@@ -142,6 +142,14 @@ export class TooManyLooks extends HttpError {
   }
 }
 
+/** "Change this" without a note: the agent would have nothing to go on. A 400, nothing written. */
+export class LookNoteRequired extends HttpError {
+  constructor() {
+    super(400, t('looks.NOTE_REQUIRED'));
+    this.name = 'LookNoteRequired';
+  }
+}
+
 /** An agent's rewrite of a look the owner declined: they reconsider it first. */
 export class LookDeclined extends HttpError {
   constructor() {
@@ -173,14 +181,17 @@ function checkLook(
   }
 }
 
+/** An owner's or agent's note as stored: trimmed, blank null. */
+function storedNote(note: string | null | undefined): string | null {
+  return note?.trim() || null;
+}
+
 /** Trimmed, a blank note null: as stored. */
 function storedFields<T extends Partial<LookFields>>(fields: T): T {
   return {
     ...fields,
     ...(fields.name === undefined ? {} : { name: fields.name.trim() }),
-    ...(fields.note === undefined
-      ? {}
-      : { note: fields.note?.trim() ? fields.note : null }),
+    ...(fields.note === undefined ? {} : { note: storedNote(fields.note) }),
   };
 }
 
@@ -389,12 +400,15 @@ export async function proposeLook(
   return ownerTransaction(db, ownerId, 'proposeLook', async (tx) => {
     const looks = await planLookSets(tx, ownerId, planId);
     if (!looks) throw planNotFound();
+    // Judged first: a retry is answered only while its pieces still pass,
+    // so a set gone stale (a piece archived, a candidate unlinked) is refused
+    // as a fresh proposal would be, never confirmed.
+    const slots = await judgedSlots(tx, ownerId, planId, garmentIds);
     const same = sameSetLook(looks, garmentIds);
     if (same?.reaction === 'declined') throw new LookSetDeclined(same.id);
     if (same) return { id: same.id, alreadyProposed: true };
     const kept = looks.filter((look) => look.reaction !== 'declined');
     if (kept.length >= LOOKS_PER_PLAN_MAX) throw new TooManyLooks();
-    const slots = await judgedSlots(tx, ownerId, planId, garmentIds);
     const [look] = await tx
       .insert(planLook)
       .values({
@@ -496,8 +510,11 @@ export interface LookMoves {
  * machine against its stored reaction, under the owner lock. Ids that are
  * no look of the plan are in neither list (a caller's 404). Two statements
  * however many: the read, and one update (each note a case of it).
- * reviewItems' shape. A `change` needs a note (the caller's 400; the
- * column's check backs it). Love it, Change this, Not for me and
+ * reviewItems' shape. Notes are stored trimmed, a blank one null; a
+ * `change` without one is LookNoteRequired (400) before any statement (the
+ * column's check backs it). `reconsider` brings declined looks back under
+ * LOOKS_PER_PLAN_MAX, counted in the read: past it the whole call is
+ * TooManyLooks, nothing moved. Love it, Change this, Not for me and
  * Reconsider in the app (#291).
  */
 export async function reactToLooks(
@@ -508,9 +525,24 @@ export async function reactToLooks(
   moves: readonly LookMove[],
 ): Promise<LookMoves> {
   if (moves.length === 0) return { moved: [], refused: [] };
+  const notes = new Map(
+    moves.map((move) => [move.lookId, storedNote(move.note)]),
+  );
+  if (event === 'change' && [...notes.values()].some((note) => !note)) {
+    throw new LookNoteRequired();
+  }
   return ownerTransaction(db, ownerId, 'reactToLooks', async (tx) => {
     const rows = await tx
-      .select({ id: planLook.id, reaction: planLook.reaction })
+      .select({
+        id: planLook.id,
+        reaction: planLook.reaction,
+        // The plan's looks not declined, counted under the lock: Reconsider
+        // brings declined looks back into the cap.
+        kept: tx.$count(
+          planLook,
+          and(eq(planLook.planId, planId), ne(planLook.reaction, 'declined')),
+        ),
+      })
       .from(planLook)
       .innerJoin(wardrobePlan, eq(wardrobePlan.id, planLook.planId))
       .where(
@@ -540,9 +572,13 @@ export async function reactToLooks(
       }
     }
     if (to === undefined) return { moved, refused };
-    const notes = new Map(
-      moves.map((move) => [move.lookId, move.note ?? null]),
-    );
+    // All or nothing: past the cap, no look is reconsidered.
+    if (
+      event === 'reconsider' &&
+      rows[0].kept + moved.length > LOOKS_PER_PLAN_MAX
+    ) {
+      throw new TooManyLooks();
+    }
     await tx
       .update(planLook)
       .set({ reaction: to, ...ownerNoteSet(effect, moved, notes) })
