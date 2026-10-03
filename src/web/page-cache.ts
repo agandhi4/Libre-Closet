@@ -140,36 +140,6 @@ export function servesStaleWhileRevalidate(
   );
 }
 
-/**
- * The page a write belongs to: its path's first two segments (a write to
- * `/wardrobe/39/edit` or `/wardrobe/39/wears` is `/wardrobe/39`'s), or its
- * one segment (`/wardrobe`, creating a garment, is the tab root's).
- */
-export function writtenPage(pathname: string): string {
-  const segments = pathname.split('/').filter(Boolean).slice(0, 2);
-  return `/${segments.join('/')}`;
-}
-
-/**
- * The cached copies a successful write makes stale (#286): the tab roots,
- * which the worker opens from its cache (a Back after an edit reloads one),
- * and every page and fragment under the write's own page
- * (`/wardrobe/39`, `/wardrobe/39/edit`, `/wardrobe/39?ownerId=…`). The
- * worker deletes them before it answers the write, so the page the write
- * lands on, and Back to the tab it came from, are the server's. Under a
- * one-segment write only the tab roots go: the whole section is not its.
- */
-export function staleAfterWrite(
-  writePathname: string,
-): (page: { pathname: string; search: string }) => boolean {
-  const own = writtenPage(writePathname);
-  const ownsPages = own.indexOf('/', 1) !== -1;
-  return (page) =>
-    (page.search === '' && TAB_ROOTS.has(page.pathname)) ||
-    (ownsPages &&
-      (page.pathname === own || page.pathname.startsWith(`${own}/`)));
-}
-
 /** When a cached page was stored; 0 for a response without the stamp. */
 export function cachedAt(headers: {
   get(name: string): string | null;
