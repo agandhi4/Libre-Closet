@@ -427,6 +427,45 @@ describe('looks become outfits', () => {
       });
       expect(plain.body).not.toContain('id="completed-looks"');
     });
+
+    it("shows a MANAGE grantee who buys the piece no completed looks and no Save as outfit: looks are the owner's", async () => {
+      const f = await fixture();
+      await f.look('Completes');
+      const cookie = await t.register('look-manager@example.com');
+      const invite = await t.inject({
+        method: 'POST',
+        url: '/wardrobe-share/create-invite-link',
+        payload: { permission: 'MANAGE' },
+        headers: { 'hx-request': 'true' },
+      });
+      const token = /\/wardrobe-share\/invite\/([0-9a-f-]{36})/.exec(
+        invite.body,
+      )![1];
+      await t.inject({
+        method: 'POST',
+        url: `/wardrobe-share/invite/${token}/accept`,
+        headers: { cookie },
+      });
+
+      const bought = await t.inject({
+        method: 'POST',
+        url: `/wardrobe/${f.candidate}/bought?ownerId=${t.owner.id}`,
+        payload: { acquiredOn: t.today(), price: '' },
+        headers: { cookie },
+      });
+      expect(bought.statusCode, bought.body).toBe(303);
+      const location = String(bought.headers.location);
+      expect(location).toContain('bought=1');
+      const page = await t.inject({
+        method: 'GET',
+        url: location,
+        headers: { cookie },
+      });
+      expect(page.statusCode).toBe(200);
+      const html = unescapeHtml(page.body);
+      expect(html).not.toContain('id="completed-looks"');
+      expect(html).not.toContain('/save"');
+    });
   });
 
   describe('"In N looks" on the candidate strips', () => {
