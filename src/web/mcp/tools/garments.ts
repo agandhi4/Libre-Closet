@@ -42,12 +42,12 @@ import {
   type GarmentSummary,
   garmentSummaries,
   gridCount,
-  GRID_PAGE_SIZE,
   type GridFilters,
   setCondition,
   updateGarmentProperties,
 } from '../../wardrobe/queries';
 import { resolveCandidateFor } from '../../wardrobe/destination';
+import { GRID_PAGE_SIZE } from '../../wardrobe/grid-page-size';
 import { addCopies, closetLookalikes } from '../../wardrobe/lookalikes';
 import { repairLogSql } from '../../wardrobe/repairs';
 import {
