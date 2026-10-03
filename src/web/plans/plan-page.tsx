@@ -13,7 +13,7 @@ import { categoryLabel, priceLabel } from '../wardrobe/garment';
 import { roleGroupLabel } from '../wardrobe/labels';
 import { garmentUrl } from '../wardrobe/urls';
 import { snapItem } from '../strip/snap-strip';
-import { candidateName, DETAILS, TILE } from './candidate-tile';
+import { candidateName, DETAILS, isAgentsPick, TILE } from './candidate-tile';
 import type { CandidatesByItem } from './candidates';
 import { awaitingReview, byPriority, type PlanGaps } from './gaps';
 import { itemTitle, priorityLabel } from './labels';
@@ -449,6 +449,14 @@ function ItemCard(props: { card: PlanCard; gaps: PlanGaps }) {
         >
           {chip.text}
         </span>
+        {card.status !== 'owned' && card.candidates.some(isAgentsPick) && (
+          <span
+            class="badge badge-xs badge-primary absolute bottom-1.5 right-1.5"
+            data-agents-pick=""
+          >
+            {t('plans.AGENTS_PICK')}
+          </span>
+        )}
         {item.quantity > 1 && (
           <span class="badge badge-xs badge-neutral absolute bottom-1.5 left-1.5">
             {t('QUANTITY_BADGE', { quantity: item.quantity })}
