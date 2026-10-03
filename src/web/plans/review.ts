@@ -526,7 +526,7 @@ export async function applyReview(
   }
   if (looks.refused.length > 0) {
     logger.info(
-      `Plan ${planId} review by user ${ownerId}: looks ${looks.refused.map((r) => `${r.lookId} (${r.reaction})`).join(', ')} left as they are, their reaction moved meanwhile`,
+      `Plan ${planId} review by user ${ownerId}: looks ${looks.refused.map((r) => `${r.lookId} (${r.reaction})`).join(', ')} not moved (already moved or not this plan's)`,
     );
   }
   if (outcome.kept.length > 0) {

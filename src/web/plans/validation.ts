@@ -127,6 +127,11 @@ const REVIEW_MAX = 500;
  * file), with room for an item past the cap from before it.
  */
 const OFFERED_MAX = REVIEW_MAX * 10;
+/**
+ * Keys one review body has at most: a `look-<id>` radio group per look, and
+ * the dozen named fields. The Record's bound counts every key of the body.
+ */
+const REVIEW_KEYS_MAX = REVIEW_MAX + 16;
 
 /** A reason given with "Not this one": a line, not an essay. */
 export const REJECT_REASON_MAX = 300;
@@ -200,6 +205,7 @@ export const ReviewBody = Type.Intersect([
       ...LOOK_PICKS.map((pick) => Type.Literal(pick)),
       Type.Literal(''),
     ]),
+    { maxProperties: REVIEW_KEYS_MAX },
   ),
 ]);
 

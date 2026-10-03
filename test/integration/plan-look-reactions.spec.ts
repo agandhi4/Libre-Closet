@@ -306,6 +306,32 @@ describe('plan looks in the app', () => {
       expect((await reactionsOf([love])).get(love)?.reaction).toBe('loved');
     });
 
+    it('leaves a look of another plan, and of another user, as it is', async () => {
+      const f = await fixture({ proposedItem: true });
+      const mine = await f.look('Office Tuesday');
+      const other = await fixture();
+      const sameOwnerLook = await other.look('Elsewhere');
+      const res = await post(
+        `/wardrobe/plans/${f.planId}/review`,
+        {
+          shown: [String(f.itemId)],
+          pick: [`${f.itemId}:keep`],
+          look: [String(mine), String(sameOwnerLook)],
+          lookNote: ['', ''],
+          [`look-${mine}`]: 'love',
+          [`look-${sameOwnerLook}`]: 'decline',
+        },
+        f.cookie,
+      );
+      expect(res.statusCode, res.body).toBe(303);
+      expect(await reactionsOf([mine, sameOwnerLook])).toEqual(
+        new Map([
+          [mine, { reaction: 'loved', note: null }],
+          [sameOwnerLook, { reaction: 'proposed', note: null }],
+        ]),
+      );
+    });
+
     it('refuses Change this without a note: the page as posted, 400, nothing written', async () => {
       const f = await fixture({ proposedItem: true });
       const love = await f.look('Office Tuesday');
@@ -381,6 +407,16 @@ describe('plan looks in the app', () => {
   });
 
   describe('the plan page', () => {
+    it('reads the page in 6 statements', async () => {
+      const f = await fixture();
+      await f.look('Office Tuesday');
+      const { result, statements } = await recordStatements(() =>
+        get(`/wardrobe/plans/${f.planId}`, f.cookie),
+      );
+      expect(result.statusCode).toBe(200);
+      expect(statements).toHaveLength(6);
+    });
+
     it('leads with the strip and lists the looks sent back or turned down apart', async () => {
       const f = await fixture();
       const first = await f.look('Office Tuesday');
