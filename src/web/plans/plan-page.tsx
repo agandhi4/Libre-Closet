@@ -15,7 +15,7 @@ import { garmentUrl } from '../wardrobe/urls';
 import { snapItem } from '../strip/snap-strip';
 import { candidateName, DETAILS, TILE } from './candidate-tile';
 import type { CandidatesByItem } from './candidates';
-import { byPriority, type PlanGaps } from './gaps';
+import { awaitingReview, byPriority, type PlanGaps } from './gaps';
 import { itemTitle, priorityLabel } from './labels';
 import { LookFace, LooksApart, LooksStrip } from './look-tile';
 import type { LookGroups, PlanLookView } from './looks';
@@ -160,7 +160,8 @@ export function planSections(
 export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
   const { ctx, model } = props;
   const { plan, tally } = model.gaps;
-  const { proposed, declined } = model.gaps.review;
+  const { declined } = model.gaps.review;
+  const awaiting = awaitingReview(model.gaps);
   const sections = planSections(model.gaps, model.candidates);
   const { looks } = model;
   return (
@@ -192,13 +193,13 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             </p>
           )}
         </div>
-        {proposed.length > 0 && (
+        {awaiting > 0 && (
           <div
             class="flex items-center justify-between gap-3 rounded-box bg-base-200 px-3 py-2"
             id="plan-proposals"
           >
             <p class="text-sm">
-              {t('plans.PROPOSED_COUNT', { count: proposed.length })}
+              {t('plans.PROPOSED_COUNT', { count: awaiting })}
             </p>
             <a
               href={reviewUrl(plan.id)}
@@ -664,6 +665,13 @@ function DeclinedList({ items }: { items: PlanItemRow[] }) {
   );
 }
 
+// The shared strip's observer (public/js/snap-strip.js, through the
+// importmap): an inline module, so it runs again after a boosted navigation
+// brings the page and on a fresh load, where nothing else has loaded it. A
+// fixed string with nothing interpolated.
+const LOOKS_INIT = `import { initSnapStrips } from 'snap-strip';
+initSnapStrips(document.getElementById('plan-looks'));`;
+
 /** The plan's Looks strip (#291), edge to edge; nothing without looks in it. */
 function PlanLooks({ looks }: { looks: PlanLookView[] }) {
   if (looks.length === 0) return null;
@@ -678,6 +686,7 @@ function PlanLooks({ looks }: { looks: PlanLookView[] }) {
           <LookPlanTile look={look} selected={index === 0} eager={index < 2} />
         ))}
       </LooksStrip>
+      <script type="module" dangerouslySetInnerHTML={{ __html: LOOKS_INIT }} />
     </div>
   );
 }

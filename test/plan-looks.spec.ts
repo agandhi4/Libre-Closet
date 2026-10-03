@@ -139,3 +139,52 @@ test('swipe the looks, Love one, Change another with a note, Accept, see them gr
   );
   expect(errors).toEqual([]);
 });
+
+test('a fresh plan page: swipe to the second look and Love it', async ({
+  page,
+}) => {
+  const errors = pageErrors(page);
+  const email = await signIn(page, 'plan-looks-fresh');
+  const plan = await post(page, '/wardrobe/plans', { name: 'Winter' });
+  const planId = Number(plan.split('/').pop());
+  const shirt = await createGarment(page, 'Oxford shirt', 'tops');
+  const chinos = await createGarment(page, 'Chinos', 'bottoms');
+  const knit = await createGarment(page, 'Merino knit', 'tops');
+  const [first, second] = await withServerDb(async (db) => {
+    const ownerId = await userIdOf(db, email);
+    const look = async (name: string, garmentIds: number[]) =>
+      (
+        await proposeLook(
+          db,
+          ownerId,
+          planId,
+          { name, occasion: null, note: null },
+          garmentIds,
+        )
+      ).id;
+    return [
+      await look('Office Tuesday', [shirt, chinos]),
+      await look('Friday knit', [knit, chinos]),
+    ];
+  });
+
+  // The document's first page: nothing has loaded the strip's module yet.
+  await page.goto(plan);
+  const strip = page.locator('#plan-looks [data-snap-strip]');
+  const secondTile = page.locator(`#look-${second}`);
+  await expect(page.locator(`#look-${first}`)).toHaveAttribute(
+    'data-selected',
+    '',
+  );
+  await strip.scrollIntoViewIfNeeded();
+  const box = (await strip.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(box.width / 2, 0);
+  await expect(secondTile).toHaveAttribute('data-selected', '');
+  await secondTile.getByRole('button', { name: 'Love it' }).click();
+  await expect(page.locator(`#look-${second}`)).toHaveAttribute(
+    'data-reaction',
+    'loved',
+  );
+  expect(errors).toEqual([]);
+});

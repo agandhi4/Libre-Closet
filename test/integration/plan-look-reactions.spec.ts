@@ -463,6 +463,28 @@ describe('plan looks in the app', () => {
       expect(html).toContain(action(declined, 'reconsider'));
     });
 
+    it('offers Review for a plan whose only proposal is a look: the plan page and the list', async () => {
+      const f = await fixture();
+      await f.look('Only look');
+      const planHtml = unescapeHtml(
+        (await get(`/wardrobe/plans/${f.planId}`, f.cookie)).body,
+      );
+      expect(planHtml).toContain('id="plan-review"');
+      expect(planHtml).toContain('1 proposed by your agent');
+      const listHtml = unescapeHtml(
+        (await get('/wardrobe/plans', f.cookie)).body,
+      );
+      expect(listHtml).toContain(`href="/wardrobe/plans/${f.planId}/review"`);
+      expect(listHtml).toContain('1 proposed by your agent');
+
+      const none = await fixture();
+      expect(
+        unescapeHtml(
+          (await get(`/wardrobe/plans/${none.planId}`, none.cookie)).body,
+        ),
+      ).not.toContain('id="plan-review"');
+    });
+
     it('moves a look with its own posts, a 409 when it moved already', async () => {
       const f = await fixture();
       const look = await f.look('Office Tuesday');
