@@ -135,7 +135,7 @@ document.addEventListener(
  */
 const heading = new WeakMap();
 
-/** Centres the item `step` places from the one the strip holds or is heading for; a no-op at an end. */
+/** Centres the item `step` places from the one the strip holds or is heading for; the item, or null at an end. */
 function stepStrip(strip, step) {
   const items = [...strip.querySelectorAll('[data-snap-item]')];
   const aimed = heading.get(strip);
@@ -144,9 +144,10 @@ function stepStrip(strip, step) {
     : items.findIndex((item) => item.hasAttribute('data-selected'));
   const target = items[from + step];
   // Not inert: a locked Styling row's neighbours are, and stay unchosen.
-  if (from < 0 || !target || target.inert) return;
+  if (from < 0 || !target || target.inert) return null;
   heading.set(strip, target);
   centre(strip, target, smooth());
+  return target;
 }
 
 // Whatever ended the scroll (arrival or a swipe taking over), the strip's own
@@ -164,6 +165,8 @@ document.addEventListener('click', (event) => {
   if (strip) stepStrip(strip, Number(button.dataset.snapStep));
 });
 
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
+
 // Arrow keys while focus is in a strip (an item or the scroller itself). Not
 // in a field: its caret keys are its own.
 document.addEventListener('keydown', (event) => {
@@ -174,7 +177,16 @@ document.addEventListener('keydown', (event) => {
   const strip = event.target.closest('[data-snap-strip]');
   if (!strip) return;
   event.preventDefault();
-  stepStrip(strip, step);
+  const target = stepStrip(strip, step);
+  // Focus follows the choice, so Enter acts on what was chosen. The strip
+  // itself keeps focus when it was the focus target. No scroll: the smooth
+  // one above is already under way.
+  if (target && event.target !== strip) {
+    const control = target.matches(FOCUSABLE)
+      ? target
+      : target.querySelector(FOCUSABLE);
+    control?.focus({ preventScroll: true });
+  }
 });
 
 // Strips swapped in after the page loaded, and history restores.

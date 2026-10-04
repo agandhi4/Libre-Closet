@@ -94,6 +94,7 @@ export function LooksStrip(props: {
         size="card"
         label={t('plans.looks.STRIP_LABEL')}
         listbox={false}
+        focusable
         class={props.class}
       >
         {props.children}

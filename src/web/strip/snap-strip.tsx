@@ -67,6 +67,13 @@ export function SnapStrip(props: {
    * group, and `snapItem({ listbox: false })` on its items.
    */
   listbox?: boolean;
+  /**
+   * True when no tile holds a focusable control (the Looks strip's collage
+   * cards hold none the keyboard needs): the strip itself takes focus, so the
+   * arrow keys can reach it. Off where tiles are buttons or links, which
+   * would only add a second tab stop.
+   */
+  focusable?: boolean;
   class?: string;
   /** Classes on the frame around the strip and its step buttons (a page hides the buttons while it freezes the strip). */
   frameClass?: string;
@@ -83,7 +90,7 @@ export function SnapStrip(props: {
         class={classes.filter(Boolean).join(' ')}
         role={props.listbox === false ? 'group' : 'listbox'}
         aria-label={props.label}
-        tabindex={0}
+        tabindex={props.focusable ? 0 : undefined}
         data-snap-strip=""
       >
         {props.children}
@@ -91,8 +98,8 @@ export function SnapStrip(props: {
       {props.name !== undefined && (
         <input type="hidden" name={props.name} value={props.value ?? ''} />
       )}
-      <StepButton step={-1} />
-      <StepButton step={1} />
+      <StepButton step={-1} label={props.label} />
+      <StepButton step={1} label={props.label} />
     </div>
   );
 }
@@ -104,14 +111,16 @@ export function SnapStrip(props: {
  * the hidden input in the frame, which keeps it the strip's
  * `nextElementSibling`.
  */
-function StepButton(props: { step: -1 | 1 }) {
+function StepButton(props: { step: -1 | 1; label: string }) {
   const previous = props.step < 0;
   return (
     <button
       type="button"
       class={`btn btn-circle btn-sm absolute top-1/2 z-10 hidden -translate-y-1/2 fine:inline-flex ${previous ? 'left-1' : 'right-1'}`}
       data-snap-step={props.step}
-      aria-label={t(previous ? 'strip.PREVIOUS' : 'strip.NEXT')}
+      aria-label={t(previous ? 'strip.PREVIOUS' : 'strip.NEXT', {
+        label: props.label,
+      })}
     >
       <span aria-hidden="true">{previous ? '‹' : '›'}</span>
     </button>

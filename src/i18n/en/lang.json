@@ -3,8 +3,8 @@
   "HOME": "Home",
   "PROFILE": "Profile",
   "strip": {
-    "PREVIOUS": "Previous item",
-    "NEXT": "Next item"
+    "PREVIOUS": "Previous: {label}",
+    "NEXT": "Next: {label}"
   },
   "profile": {
     "SECTIONS": "Profile sections",
@@ -1224,7 +1224,7 @@
     "EDITING": "Changing {name}",
     "SHARED": "You're styling {name}'s wardrobe. Outfits are private, so nothing styled here can be saved.",
     "SHARED_NO_SAVE": "Browsing only: outfits styled here are not saved.",
-    "OFFLINE": "Offline: swiping works, but shuffling and saving need a connection.",
+    "OFFLINE": "Offline: choosing still works, but shuffling and saving need a connection.",
     "ADD_ROW": "Add a row",
     "SAVE_TITLE": "Save outfit",
     "SAVE_OUTFIT": "Save outfit",

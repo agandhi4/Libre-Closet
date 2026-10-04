@@ -22,6 +22,10 @@ async function wardrobe(page: Page, user: string) {
 
 test.describe('with a mouse', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
+  test.skip(
+    ({ isMobile }) => isMobile,
+    'the mobile projects have a coarse pointer: no step buttons',
+  );
 
   test('buttons and arrow keys move a strip and its value', async ({
     page,
@@ -30,8 +34,10 @@ test.describe('with a mouse', () => {
     const g = await wardrobe(page, 'strip-pointer');
     const tops = page.locator('[data-styling-row="top"]').first();
     const value = tops.locator('input[name="garmentId"]');
-    const previous = tops.getByRole('button', { name: 'Previous item' });
-    const next = tops.getByRole('button', { name: 'Next item' });
+    const previous = tops.getByRole('button', {
+      name: 'Previous: Top: choose one',
+    });
+    const next = tops.getByRole('button', { name: 'Next: Top: choose one' });
     await expect(value).toHaveValue(String(g.midTee));
 
     // Newest first: the next item is the older tee, then back.
@@ -50,6 +56,10 @@ test.describe('with a mouse', () => {
     await tops.locator('.styling-strip [data-snap-item]').nth(1).focus();
     await page.keyboard.press('ArrowRight');
     await expect(value).toHaveValue(String(g.newTee));
+    await expect(page.locator(':focus')).toHaveAttribute(
+      'data-snap-value',
+      String(g.newTee),
+    );
     await page.keyboard.press('ArrowLeft');
     await expect(value).toHaveValue(String(g.midTee));
 
@@ -126,13 +136,14 @@ test.describe('on a phone', () => {
   test.use({
     viewport: { width: 390, height: 844 },
     hasTouch: true,
-    isMobile: true,
   });
 
   test('the step buttons are not shown', async ({ page }) => {
     await wardrobe(page, 'strip-touch');
     const tops = page.locator('[data-styling-row="top"]').first();
-    await expect(tops.getByRole('button', { name: 'Next item' })).toBeHidden();
+    await expect(
+      tops.getByRole('button', { name: 'Next: Top: choose one' }),
+    ).toBeHidden();
     await page.screenshot({ path: 'test-results/311-styling-390.png' });
   });
 });
