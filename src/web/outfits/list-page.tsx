@@ -7,10 +7,13 @@ import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
 import { EmptyState } from '../layout/parts';
-import { TILE } from '../plans/candidate-tile';
-import { LookFace, LookSaveAction, LooksStrip } from '../plans/look-tile';
+import {
+  LOOKS_INIT,
+  LookSaveAction,
+  LookStripTile,
+  LooksStrip,
+} from '../plans/look-tile';
 import type { PlanLookView } from '../plans/looks';
-import { snapItem } from '../strip/snap-strip';
 import { stylingUrl } from '../styling/urls';
 import type { ViewContext } from '../view-context';
 import { OutfitCollage } from './collage';
@@ -105,12 +108,6 @@ export function OutfitsPage(props: { ctx: ViewContext; model: SavedModel }) {
   );
 }
 
-// The strip's observer (public/js/snap-strip.js, through the importmap):
-// an inline module, so it runs again after a boosted navigation brings the
-// page. A fixed string with nothing interpolated (the plan page's).
-const PLAN_LOOKS_INIT = `import { initSnapStrips } from 'snap-strip';
-initSnapStrips(document.getElementById('plan-looks'));`;
-
 /**
  * "From your plan": the active plan's looks as the plan page draws them
  * (LooksStrip, LookFace), each with Save as outfit while every piece is
@@ -129,29 +126,14 @@ function PlanLooksRow({ looks }: { looks: PlanLookView[] }) {
         hint={t('outfits.FROM_PLAN_HINT')}
       >
         {looks.map((look, index) => (
-          <div
-            {...snapItem({
-              value: String(look.id),
-              selected: index === 0,
-              size: 'card',
-              listbox: false,
-              class: TILE,
-            })}
-            id={`look-${look.id}`}
-            data-look={String(look.id)}
-            data-reaction={look.reaction}
-          >
-            <LookFace look={look} eager={index < 2} />
+          <LookStripTile look={look} selected={index === 0} eager={index < 2}>
             <div class="mt-1">
               <LookSaveAction look={look} />
             </div>
-          </div>
+          </LookStripTile>
         ))}
       </LooksStrip>
-      <script
-        type="module"
-        dangerouslySetInnerHTML={{ __html: PLAN_LOOKS_INIT }}
-      />
+      <script type="module" dangerouslySetInnerHTML={{ __html: LOOKS_INIT }} />
     </div>
   );
 }

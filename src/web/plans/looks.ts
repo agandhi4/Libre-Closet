@@ -1091,17 +1091,3 @@ export function groupLooks(looks: readonly PlanLookView[]): LookGroups {
     declined: of('declined'),
   };
 }
-
-/**
- * The looks the Outfits tab offers: every one not turned down, the loved
- * first, then the rest in looksOfPlan's order (oldest first). Pure.
- */
-export function outfitsRowLooks(
-  looks: readonly PlanLookView[],
-): PlanLookView[] {
-  const open = looks.filter((look) => look.reaction !== 'declined');
-  return [
-    ...open.filter((look) => look.reaction === 'loved'),
-    ...open.filter((look) => look.reaction !== 'loved'),
-  ];
-}

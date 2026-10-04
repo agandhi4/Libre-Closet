@@ -9,7 +9,7 @@ import { navigateTo, renderPage } from '../render';
 import { DEFAULT_OCCASION } from '../../wardrobe/occasions';
 import { IsoDateSchema, OccasionSchema, RowId } from '../schemas';
 import { ALREADY_SAVED_FLAG } from '../gallery/urls';
-import { looksOfActivePlan, outfitsRowLooks } from '../plans/looks';
+import { groupLooks, looksOfActivePlan } from '../plans/looks';
 import { stylingUrl } from '../styling/urls';
 import { viewContext } from '../view-context';
 import { type OutfitDestination, parseDestination } from './destination';
@@ -222,7 +222,11 @@ export const outfitRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       // Picking for a day is its own task: the plan's looks stay out of it.
       const [{ outfits, activity, choice }, planLooks] = await Promise.all([
         savedContext(db, ownerId, today, day),
-        day ? [] : looksOfActivePlan(db, ownerId).then(outfitsRowLooks),
+        day
+          ? []
+          : looksOfActivePlan(db, ownerId).then(
+              (looks) => groupLooks(looks).strip,
+            ),
       ]);
       if (day?.replace !== undefined && !choice?.replacing) {
         logger.debug(

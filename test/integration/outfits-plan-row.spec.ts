@@ -139,16 +139,20 @@ describe('the Outfits tab: From your plan', () => {
     expect(rowOf((await tab()).body).has).toBe(false);
   });
 
-  it('shows the active plan’s looks, loved first, none declined, with To buy and Save as outfit', async () => {
+  it('shows the plan page’s strip, loved first, none declined or sent back, with To buy and Save as outfit', async () => {
     const p = await plan(t.owner.id);
     const first = await p.look('First look');
     const second = await p.look('Second look');
     const loved = await p.look('Loved look');
     const declined = await p.look('Declined look');
     const ready = await p.look('Ready look', true);
+    const revise = await p.look('Revise look');
     await reactToLooks(t.db, t.owner.id, p.planId, 'love', [{ lookId: loved }]);
     await reactToLooks(t.db, t.owner.id, p.planId, 'decline', [
       { lookId: declined },
+    ]);
+    await reactToLooks(t.db, t.owner.id, p.planId, 'change', [
+      { lookId: revise, note: 'Swap the shoes' },
     ]);
     await setActivePlan(t.db, p.planId, t.owner.id);
 
