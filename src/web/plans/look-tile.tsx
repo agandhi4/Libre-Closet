@@ -70,6 +70,8 @@ export function LooksStrip(props: {
   id: string;
   count: number;
   hint: string;
+  /** Defaults to "Looks"; the Outfits tab's row is "From your plan". */
+  title?: string;
   children: Child;
   /** Each tile's strip-wide hooks (`group/<name>`), the review's. */
   class?: string;
@@ -82,7 +84,7 @@ export function LooksStrip(props: {
     >
       <div class="px-4 flex flex-col gap-0.5">
         <h2 id={`${props.id}-title`} class="font-semibold">
-          {t('plans.looks.TITLE')}{' '}
+          {props.title ?? t('plans.looks.TITLE')}{' '}
           <span class="font-normal text-muted">· {props.count}</span>
         </h2>
         <p class="text-xs text-muted">{props.hint}</p>
