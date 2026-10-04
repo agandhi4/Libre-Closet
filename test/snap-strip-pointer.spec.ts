@@ -119,6 +119,13 @@ test.describe('a strip of tiles with no focusable parts', () => {
     await page.goto(plan);
     const strip = page.locator('#plan-looks [data-snap-strip]');
     await expect(strip).toHaveAttribute('tabindex', '0');
+    const frame = page.locator('#plan-looks .snap-strip-frame');
+    const [previous, next] = [
+      frame.locator('[data-snap-step="-1"]'),
+      frame.locator('[data-snap-step="1"]'),
+    ];
+    await expect(previous).toBeDisabled();
+    await expect(next).toBeEnabled();
     await strip.focus();
     await expect(page.locator(`#look-${first}`)).toHaveAttribute(
       'data-selected',
@@ -129,7 +136,46 @@ test.describe('a strip of tiles with no focusable parts', () => {
       'data-selected',
       '',
     );
+
+    // From a look's action button, focus lands on the new look's same one.
+    await page
+      .locator(`#look-${second}`)
+      .getByRole('button', { name: 'Love it' })
+      .focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator(`#look-${first}`)).toHaveAttribute(
+      'data-selected',
+      '',
+    );
+    await expect(
+      page.locator(`#look-${first}`).getByRole('button', { name: 'Love it' }),
+    ).toBeFocused();
   });
+});
+
+test('a strip of one item has both step buttons disabled', async ({ page }) => {
+  const email = await signIn(page, 'strip-single');
+  const created = await page.request.post('/wardrobe/plans', {
+    form: { name: 'Winter' },
+    headers: SAME_ORIGIN,
+  });
+  const plan = new URL(created.url()).pathname;
+  const shirt = await createGarment(page, 'Oxford shirt', 'tops');
+  const chinos = await createGarment(page, 'Chinos', 'bottoms');
+  await withServerDb(async (db) => {
+    const ownerId = await userIdOf(db, email);
+    await proposeLook(
+      db,
+      ownerId,
+      Number(plan.split('/').pop()),
+      { name: 'Office Tuesday', occasion: null, note: null },
+      [shirt, chinos],
+    );
+  });
+  await page.goto(plan);
+  const frame = page.locator('#plan-looks .snap-strip-frame');
+  await expect(frame.locator('[data-snap-step="-1"]')).toBeDisabled();
+  await expect(frame.locator('[data-snap-step="1"]')).toBeDisabled();
 });
 
 test.describe('on a phone', () => {

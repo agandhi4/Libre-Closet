@@ -59,6 +59,7 @@ function watch(strip) {
   for (const item of strip.querySelectorAll('[data-snap-item]')) {
     observer.observe(item);
   }
+  syncSteps(strip);
   strip.dispatchEvent(new CustomEvent('snap-strip:watch', { bubbles: true }));
 }
 
@@ -93,6 +94,8 @@ function choose(strip, item) {
       other.setAttribute('aria-selected', String(chosen));
     }
   }
+  syncSteps(strip);
+  refocus(strip, item);
 }
 
 /** Scrolls `item` to the middle of its strip. */
@@ -167,6 +170,44 @@ document.addEventListener('click', (event) => {
 
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
 
+/** An item's own controls: the item itself when it is one, else those inside. */
+function controlsOf(item) {
+  return item.matches(FOCUSABLE)
+    ? [item]
+    : [...item.querySelectorAll(FOCUSABLE)];
+}
+
+/**
+ * Where a keyboard step wants focus once its item is the chosen one: that
+ * item and which of its controls (the nth). A control is only visible, and so
+ * focusable, in the chosen item (`group-data-selected/item:visible`), so
+ * focus moves in choose(), after the selection has changed.
+ */
+const wantsFocus = new WeakMap();
+// Not cleared on `scrollend`: the scroll a focus() itself causes ends after
+// the next key press has begun. A step that has not landed by now is stale.
+const FOCUS_WINDOW = 1500;
+
+function refocus(strip, item) {
+  const want = wantsFocus.get(strip);
+  if (want?.item !== item) return;
+  wantsFocus.delete(strip);
+  if (performance.now() - want.at > FOCUS_WINDOW) return;
+  // No scroll: the smooth one is already under way.
+  controlsOf(item)[want.nth]?.focus({ preventScroll: true });
+}
+
+/** Previous/next are disabled where the chosen item has no neighbour that way. */
+function syncSteps(strip) {
+  const items = [...strip.querySelectorAll('[data-snap-item]')];
+  const at = items.findIndex((item) => item.hasAttribute('data-selected'));
+  if (at < 0) return;
+  const buttons = strip.parentElement.querySelectorAll('[data-snap-step]');
+  for (const button of buttons) {
+    button.disabled = !items[at + Number(button.dataset.snapStep)];
+  }
+}
+
 // Arrow keys while focus is in a strip (an item or the scroller itself). Not
 // in a field: its caret keys are its own.
 document.addEventListener('keydown', (event) => {
@@ -177,15 +218,13 @@ document.addEventListener('keydown', (event) => {
   const strip = event.target.closest('[data-snap-strip]');
   if (!strip) return;
   event.preventDefault();
+  const source = event.target.closest('[data-snap-item]');
   const target = stepStrip(strip, step);
-  // Focus follows the choice, so Enter acts on what was chosen. The strip
-  // itself keeps focus when it was the focus target. No scroll: the smooth
-  // one above is already under way.
-  if (target && event.target !== strip) {
-    const control = target.matches(FOCUSABLE)
-      ? target
-      : target.querySelector(FOCUSABLE);
-    control?.focus({ preventScroll: true });
+  // Focus follows the choice, so Enter acts on what was chosen; the strip
+  // itself keeps focus when it was the focus target.
+  if (target && source) {
+    const nth = controlsOf(source).indexOf(event.target);
+    if (nth >= 0) wantsFocus.set(strip, { item: target, nth, at: performance.now() });
   }
 });
 
