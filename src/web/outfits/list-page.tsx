@@ -6,6 +6,7 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
+import { PageMain } from '../layout/page-main';
 import { EmptyState } from '../layout/parts';
 import {
   LOOKS_INIT,
@@ -75,7 +76,7 @@ export function OutfitsPage(props: { ctx: ViewContext; model: SavedModel }) {
           </a>
         }
       />
-      <main class="p-4 pt-20 pb-24 w-full sm:max-w-2xl sm:mx-auto flex flex-col gap-3">
+      <PageMain class="p-4 pt-20 pb-24 flex flex-col gap-3">
         <OutfitTabs active="saved" destination={destination} />
         {model.picking && (
           <PickingHeader destination={model.picking.destination} />
@@ -104,7 +105,7 @@ export function OutfitsPage(props: { ctx: ViewContext; model: SavedModel }) {
             ))}
           </ul>
         )}
-      </main>
+      </PageMain>
       <Dock ctx={ctx} />
     </Layout>
   );
