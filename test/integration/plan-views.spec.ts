@@ -179,5 +179,22 @@ describe('the plan page views', () => {
       expect(header).not.toContain('0 owned');
       expect(header).toContain('2 proposed by your agent');
     });
+
+    it('counts a draft holding only proposed looks as awaiting, not "0 items"', async () => {
+      const draft = await tool<{ id: number }>(t, token, 'create_plan', {
+        name: 'Look-only draft',
+      });
+      const tee = await addGarment({ category: 'tops', type: 't-shirt' });
+      const shoe = await addGarment({ category: 'footwear', type: 'boots' });
+      await tool(t, token, 'propose_look', {
+        planId: draft.id,
+        name: 'Proposed look',
+        garmentIds: [tee, shoe],
+      });
+      const list = await page('/wardrobe/plans');
+      const card = list.slice(list.indexOf('Look-only draft'));
+      expect(card).toContain('1 proposed');
+      expect(card.slice(0, 1500)).not.toContain('0 items · ');
+    });
   });
 });

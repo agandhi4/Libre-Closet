@@ -144,13 +144,12 @@ function PlanCard(props: { gaps: PlanGaps; cover: PlanCover | undefined }) {
   const awaiting = awaitingReview(gaps);
   const items = tally.owned + tally.partly + tally.missing;
   const looks = cover?.looks ?? 0;
-  const proposed = gaps.review.proposed.length;
   const looksText =
     looks === 1 ? t('plans.LOOKS_ONE') : t('plans.LOOKS', { count: looks });
   // Nothing accepted yet: the proposals are what it holds, and "0 items · 0 to buy" read like a bug.
   const counts = (
-    items === 0 && proposed > 0
-      ? [t('plans.PROPOSED_ITEMS', { count: proposed }), looksText]
+    items === 0 && awaiting > 0
+      ? [t('plans.PROPOSED_ITEMS', { count: awaiting }), looksText]
       : [
           items === 1
             ? t('plans.ITEMS_ONE')

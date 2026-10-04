@@ -584,17 +584,8 @@ function ItemSheet(props: {
   lead: Lead | null;
 }) {
   const { card, gaps, lead } = props;
-  const { item, match } = card;
-  const chip = statusChip(card);
+  const { item } = card;
   const titleId = `plan-sheet-${item.id}-title`;
-  const meta = [
-    item.budget
-      ? t('plans.BUDGET_EACH', { price: priceLabel(item.budget) })
-      : null,
-    item.priority === 'medium'
-      ? null
-      : t('plans.PRIORITY_BADGE', { priority: priorityLabel(item.priority) }),
-  ].filter((part) => part !== null);
   return (
     <dialog
       id={`plan-sheet-${item.id}`}
@@ -602,44 +593,8 @@ function ItemSheet(props: {
       aria-labelledby={titleId}
     >
       <div class="modal-box flex flex-col gap-3 pb-8">
-        <div class="flex gap-3">
-          <div class="relative aspect-[4/5] w-28 shrink-0 overflow-hidden rounded-box bg-base-200 flex items-center justify-center">
-            <LeadPhoto lead={lead} />
-          </div>
-          <div class="flex min-w-0 flex-col items-start gap-1">
-            <h2 id={titleId} class="font-semibold text-lg break-words">
-              {itemTitle(item)}
-            </h2>
-            <span class={`badge badge-sm ${chip.class}`} data-status-chip="">
-              {chip.text}
-            </span>
-            {card.status !== 'owned' && card.candidates.some(isAgentsPick) && (
-              <span class="badge badge-xs badge-primary" data-agents-pick="">
-                {t('plans.AGENTS_PICK')}
-              </span>
-            )}
-            {meta.length > 0 && (
-              <p class="text-sm text-muted">{meta.join(' · ')}</p>
-            )}
-          </div>
-        </div>
-        {card.status !== 'owned' && (
-          <Options card={card} onPhoto={lead?.candidateId} />
-        )}
-        {match && match.fulfilledBy.length > 0 && (
-          <FulfilledBy match={match} closet={gaps.closet} />
-        )}
-        {match?.reason && match.reason !== 'nothing-matches' && (
-          <p class="text-sm text-muted" data-reason={match.reason}>
-            {reasonText(match, gaps)}
-          </p>
-        )}
-        {item.ownerNote && (
-          <p class="text-sm" data-owner-note>
-            {t('plans.YOUR_NOTE', { note: item.ownerNote })}
-          </p>
-        )}
-        <ReviewMoves item={item} status={card.status} />
+        <SheetHeader card={card} lead={lead} titleId={titleId} />
+        <SheetBody card={card} gaps={gaps} lead={lead} />
         <div class="modal-action mt-2 items-center">
           <a
             href={itemUrl(item.planId, item.id, '/edit')}
@@ -660,6 +615,79 @@ function ItemSheet(props: {
         <button>{t('CLOSE')}</button>
       </form>
     </dialog>
+  );
+}
+
+/** The sheet's top: photo, title, status chip, the agent's pick, budget and priority. */
+function SheetHeader(props: {
+  card: PlanCard;
+  lead: Lead | null;
+  titleId: string;
+}) {
+  const { card, lead, titleId } = props;
+  const { item } = card;
+  const chip = statusChip(card);
+  const meta = [
+    item.budget
+      ? t('plans.BUDGET_EACH', { price: priceLabel(item.budget) })
+      : null,
+    item.priority === 'medium'
+      ? null
+      : t('plans.PRIORITY_BADGE', { priority: priorityLabel(item.priority) }),
+  ].filter((part) => part !== null);
+  return (
+    <div class="flex gap-3">
+      <div class="relative aspect-[4/5] w-28 shrink-0 overflow-hidden rounded-box bg-base-200 flex items-center justify-center">
+        <LeadPhoto lead={lead} />
+      </div>
+      <div class="flex min-w-0 flex-col items-start gap-1">
+        <h2 id={titleId} class="font-semibold text-lg break-words">
+          {itemTitle(item)}
+        </h2>
+        <span class={`badge badge-sm ${chip.class}`} data-status-chip="">
+          {chip.text}
+        </span>
+        {card.status !== 'owned' && card.candidates.some(isAgentsPick) && (
+          <span class="badge badge-xs badge-primary" data-agents-pick="">
+            {t('plans.AGENTS_PICK')}
+          </span>
+        )}
+        {meta.length > 0 && (
+          <p class="text-sm text-muted">{meta.join(' · ')}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The sheet's middle: options, what fulfils the item, why, the owner's note, the review moves. */
+function SheetBody(props: {
+  card: PlanCard;
+  gaps: PlanGaps;
+  lead: Lead | null;
+}) {
+  const { card, gaps, lead } = props;
+  const { item, match } = card;
+  return (
+    <>
+      {card.status !== 'owned' && (
+        <Options card={card} onPhoto={lead?.candidateId} />
+      )}
+      {match && match.fulfilledBy.length > 0 && (
+        <FulfilledBy match={match} closet={gaps.closet} />
+      )}
+      {match?.reason && match.reason !== 'nothing-matches' && (
+        <p class="text-sm text-muted" data-reason={match.reason}>
+          {reasonText(match, gaps)}
+        </p>
+      )}
+      {item.ownerNote && (
+        <p class="text-sm" data-owner-note>
+          {t('plans.YOUR_NOTE', { note: item.ownerNote })}
+        </p>
+      )}
+      <ReviewMoves item={item} status={card.status} />
+    </>
   );
 }
 
@@ -719,7 +747,7 @@ function Options(props: { card: PlanCard; onPhoto: number | undefined }) {
           )}
         </a>
       ))}
-      <a href={href} class="link link-hover text-muted whitespace-nowrap">
+      <a href={href} class="link link-primary whitespace-nowrap">
         {candidates.length === 1
           ? t('plans.OPTIONS_ONE')
           : t('plans.OPTIONS', { count: candidates.length })}
@@ -768,10 +796,7 @@ function ReviewMoves(props: { item: PlanItemRow; status: CardStatus }) {
   const { item, status } = props;
   const action = (suffix: string) => itemUrl(item.planId, item.id, suffix);
   const change = (
-    <a
-      href={action('/change')}
-      class="link link-hover text-xs text-muted self-start"
-    >
+    <a href={action('/change')} class="link link-primary text-xs self-start">
       {t('plans.CHANGE_THIS')}
     </a>
   );
