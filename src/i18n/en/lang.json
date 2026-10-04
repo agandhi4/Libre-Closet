@@ -2,6 +2,10 @@
   "APP_DESCRIPTION": "Wardrobe organizer: garments, outfits, and a calendar.",
   "HOME": "Home",
   "PROFILE": "Profile",
+  "strip": {
+    "PREVIOUS": "Previous: {label}",
+    "NEXT": "Next: {label}"
+  },
   "profile": {
     "SECTIONS": "Profile sections",
     "ACCOUNT": "Account",
@@ -843,7 +847,7 @@
     "REJECT_REASON_LABEL": "Why not {name}",
     "REVIEW": "Review",
     "REVIEW_TITLE": "Review {name}",
-    "REVIEW_INTRO": "Swipe each item to the product you want, to Keep, to Change this… or to Don’t buy. Accept these saves every choice at once.",
+    "REVIEW_INTRO": "Choose for each item the product you want, Keep, Change this… or Don’t buy. Accept these saves every choice at once.",
     "STYLE_WITH_CLOSET": "Style with my closet",
     "REVIEW_NONE": "Nothing left to review: every proposal is decided.",
     "REVIEW_CHANGED": "Some of these items changed since the page was drawn. Here they are as they stand now.",
@@ -894,7 +898,7 @@
     "PRIORITY_BADGE": "{priority} priority",
     "looks": {
       "TITLE": "Looks",
-      "REVIEW_HINT": "Outfits your agent put together from this plan and your closet. Swipe to a look and say what you think: Accept these saves it with the rest.",
+      "REVIEW_HINT": "Outfits your agent put together from this plan and your closet. Pick a look and say what you think: Accept these saves it with the rest.",
       "NONE": "No outfits yet. Your agent proposes them from this plan and your closet.",
       "PLAN_HINT": "Outfits your agent put together from this plan and your closet.",
       "STRIP_LABEL": "Looks your agent designed",
@@ -1062,7 +1066,7 @@
     "RESTED": "Not worn lately: {names}",
     "IDEAS": "Ideas",
     "STYLE_THIS": "Style this",
-    "SWIPE_OUTFITS": "Swipe outfits",
+    "SWIPE_OUTFITS": "Browse outfits",
     "AVOIDED_HEADING": "Never paired with",
     "ALLOW_AGAIN": "Allow again",
     "problem": {
@@ -1085,6 +1089,8 @@
   "outfits": {
     "FROM_PLAN_TITLE": "From your plan",
     "FROM_PLAN_HINT": "Looks your agent designed from your active plan. Save one as an outfit once every piece is in your closet.",
+    "FROM_DRAFT_HINT": "Drafted by {name}. Not your active plan yet.",
+    "FROM_DRAFT_LINK": "Review the draft",
     "PLANNED_ON": "Planned {day}",
     "WORN_TIMES": "Worn {count}×",
     "PICK_PROMPT": "Tap an outfit to plan it.",
@@ -1220,14 +1226,14 @@
     "TITLE": "Styling",
     "DOCK": "Style",
     "NEW": "Style an outfit",
-    "STRIP_LABEL": "{role}: swipe to choose",
+    "STRIP_LABEL": "{role}: choose one",
     "LOCK": "Lock {role}",
     "NO_GARMENT": "None",
     "NO_IDEA": "Nothing clean goes with the locked rows. Unlock one and shuffle again.",
     "EDITING": "Changing {name}",
     "SHARED": "You're styling {name}'s wardrobe. Outfits are private, so nothing styled here can be saved.",
     "SHARED_NO_SAVE": "Browsing only: outfits styled here are not saved.",
-    "OFFLINE": "Offline: swiping works, but shuffling and saving need a connection.",
+    "OFFLINE": "Offline: choosing still works, but shuffling and saving need a connection.",
     "ADD_ROW": "Add a row",
     "SAVE_TITLE": "Save outfit",
     "SAVE_OUTFIT": "Save outfit",
