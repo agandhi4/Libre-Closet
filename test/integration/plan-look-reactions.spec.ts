@@ -417,7 +417,7 @@ describe('plan looks in the app', () => {
       expect(statements).toHaveLength(6);
     });
 
-    it('draws the looks under Outfits (?view=outfits) and not under Items, listing those sent back or turned down apart', async () => {
+    it('draws the looks in the Outfits panel (?view=outfits checks it), listing those sent back or turned down apart', async () => {
       const f = await fixture();
       const first = await f.look('Office Tuesday');
       const loved = await f.look('Friday drinks', [f.top, f.candidate]);
@@ -435,7 +435,9 @@ describe('plan looks in the app', () => {
       const items = unescapeHtml(
         (await get(`/wardrobe/plans/${f.planId}`, f.cookie)).body,
       );
-      expect(items).not.toContain('id="plan-looks"');
+      // Both panels are in either view; ?view= picks the checked tab (#312).
+      expect(items).toContain('id="plan-looks"');
+      expect(items).toMatch(/id="plan-view-items"[^>]*\bchecked\b/);
       const res = await get(
         `/wardrobe/plans/${f.planId}?view=outfits`,
         f.cookie,
@@ -443,7 +445,7 @@ describe('plan looks in the app', () => {
       expect(res.statusCode).toBe(200);
       expectFullPage(res);
       const html = unescapeHtml(res.body);
-      expect(html).not.toContain('id="plan-role-');
+      expect(html).toMatch(/id="plan-view-outfits"[^>]*\bchecked\b/);
       const strip = [...html.matchAll(/id="look-(\d+)" data-look/g)].map((m) =>
         Number(m[1]),
       );

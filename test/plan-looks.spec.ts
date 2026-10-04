@@ -115,8 +115,17 @@ test('swipe the looks, Love one, Change another with a note, Accept, see them gr
 
   // The plan page's Outfits view (#312): the loved look leads the strip;
   // the changed one waits on the agent, apart, with the note.
-  await page.getByRole('tab', { name: /Outfits/ }).click();
-  await expect(page).toHaveURL(`${plan}?view=outfits`);
+  // Both panels are in the page: the switch is local, so it works offline.
+  await expect(page.getByRole('radio', { name: /^Items/ })).toBeChecked();
+  await page.context().setOffline(true);
+  await page.getByRole('radio', { name: /^Outfits/ }).check();
+  await expect(page).toHaveURL(plan);
+  await expect(page.locator('#plan-panel-outfits')).toBeVisible();
+  await expect(page.locator('#plan-panel-items')).toBeHidden();
+  await page.getByRole('radio', { name: /^Items/ }).check();
+  await expect(page.locator('#plan-panel-items')).toBeVisible();
+  await page.getByRole('radio', { name: /^Outfits/ }).check();
+  await page.context().setOffline(false);
   await expect(page.locator(`#look-${first}`)).toHaveAttribute(
     'data-reaction',
     'loved',

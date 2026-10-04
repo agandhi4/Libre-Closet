@@ -140,22 +140,73 @@ describe('the plan page views', () => {
   });
 
   describe('?view=', () => {
-    it('Outfits shows the looks and Items the cards; anything else is Items', async () => {
+    const checked = (html: string) =>
+      /id="plan-view-(items|outfits)"[^>]*\bchecked\b/.exec(html)?.[1];
+
+    it('holds both panels either way, and ?view= picks the checked tab; anything else is Items', async () => {
       const planId = await createPlan('Views');
       await addItem(planId, { category: 'tops' });
-      const items = await page(`/wardrobe/plans/${planId}`);
-      const outfits = await page(`/wardrobe/plans/${planId}?view=outfits`);
-      const unknown = await page(`/wardrobe/plans/${planId}?view=nonsense`);
-      expect(unknown).toContain('id="plan-role-');
-      expect(items).toContain('id="plan-role-');
-      expect(outfits).not.toContain('id="plan-role-');
-      expect(outfits).toContain('id="plan-no-looks"');
-      // The switch is a boosted link, never script.
-      expect(items).toContain(
-        `href="/wardrobe/plans/${planId}?view=outfits" class="tab"`,
+      const url = `/wardrobe/plans/${planId}`;
+      const items = await page(url);
+      const outfits = await page(`${url}?view=outfits`);
+      const unknown = await page(`${url}?view=nonsense`);
+      const long = await page(`${url}?view=${'x'.repeat(200)}`);
+      for (const html of [items, outfits, unknown, long]) {
+        expect(html).toContain('id="plan-role-');
+        expect(html).toContain('id="plan-no-looks"');
+        expect(html).toContain('id="plan-panel-items"');
+        expect(html).toContain('id="plan-panel-outfits"');
+      }
+      expect(checked(items)).toBe('items');
+      expect(checked(unknown)).toBe('items');
+      expect(checked(long)).toBe('items');
+      expect(checked(outfits)).toBe('outfits');
+      // The switch is local: radios, no link and no script.
+      expect(items).not.toContain(`href="${url}?view=outfits"`);
+      expect(items).toContain('aria-label="Outfits 0"');
+    });
+
+    it('counts declined items in the Items tab', async () => {
+      const planId = await createPlan('Declined count');
+      await addItem(planId, { category: 'tops' });
+      const proposed = await tool<{ id: number }>(
+        t,
+        token,
+        'propose_plan_item',
+        {
+          planId,
+          category: 'shoes',
+        },
       );
-      expect(outfits).toMatch(/data-view="outfits"/);
-      expect(outfits).toContain('tab tab-active');
+      const before = await page(`/wardrobe/plans/${planId}`);
+      expect(before).toContain('aria-label="Items 2"');
+      const res = await post(
+        `/wardrobe/plans/${planId}/items/${proposed.id}/decline`,
+      );
+      expect(res.statusCode, res.body).toBe(303);
+      const after = await page(`/wardrobe/plans/${planId}`);
+      expect(after).toContain('aria-label="Items 2"');
+    });
+
+    it('shows the price of the product on the card’s photo', async () => {
+      const planId = await createPlan('Price');
+      const item = await addItem(planId, { category: 'shoes' });
+      const cheap = await addGarment({
+        name: 'No photo',
+        to: 'wishlist',
+        wishlist: '1',
+        replaces: '',
+        product: '1',
+        category: 'shoes',
+        price: '40',
+      });
+      await changeCandidates(t.db, t.owner.id, {
+        add: { itemIds: [item], garmentIds: [cheap] },
+      });
+      const card = cardOf(await page(`/wardrobe/plans/${planId}`), item);
+      // No candidate has a photo: the glyph, and the top candidate's price.
+      expect(card).not.toContain('<img');
+      expect(statusLine(card)).toBe('To buy · $40.00');
     });
   });
 

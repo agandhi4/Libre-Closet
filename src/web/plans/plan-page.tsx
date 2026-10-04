@@ -36,7 +36,6 @@ import {
   PLANS_PATH,
   PLAN_VIEWS,
   type PlanView,
-  planViewUrl,
   reviewUrl,
   shoppingUrl,
 } from './urls';
@@ -219,22 +218,24 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             </a>
           </div>
         )}
-        <div class="flex items-center justify-between gap-2">
-          <PlanViewTabs
-            planId={plan.id}
-            view={model.view}
-            items={sections.reduce((sum, { items }) => sum + items.length, 0)}
-            outfits={
-              looks.strip.length + looks.revise.length + looks.declined.length
-            }
-          />
-          <a href={itemUrl(plan.id, 'new')} class="btn btn-primary btn-sm">
-            + {t('plans.ADD_ITEM')}
-          </a>
-        </div>
+        <div class={`flex flex-col gap-4 ${PLAN_VIEW_PANELS}`}>
+          <div class="flex items-center justify-between gap-2">
+            <PlanViewTabs
+              view={model.view}
+              items={
+                sections.reduce((sum, { items }) => sum + items.length, 0) +
+                declined.length
+              }
+              outfits={
+                looks.strip.length + looks.revise.length + looks.declined.length
+              }
+            />
+            <a href={itemUrl(plan.id, 'new')} class="btn btn-primary btn-sm">
+              + {t('plans.ADD_ITEM')}
+            </a>
+          </div>
 
-        {model.view === 'outfits' ? (
-          <>
+          <div id="plan-panel-outfits" class="space-y-4">
             <PlanLooks looks={looks.strip} />
             {looks.strip.length +
               looks.revise.length +
@@ -258,9 +259,8 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
               looks={looks.declined}
               moves={(look) => <LookMoves look={look} />}
             />
-          </>
-        ) : (
-          <>
+          </div>
+          <div id="plan-panel-items" class="space-y-4">
             {sections.length === 0 && declined.length === 0 ? (
               <p class="text-sm text-muted text-center pt-8">
                 {t('plans.NO_ITEMS')}
@@ -271,8 +271,8 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
               ))
             )}
             {declined.length > 0 && <DeclinedList items={declined} />}
-          </>
-        )}
+          </div>
+        </div>
       </PageMain>
       {model.toast && (
         <SavedToast
@@ -310,11 +310,13 @@ function PlanTally({ gaps }: { gaps: PlanGaps }) {
 }
 
 /**
- * Items and Outfits (`?view=`): plain boosted links, the Wardrobe tabs'
- * way, so a switch is a navigation the service worker can answer.
+ * Items and Outfits: daisyUI radio tabs, so a switch is local (the page
+ * holds both panels; `PLAN_VIEW_PANELS` shows the checked one) and works
+ * offline: `?view=` is a separate cache key, so a link per tab would fall to
+ * the offline page. `?view=` only picks the initially checked tab. Radios are
+ * keyboard operable (arrows) and the checked one is the selected tab.
  */
 function PlanViewTabs(props: {
-  planId: number;
   view: PlanView;
   items: number;
   outfits: number;
@@ -325,21 +327,33 @@ function PlanViewTabs(props: {
     outfits: t('plans.VIEW_OUTFITS'),
   };
   return (
-    <div role="tablist" class="tabs tabs-border" id="plan-views">
+    <div
+      role="radiogroup"
+      aria-label={t('plans.VIEWS')}
+      class="tabs tabs-border"
+      id="plan-views"
+    >
       {PLAN_VIEWS.map((view) => (
-        <a
-          role="tab"
-          href={planViewUrl(props.planId, view)}
-          class={props.view === view ? 'tab tab-active' : 'tab'}
-          aria-selected={props.view === view ? 'true' : 'false'}
+        <input
+          type="radio"
+          name="plan-view"
+          id={`plan-view-${view}`}
+          class="tab"
+          aria-label={`${labels[view]} ${counts[view]}`}
           data-view={view}
-        >
-          {labels[view]} <span class="ml-1 text-muted">{counts[view]}</span>
-        </a>
+          checked={props.view === view}
+        />
       ))}
     </div>
   );
 }
+
+/**
+ * Shows the panel of the checked tab, hides the other; the wrapper holds the
+ * tabs and both panels. Written whole so Tailwind sees the classes.
+ */
+const PLAN_VIEW_PANELS =
+  '[&:has(#plan-view-items:checked)_#plan-panel-outfits]:hidden [&:has(#plan-view-outfits:checked)_#plan-panel-items]:hidden';
 
 /** A role's cards under its heading and count: "Shoes · 2". */
 function RoleSection(props: { section: RoleGroup<PlanCard>; gaps: PlanGaps }) {
@@ -489,10 +503,10 @@ function leadOf(
 
 /**
  * What a card says of the item in one line: "Owned", "To buy · $90" (the
- * top candidate's price), "2 of 3", or the review's own words. The rest
+ * price of the product on its photo), "2 of 3", or the review's own words. The rest
  * (budget, priority, what in the closet fulfils it) is in its sheet.
  */
-function statusLine(card: PlanCard): string {
+function statusLine(card: PlanCard, lead: Lead | null): string {
   switch (card.status) {
     case 'partly':
       return t('plans.HAVE_OF', {
@@ -500,7 +514,13 @@ function statusLine(card: PlanCard): string {
         need: card.match!.need,
       });
     case 'missing': {
-      const price = card.candidates[0]?.price;
+      // The price of the product on the photo; with no photo, the top one's.
+      const shown = lead
+        ? card.candidates.find(
+            ({ garmentId }) => garmentId === lead.candidateId,
+          )
+        : card.candidates[0];
+      const price = shown?.price;
       return price
         ? t('plans.TO_BUY_PRICE', { price: priceLabel(price) })
         : t('plans.status.missing');
@@ -565,7 +585,7 @@ function ItemCard(props: { card: PlanCard; gaps: PlanGaps }) {
           {itemTitle(item)}
         </span>
         <span class="text-xs text-muted" data-status-line="">
-          {statusLine(card)}
+          {statusLine(card, lead)}
         </span>
       </button>
       <ItemSheet card={card} gaps={gaps} lead={lead} />

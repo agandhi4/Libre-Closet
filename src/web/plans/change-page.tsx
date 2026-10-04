@@ -10,7 +10,7 @@ import { itemFacts, itemTitle } from './labels';
 import { LookFace } from './look-tile';
 import type { PlanLookView } from './looks';
 import type { PlanDetail, PlanItemRow } from './queries';
-import { itemUrl, lookUrl, planUrl } from './urls';
+import { itemUrl, lookUrl, planUrl, planViewUrl } from './urls';
 import { ITEM_NOTE_MAX } from './validation';
 
 export interface ChangeItemModel {
@@ -81,7 +81,12 @@ export function ChangeLookPage(props: {
   const title = t('plans.CHANGE_TITLE', { item: look.name });
   return (
     <Layout ctx={ctx} title={title}>
-      <AppBar ctx={ctx} title={title} back={planUrl(plan.id)} formPage />
+      <AppBar
+        ctx={ctx}
+        title={title}
+        back={planViewUrl(plan.id, 'outfits')}
+        formPage
+      />
       <PageMain class="p-4 pt-20 pb-24 flex flex-col gap-3">
         <p class="text-sm text-muted truncate">{plan.name}</p>
         <div class="w-56 self-center flex flex-col gap-1">
@@ -89,7 +94,7 @@ export function ChangeLookPage(props: {
         </div>
         <NoteForm
           action={lookUrl(plan.id, look.id, '/change')}
-          back={planUrl(plan.id)}
+          back={planViewUrl(plan.id, 'outfits')}
           note={model.note}
           error={model.error}
         />

@@ -111,7 +111,7 @@ export const FromWardrobeBody = Type.Object({ ownerId: RowId });
 /** The plan page's one-shot flags (the toasts after a write). */
 export const PlanPageQuery = Type.Object({
   /** `items` or `outfits`; anything else is Items, not a 400: it is URL state (planView). */
-  view: Type.Optional(Type.String({ maxLength: 20 })),
+  view: Type.Optional(Type.String()),
   created: Type.Optional(Type.String({ maxLength: 5 })),
   saved: Type.Optional(Type.String({ maxLength: 5 })),
   reviewed: Type.Optional(Type.String({ maxLength: 5 })),
