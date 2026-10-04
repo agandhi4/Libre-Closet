@@ -93,6 +93,8 @@ export function IdeasPage(props: { ctx: ViewContext; model: IdeasPageModel }) {
               size="page"
               label={t('gallery.STRIP_LABEL')}
               listbox={false}
+              tapThrough
+              frameClass="lg:w-full lg:max-w-3xl lg:mx-auto"
               class="pb-2"
               attributes={{ id: 'idea-strip' }}
             >

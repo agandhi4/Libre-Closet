@@ -294,6 +294,8 @@ export function IdeasRowView(props: { row: IdeasRow; today: IsoDate }) {
           size="peek"
           label={t('today.STRIP_LABEL')}
           listbox={false}
+          tapThrough
+          frameClass="lg:w-full lg:max-w-3xl lg:mx-auto"
           class="pb-2"
         >
           {row.ideas.map((idea, index) => (

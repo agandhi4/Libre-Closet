@@ -90,7 +90,7 @@ export function GoesWithSection({
           <>
             {/* Display only, no control in a card: the strip itself takes focus. */}
             <SnapStrip
-              size="card"
+              size={best.length > 1 ? 'pair' : 'page'}
               label={t('goesWith.BEST_LABEL')}
               listbox={false}
               focusable
@@ -102,7 +102,7 @@ export function GoesWithSection({
                   {...snapItem({
                     value: idea.garments.map((g) => g.id).join(','),
                     selected: index === 0,
-                    size: 'card',
+                    size: best.length > 1 ? 'pair' : 'page',
                     listbox: false,
                     class: 'flex flex-col gap-1',
                   })}

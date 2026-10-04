@@ -293,4 +293,24 @@ test.describe('the idea strips (#321)', () => {
     }
     expect(errors).toEqual([]);
   });
+
+  test("one click on a neighbouring idea card's button does its work", async ({
+    page,
+  }) => {
+    await signIn(page, 'strip-tap-through');
+    for (const [name, category, color] of [
+      ['White tee', 'tops', 'white'],
+      ['Grey tee', 'tops', 'grey'],
+      ['Raw jeans', 'bottoms', 'blue'],
+      ['Khaki chinos', 'bottoms', 'beige'],
+      ['White sneakers', 'footwear', 'white'],
+    ] as const) {
+      await createGarment(page, name, category, { color });
+    }
+    await page.goto('/outfits/ideas');
+    const second = page.locator('#idea-strip [data-idea]').nth(1);
+    await expect(second).not.toHaveAttribute('data-selected', '');
+    await second.locator('summary').click();
+    await expect(second.locator('details')).toHaveAttribute('open', '');
+  });
 });
