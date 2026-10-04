@@ -70,7 +70,7 @@ function lookMeta(look: PlanLookView): string {
 export function LooksStrip(props: {
   id: string;
   count: number;
-  hint: string;
+  hint: Child;
   /** Defaults to "Looks"; the Outfits tab's row is "From your plan". */
   title?: string;
   children: Child;
@@ -94,6 +94,7 @@ export function LooksStrip(props: {
         size="card"
         label={t('plans.looks.STRIP_LABEL')}
         listbox={false}
+        focusable
         class={props.class}
       >
         {props.children}
@@ -255,6 +256,7 @@ export function LookSaveAction({
           href={outfitUrl(look.outfitId!)}
           class="link link-hover text-xs font-medium"
           data-look-saved=""
+          data-strip-action="saved"
         >
           {t('plans.looks.SAVED_AS_OUTFIT')}
         </a>
@@ -266,6 +268,7 @@ export function LookSaveAction({
             type="submit"
             class="btn btn-xs btn-primary"
             data-save-look={String(look.id)}
+            data-strip-action="save"
           >
             {t('plans.looks.SAVE_AS_OUTFIT')}
           </button>
