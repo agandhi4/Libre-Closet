@@ -28,14 +28,33 @@ const SIZES = {
     item: 'w-28',
     ends: 'before:w-[calc(50%-4.25rem)] after:w-[calc(50%-4.25rem)] before:shrink-0 after:shrink-0',
   },
+  // Styling's accessory rows; larger tiles from `lg` (#321), where the row has the width.
   small: {
-    item: 'w-20',
-    ends: 'before:w-[calc(50%-3.25rem)] after:w-[calc(50%-3.25rem)] before:shrink-0 after:shrink-0',
+    item: 'w-20 lg:w-28',
+    ends: 'before:w-[calc(50%-3.25rem)] after:w-[calc(50%-3.25rem)] lg:before:w-[calc(50%-4.25rem)] lg:after:w-[calc(50%-4.25rem)] before:shrink-0 after:shrink-0',
+  },
+  // Styling's garment rows: `regular` on a phone, larger from `lg`.
+  roomy: {
+    item: 'w-28 lg:w-40',
+    ends: 'before:w-[calc(50%-4.25rem)] after:w-[calc(50%-4.25rem)] lg:before:w-[calc(50%-5.75rem)] lg:after:w-[calc(50%-5.75rem)] before:shrink-0 after:shrink-0',
   },
   // A plan look's card (#291): a collage with words and reactions under it.
   card: {
     item: 'w-56',
     ends: 'before:w-[calc(50%-7.75rem)] after:w-[calc(50%-7.75rem)] before:shrink-0 after:shrink-0',
+  },
+  // An idea card (#321): the strip's whole width on a phone (no spacers: the
+  // negative margins cancel the gap beside the zero-width pseudo-element),
+  // a fixed card from `lg`. The percentage resolves against the strip.
+  page: {
+    item: 'w-full lg:w-72',
+    ends: 'before:w-0 after:w-0 before:-mr-3 after:-ml-3 lg:before:mr-0 lg:after:ml-0 lg:before:w-[calc(50%-9.75rem)] lg:after:w-[calc(50%-9.75rem)] before:shrink-0 after:shrink-0',
+  },
+  // The same card with the next one peeking in on a phone (Today's rows),
+  // flush left as before: the first card cannot be centred there.
+  peek: {
+    item: 'w-[85%] lg:w-72',
+    ends: 'before:w-0 after:w-0 before:-mr-3 after:-ml-3 lg:before:mr-0 lg:after:ml-0 lg:before:w-[calc(50%-9.75rem)] lg:after:w-[calc(50%-9.75rem)] before:shrink-0 after:shrink-0',
   },
 } as const;
 
@@ -75,6 +94,8 @@ export function SnapStrip(props: {
    */
   focusable?: boolean;
   class?: string;
+  /** Extra attributes on the strip itself (an `id` a page's test or script finds it by). */
+  attributes?: Readonly<Record<string, string>>;
   /** Classes on the frame around the strip and its step buttons (a page hides the buttons while it freezes the strip). */
   frameClass?: string;
   children?: Child;
@@ -92,6 +113,7 @@ export function SnapStrip(props: {
         aria-label={props.label}
         tabindex={props.focusable ? 0 : undefined}
         data-snap-strip=""
+        {...props.attributes}
       >
         {props.children}
       </div>
@@ -101,6 +123,24 @@ export function SnapStrip(props: {
       <StepButton step={-1} label={props.label} />
       <StepButton step={1} label={props.label} />
     </div>
+  );
+}
+
+/**
+ * The inline module a page with strips renders once (the plan pages' is
+ * `LOOKS_INIT`, Styling's `initStyling`): a boosted navigation brings new
+ * strips and a `<script src>` module runs only once, so the page asks for
+ * the observer on every visit. A fixed string, nothing interpolated.
+ */
+export function SnapStripsInit() {
+  return (
+    <script
+      type="module"
+      dangerouslySetInnerHTML={{
+        __html: `import { initSnapStrips } from 'snap-strip';
+initSnapStrips(document);`,
+      }}
+    />
   );
 }
 
