@@ -113,8 +113,10 @@ test('swipe the looks, Love one, Change another with a note, Accept, see them gr
   await expect(page).toHaveURL(plan);
   await expect(page.locator('#plan-toast')).toContainText('Review saved');
 
-  // The plan page: the loved look leads the strip; the changed one waits
-  // on the agent, apart, with the note.
+  // The plan page's Outfits view (#312): the loved look leads the strip;
+  // the changed one waits on the agent, apart, with the note.
+  await page.getByRole('tab', { name: /Outfits/ }).click();
+  await expect(page).toHaveURL(`${plan}?view=outfits`);
   await expect(page.locator(`#look-${first}`)).toHaveAttribute(
     'data-reaction',
     'loved',
@@ -169,7 +171,7 @@ test('a fresh plan page: swipe to the second look and Love it', async ({
   });
 
   // The document's first page: nothing has loaded the strip's module yet.
-  await page.goto(plan);
+  await page.goto(`${plan}?view=outfits`);
   const strip = page.locator('#plan-looks [data-snap-strip]');
   const secondTile = page.locator(`#look-${second}`);
   await expect(page.locator(`#look-${first}`)).toHaveAttribute(

@@ -806,6 +806,10 @@
     "WHY": "Why",
     "WHY_PLACEHOLDER": "Why the wardrobe needs it",
     "HAVE_OF": "{have} of {need}",
+    "TO_BUY_PRICE": "To buy · {price}",
+    "VIEW_ITEMS": "Items",
+    "VIEW_OUTFITS": "Outfits",
+    "PROPOSED_ITEMS": "{count} proposed",
     "FULFILLED_BY": "In your closet",
     "NEEDS_REPAIR": "needs repair",
     "REASON_REPLACE_SOON": "Worn out, to replace: {names}",
@@ -889,6 +893,7 @@
     "looks": {
       "TITLE": "Looks",
       "REVIEW_HINT": "Outfits your agent put together from this plan and your closet. Swipe to a look and say what you think: Accept these saves it with the rest.",
+      "NONE": "No outfits yet. Your agent proposes them from this plan and your closet.",
       "PLAN_HINT": "Outfits your agent put together from this plan and your closet.",
       "STRIP_LABEL": "Looks your agent designed",
       "TO_BUY": "To buy",

@@ -144,11 +144,23 @@ function PlanCard(props: { gaps: PlanGaps; cover: PlanCover | undefined }) {
   const awaiting = awaitingReview(gaps);
   const items = tally.owned + tally.partly + tally.missing;
   const looks = cover?.looks ?? 0;
-  const counts = [
-    items === 1 ? t('plans.ITEMS_ONE') : t('plans.ITEMS', { count: items }),
-    looks === 1 ? t('plans.LOOKS_ONE') : t('plans.LOOKS', { count: looks }),
-    t('plans.looks.TO_BUY_COUNT', { count: tally.partly + tally.missing }),
-  ].join(' · ');
+  const proposed = gaps.review.proposed.length;
+  const looksText =
+    looks === 1 ? t('plans.LOOKS_ONE') : t('plans.LOOKS', { count: looks });
+  // Nothing accepted yet: the proposals are what it holds, and "0 items · 0 to buy" read like a bug.
+  const counts = (
+    items === 0 && proposed > 0
+      ? [t('plans.PROPOSED_ITEMS', { count: proposed }), looksText]
+      : [
+          items === 1
+            ? t('plans.ITEMS_ONE')
+            : t('plans.ITEMS', { count: items }),
+          looksText,
+          t('plans.looks.TO_BUY_COUNT', {
+            count: tally.partly + tally.missing,
+          }),
+        ]
+  ).join(' · ');
   return (
     <li class="card bg-base-100 shadow-sm relative">
       <div class="card-body p-3 gap-1">
