@@ -1,4 +1,5 @@
 import type { Child } from 'hono/jsx';
+import { t } from '../i18n';
 
 /**
  * The snap strip: a horizontal scroll-snap carousel whose centred item, with
@@ -7,7 +8,8 @@ import type { Child } from 'hono/jsx';
  * strip's centre line and writes that item's `data-snap-value` into the
  * strip's hidden input. A page needs no script of its own. See ./CLAUDE.md.
  *
- * Used by Styling's rows (src/web/styling/styling-row.tsx).
+ * Used by Styling's rows (src/web/styling/styling-row.tsx), the plan review,
+ * the Looks strips and the shopping list.
  */
 
 /**
@@ -48,7 +50,9 @@ export type SnapSize = keyof typeof SIZES;
  * `name` has no input: the observer still marks the centred item and writes
  * nothing.
  *
- * `class` adds to the strip (a page's own freezing or hooks); the strip is
+ * The strip, its input and the step buttons sit in one `relative` frame, so
+ * the buttons overlay the strip's edges. `class` adds to the strip (a page's
+ * own freezing or hooks); the strip is
  * `relative`, a flex row and `overscroll-x-contain`.
  */
 export function SnapStrip(props: {
@@ -72,7 +76,7 @@ export function SnapStrip(props: {
     props.class,
   ];
   return (
-    <>
+    <div class="snap-strip-frame relative">
       <div
         class={classes.filter(Boolean).join(' ')}
         role={props.listbox === false ? 'group' : 'listbox'}
@@ -84,7 +88,30 @@ export function SnapStrip(props: {
       {props.name !== undefined && (
         <input type="hidden" name={props.name} value={props.value ?? ''} />
       )}
-    </>
+      <StepButton step={-1} />
+      <StepButton step={1} />
+    </div>
+  );
+}
+
+/**
+ * Previous / next, for a mouse (#311): hidden except where the primary input
+ * hovers and is precise (the `fine` variant, views/assets/main.css), so one
+ * markup serves every device. Wired by public/js/snap-strip.js. They follow
+ * the hidden input in the frame, which keeps it the strip's
+ * `nextElementSibling`.
+ */
+function StepButton(props: { step: -1 | 1 }) {
+  const previous = props.step < 0;
+  return (
+    <button
+      type="button"
+      class={`btn btn-circle btn-sm absolute top-1/2 z-10 hidden -translate-y-1/2 fine:inline-flex ${previous ? 'left-1' : 'right-1'}`}
+      data-snap-step={props.step}
+      aria-label={t(previous ? 'strip.PREVIOUS' : 'strip.NEXT')}
+    >
+      {previous ? '‹' : '›'}
+    </button>
   );
 }
 

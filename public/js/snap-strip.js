@@ -18,6 +18,10 @@
  * - A tap on a neighbour centres it (and so chooses it) instead of opening
  *   it; a tap on the chosen item behaves as the item does (a boosted link
  *   opens).
+ * - A mouse has two more ways in (#311): the strip's previous/next buttons
+ *   (`data-snap-step`, CSS-hidden on touch devices) and the arrow keys while
+ *   focus is in a strip. Both centre the neighbour of the chosen item, so
+ *   the choice moves through the same observer and `snap-strip:choose`.
  * - A page with rules of its own listens on the document, nothing else:
  *   `snap-strip:choose` (cancelable, on the strip, detail.item) before an
  *   item is chosen, cancelled to keep the choice as it is; `snap-strip:watch`
@@ -123,6 +127,36 @@ document.addEventListener(
   },
   { capture: true },
 );
+
+/** Centres the item `step` places from the chosen one; a no-op at an end. */
+function stepStrip(strip, step) {
+  const items = [...strip.querySelectorAll('[data-snap-item]')];
+  const from = items.findIndex((item) => item.hasAttribute('data-selected'));
+  const target = items[from + step];
+  // Not inert: a locked Styling row's neighbours are, and stay unchosen.
+  if (from < 0 || !target || target.inert) return;
+  centre(strip, target, smooth());
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-snap-step]');
+  if (!button) return;
+  const strip = button.parentElement.querySelector('[data-snap-strip]');
+  if (strip) stepStrip(strip, Number(button.dataset.snapStep));
+});
+
+// Arrow keys while focus is in a strip (an item or the scroller itself). Not
+// in a field: its caret keys are its own.
+document.addEventListener('keydown', (event) => {
+  const step = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+  if (!step || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey)
+    return;
+  if (event.target.closest('input, textarea, select, [contenteditable]')) return;
+  const strip = event.target.closest('[data-snap-strip]');
+  if (!strip) return;
+  event.preventDefault();
+  stepStrip(strip, step);
+});
 
 // Strips swapped in after the page loaded, and history restores.
 document.addEventListener('htmx:load', (event) => {
