@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { file, garment } from '../../src/db/schema';
+import {
+  file,
+  garment,
+  personalAccessToken,
+  wardrobePlan,
+} from '../../src/db/schema';
 import { changeCandidates } from '../../src/web/plans/candidates';
 import { proposeLook, reactToLooks } from '../../src/web/plans/looks';
 import { addItems } from '../../src/web/plans/queries';
@@ -520,6 +525,30 @@ describe('plan covers and the next step (#302)', () => {
       expect(withStep.result.body).toContain('data-next-purchase');
       // The plan's items and the closet, in parallel.
       expect(withStep.statements).toHaveLength(bare.statements.length + 2);
+    });
+
+    it('skips the purchase matching while a draft card wins the slot', async () => {
+      const f = await fixture();
+      const mine = await look(f.ownerId, f.planId, 'Mine', [f.top, f.first]);
+      await love(f.ownerId, f.planId, mine);
+      const withStep = await recordStatements(() => get('/', f.cookie));
+      expect(withStep.result.body).toContain('data-next-purchase');
+      const bare = withStep.statements.length - 2;
+
+      // The token's owner is not checked by the join: it only names the agent.
+      await createAccessToken(t, { name: 'Muse' });
+      const [token] = await t.db.select().from(personalAccessToken);
+      await t.db
+        .update(wardrobePlan)
+        .set({ draftedByTokenId: token.id })
+        .where(eq(wardrobePlan.id, f.planId));
+      await addItems(t.db, f.ownerId, f.planId, [item('bags')], {
+        review: 'proposed',
+      });
+      const drafted = await recordStatements(() => get('/', f.cookie));
+      expect(unescapeHtml(drafted.result.body)).toContain('idea to review');
+      expect(drafted.result.body).not.toContain('data-next-purchase');
+      expect(drafted.statements).toHaveLength(bare);
     });
   });
 });

@@ -147,9 +147,11 @@ async function readDay(
     weather,
     worn: read.worn,
     drafts: read.drafts,
-    nextPurchase: read.ranked
-      ? await nextPurchaseOf(deps.db, ownerId, read.ranked)
-      : undefined,
+    // A waiting draft's card wins the slot: skip the matching statements.
+    nextPurchase:
+      read.ranked && !read.drafts?.length
+        ? await nextPurchaseOf(deps.db, ownerId, read.ranked)
+        : undefined,
   };
 }
 
