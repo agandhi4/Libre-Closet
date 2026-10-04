@@ -459,11 +459,12 @@ describe('Styling', () => {
         const res = await shuffle([['top', theirs, true]]);
         expect(res.statusCode).toBe(200);
         expect(res.body).not.toContain(`data-snap-value="${theirs}"`);
-        expect(rowsOf(res.body)).toContainEqual([
-          'top',
-          expect.any(Number),
-          false,
-        ]);
+        // The lock is dropped, not kept: the generator filled the rows
+        // from the wardrobe (which template it chose varies with the day's
+        // seed, so no role is asserted), none of them locked.
+        const rows = rowsOf(res.body);
+        expect(rows.some(([, id]) => typeof id === 'number')).toBe(true);
+        expect(rows.some(([, , locked]) => locked)).toBe(false);
 
         const lopsided = await t.inject({
           method: 'GET',

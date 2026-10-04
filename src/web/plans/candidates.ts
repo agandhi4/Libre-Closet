@@ -523,6 +523,48 @@ function lookCountSql(): SQL<LookCount> {
       and ${planLook.reaction} <> 'declined')`;
 }
 
+/** The product to buy next: the one that is in the most loved looks of the active plan. */
+export interface NextPurchase {
+  garmentId: number;
+  name: string | null;
+  category: string;
+  /** Loved looks holding it (lookCountSql's `loved`, never zero). */
+  loved: number;
+}
+
+/**
+ * Today's next step (#302) as a scalar subquery, null when no loved look of
+ * `ownerId`'s active plan holds a product still to buy: the candidate in the
+ * most loved looks (the counts the strips show, lookCountSql, so the card and
+ * the review never disagree), ties broken by the most looks of any kind, then
+ * the lowest garment id: the same answer on every read. A product that is a
+ * candidate of two items counts once. Read beside the day in todayFor's one
+ * statement, so the home screen's statement count stays.
+ */
+export function nextPurchaseSql(ownerId: number): SQL<NextPurchase | null> {
+  return sql<NextPurchase | null>`(
+    select json_build_object(
+      'garmentId', best.id, 'name', best.name, 'category', best.category,
+      'loved', (best.looks->>'loved')::int)
+    from (
+      select distinct on (${garment.id}) ${garment.id} as id, ${garment.name} as name,
+        ${garment.category} as category, ${lookCountSql()} as looks
+      from ${planItemCandidate}
+      inner join ${planItem} on ${planItem.id} = ${planItemCandidate.planItemId}
+      inner join ${wardrobePlan} on ${wardrobePlan.id} = ${planItem.planId}
+      inner join ${garment} on ${garment.id} = ${planItemCandidate.garmentId}
+      where ${wardrobePlan.ownerId} = ${ownerId}
+        and ${wardrobePlan.active}
+        and ${planItem.review} <> 'declined'
+        and ${garment.ownerId} = ${ownerId}
+        and ${onWishlist()}
+    ) best
+    where (best.looks->>'loved')::int > 0
+    order by (best.looks->>'loved')::int desc,
+      (best.looks->>'total')::int desc, best.id
+    limit 1)`;
+}
+
 /**
  * The wishlist candidates of `ownerId`'s items matching `which` (a plan's
  * items, or the items named): the agent's ranked ones first by rank, then

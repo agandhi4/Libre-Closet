@@ -14,8 +14,9 @@ import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
 import { OutfitCollage } from '../outfits/collage';
+import type { NextPurchase } from '../plans/candidates';
 import type { WaitingDraft } from '../plans/queries';
-import { reviewUrl } from '../plans/urls';
+import { reviewUrl, SHOPPING_PATH } from '../plans/urls';
 import { EntrySelfie } from '../selfies/views';
 import type { ViewContext } from '../view-context';
 import { UserWeatherLine } from '../weather/views';
@@ -66,9 +67,11 @@ export function TodayPage(props: {
         >
           {t('today.OFFLINE')}
         </p>
-        {model.drafts?.map((draft) => (
-          <DraftCard draft={draft} />
-        ))}
+        {model.drafts?.length ? (
+          model.drafts.map((draft) => <DraftCard draft={draft} />)
+        ) : model.nextPurchase ? (
+          <NextPurchaseCard purchase={model.nextPurchase} />
+        ) : null}
         {model.rows.map((row) =>
           row.kind === 'planned' ? (
             <PlannedRowView row={row} today={model.today} />
@@ -115,6 +118,35 @@ function DraftCard({ draft }: { draft: WaitingDraft }) {
           class="btn btn-primary btn-sm shrink-0"
         >
           {t('plans.REVIEW')}
+        </a>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * "Linen shirt completes 2 of your loved looks", with the way to the
+ * shopping strip. The next step once nothing is left to review (#302), so
+ * it never stands beside a DraftCard: one card, whichever step is first.
+ */
+function NextPurchaseCard({ purchase }: { purchase: NextPurchase }) {
+  const params = {
+    product: purchase.name ?? purchase.category,
+    count: purchase.loved,
+  };
+  return (
+    <article
+      class="card bg-base-100 shadow-sm"
+      data-next-purchase={String(purchase.garmentId)}
+    >
+      <div class="card-body p-3 flex-row items-center gap-3">
+        <p class="text-sm flex-1 min-w-0 break-words">
+          {purchase.loved === 1
+            ? t('today.NEXT_STEP_ONE', params)
+            : t('today.NEXT_STEP', params)}
+        </p>
+        <a href={SHOPPING_PATH} class="btn btn-primary btn-sm shrink-0">
+          {t('today.NEXT_STEP_VIEW')}
         </a>
       </div>
     </article>
