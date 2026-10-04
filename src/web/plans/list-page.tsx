@@ -3,6 +3,7 @@ import { imageUrl } from '../files/image-url';
 import { t } from '../i18n';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
+import { PageMain } from '../layout/page-main';
 import { EmptyState } from '../layout/parts';
 import { OutfitCollage } from '../outfits/collage';
 import type { SharedWardrobe } from '../sharing/access';
@@ -60,7 +61,7 @@ export function PlansPage(props: { ctx: ViewContext; model: PlansModel }) {
       />
       <div class="pt-16">
         <WardrobeTabs active="plans" viewOwner={undefined} />
-        <main class="p-4 pb-24 w-full sm:max-w-lg sm:mx-auto flex flex-col gap-5">
+        <PageMain width="wide" class="p-4 pb-24 flex flex-col gap-5">
           <p class="text-sm text-base-content/70">
             {t('plans.INTRO')}{' '}
             <a href={STYLE_PROFILE_PATH} class="link link-primary">
@@ -124,7 +125,7 @@ export function PlansPage(props: { ctx: ViewContext; model: PlansModel }) {
               ))}
             </PostForm>
           </section>
-        </main>
+        </PageMain>
       </div>
       <Dock ctx={ctx} />
     </Layout>

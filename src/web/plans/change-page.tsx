@@ -3,6 +3,7 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
+import { PageMain } from '../layout/page-main';
 import { CancelLink } from '../layout/parts';
 import type { ViewContext } from '../view-context';
 import { itemFacts, itemTitle } from './labels';
@@ -39,7 +40,7 @@ export function ChangeItemPage(props: {
   return (
     <Layout ctx={ctx} title={title}>
       <AppBar ctx={ctx} title={title} back={planUrl(plan.id)} formPage />
-      <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto flex flex-col gap-3">
+      <PageMain class="p-4 pt-20 pb-24 flex flex-col gap-3">
         <p class="text-sm text-muted truncate">{plan.name}</p>
         {facts.length > 0 && (
           <p class="text-xs text-muted">{facts.join(' · ')}</p>
@@ -51,7 +52,7 @@ export function ChangeItemPage(props: {
           note={model.note}
           error={model.error}
         />
-      </main>
+      </PageMain>
       <Dock ctx={ctx} />
     </Layout>
   );
@@ -81,7 +82,7 @@ export function ChangeLookPage(props: {
   return (
     <Layout ctx={ctx} title={title}>
       <AppBar ctx={ctx} title={title} back={planUrl(plan.id)} formPage />
-      <main class="p-4 pt-20 pb-24 w-full max-w-lg mx-auto flex flex-col gap-3">
+      <PageMain class="p-4 pt-20 pb-24 flex flex-col gap-3">
         <p class="text-sm text-muted truncate">{plan.name}</p>
         <div class="w-56 self-center flex flex-col gap-1">
           <LookFace look={look} eager />
@@ -92,7 +93,7 @@ export function ChangeLookPage(props: {
           note={model.note}
           error={model.error}
         />
-      </main>
+      </PageMain>
       <Dock ctx={ctx} />
     </Layout>
   );

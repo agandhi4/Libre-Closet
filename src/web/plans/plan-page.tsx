@@ -7,6 +7,7 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
+import { PageMain } from '../layout/page-main';
 import { HangerIcon, SavedToast, StripFlags } from '../layout/parts';
 import type { ViewContext } from '../view-context';
 import { categoryLabel, priceLabel } from '../wardrobe/garment';
@@ -187,7 +188,7 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
         back={PLANS_PATH}
         actions={<PlanMenu gaps={model.gaps} />}
       />
-      <main class="p-4 pt-20 pb-24 w-full sm:max-w-2xl lg:max-w-5xl mx-auto flex flex-col gap-4">
+      <PageMain width="wide" class="p-4 pt-20 pb-24 flex flex-col gap-4">
         <div class="flex flex-col gap-1">
           <PlanTally gaps={model.gaps} />
           {plan.draftedBy !== null && (
@@ -272,7 +273,7 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             {declined.length > 0 && <DeclinedList items={declined} />}
           </>
         )}
-      </main>
+      </PageMain>
       {model.toast && (
         <SavedToast
           id="plan-toast"
