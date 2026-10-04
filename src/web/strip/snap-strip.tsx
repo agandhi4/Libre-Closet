@@ -68,19 +68,22 @@ export function SnapStrip(props: {
    */
   listbox?: boolean;
   class?: string;
+  /** Classes on the frame around the strip and its step buttons (a page hides the buttons while it freezes the strip). */
+  frameClass?: string;
   children?: Child;
 }) {
   const classes = [
-    'snap-strip relative flex gap-3 overflow-x-auto snap-x snap-mandatory overscroll-x-contain',
+    'snap-strip relative flex rounded-box focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary gap-3 overflow-x-auto snap-x snap-mandatory overscroll-x-contain',
     SIZES[props.size].ends,
     props.class,
   ];
   return (
-    <div class="snap-strip-frame relative">
+    <div class={`snap-strip-frame relative ${props.frameClass ?? ''}`}>
       <div
         class={classes.filter(Boolean).join(' ')}
         role={props.listbox === false ? 'group' : 'listbox'}
         aria-label={props.label}
+        tabindex={0}
         data-snap-strip=""
       >
         {props.children}
@@ -110,7 +113,7 @@ function StepButton(props: { step: -1 | 1 }) {
       data-snap-step={props.step}
       aria-label={t(previous ? 'strip.PREVIOUS' : 'strip.NEXT')}
     >
-      {previous ? '‹' : '›'}
+      <span aria-hidden="true">{previous ? '‹' : '›'}</span>
     </button>
   );
 }

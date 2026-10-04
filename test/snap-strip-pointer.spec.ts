@@ -1,7 +1,9 @@
 import { expect, type Page, test } from '@playwright/test';
+import { proposeLook } from '../src/web/plans/looks';
 import { createGarment } from './support/e2e-data';
-import { signIn } from './support/e2e-session';
+import { SAME_ORIGIN, signIn } from './support/e2e-session';
 import { pageErrors } from './support/page-errors';
+import { userIdOf, withServerDb } from './support/server-db';
 
 /**
  * The shared snap strip with a mouse (#311): previous/next buttons and the
@@ -13,8 +15,9 @@ async function wardrobe(page: Page, user: string) {
   await signIn(page, user);
   const oldTee = await createGarment(page, 'Old tee', 'tops');
   const newTee = await createGarment(page, 'New tee', 'tops');
+  const midTee = await createGarment(page, 'Mid tee', 'tops');
   await page.goto('/styling');
-  return { oldTee, newTee };
+  return { oldTee, newTee, midTee };
 }
 
 test.describe('with a mouse', () => {
@@ -29,20 +32,31 @@ test.describe('with a mouse', () => {
     const value = tops.locator('input[name="garmentId"]');
     const previous = tops.getByRole('button', { name: 'Previous item' });
     const next = tops.getByRole('button', { name: 'Next item' });
-    await expect(value).toHaveValue(String(g.newTee));
+    await expect(value).toHaveValue(String(g.midTee));
 
     // Newest first: the next item is the older tee, then back.
     await next.click();
-    await expect(value).toHaveValue(String(g.oldTee));
-    await previous.click();
     await expect(value).toHaveValue(String(g.newTee));
+    await previous.click();
+    await expect(value).toHaveValue(String(g.midTee));
+
+    // Two quick presses go two items on: the second does not repeat the first.
+    await next.dblclick();
+    await expect(value).toHaveValue(String(g.oldTee));
+    await previous.dblclick();
+    await expect(value).toHaveValue(String(g.midTee));
 
     // Arrow keys with focus in the strip (an item).
     await tops.locator('.styling-strip [data-snap-item]').nth(1).focus();
     await page.keyboard.press('ArrowRight');
-    await expect(value).toHaveValue(String(g.oldTee));
-    await page.keyboard.press('ArrowLeft');
     await expect(value).toHaveValue(String(g.newTee));
+    await page.keyboard.press('ArrowLeft');
+    await expect(value).toHaveValue(String(g.midTee));
+
+    // A locked row does not move, and shows no buttons that would do nothing.
+    await tops.locator('label.swap').click();
+    await expect(next).toBeHidden();
+    await expect(previous).toBeHidden();
 
     // The first item is whole at 1440 px: nothing clips it.
     const strip = tops.locator('.styling-strip');
@@ -56,6 +70,55 @@ test.describe('with a mouse', () => {
 
     await page.screenshot({ path: 'test-results/311-styling-1440.png' });
     expect(errors).toEqual([]);
+  });
+});
+
+test.describe('a strip of tiles with no focusable parts', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('the strip itself takes focus and the arrow keys move it', async ({
+    page,
+  }) => {
+    const email = await signIn(page, 'strip-looks');
+    const created = await page.request.post('/wardrobe/plans', {
+      form: { name: 'Winter' },
+      headers: SAME_ORIGIN,
+    });
+    const plan = new URL(created.url()).pathname;
+    const shirt = await createGarment(page, 'Oxford shirt', 'tops');
+    const chinos = await createGarment(page, 'Chinos', 'bottoms');
+    const knit = await createGarment(page, 'Merino knit', 'tops');
+    const [first, second] = await withServerDb(async (db) => {
+      const ownerId = await userIdOf(db, email);
+      const look = async (name: string, garmentIds: number[]) =>
+        (
+          await proposeLook(
+            db,
+            ownerId,
+            Number(plan.split('/').pop()),
+            { name, occasion: null, note: null },
+            garmentIds,
+          )
+        ).id;
+      return [
+        await look('Office Tuesday', [shirt, chinos]),
+        await look('Friday knit', [knit, chinos]),
+      ];
+    });
+
+    await page.goto(plan);
+    const strip = page.locator('#plan-looks [data-snap-strip]');
+    await expect(strip).toHaveAttribute('tabindex', '0');
+    await strip.focus();
+    await expect(page.locator(`#look-${first}`)).toHaveAttribute(
+      'data-selected',
+      '',
+    );
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator(`#look-${second}`)).toHaveAttribute(
+      'data-selected',
+      '',
+    );
   });
 });
 

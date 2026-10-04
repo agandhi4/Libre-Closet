@@ -128,15 +128,34 @@ document.addEventListener(
   { capture: true },
 );
 
-/** Centres the item `step` places from the chosen one; a no-op at an end. */
+/**
+ * The item a step is already heading for, per strip, while its smooth scroll
+ * is in flight: `data-selected` only moves when the observer sees the item
+ * cross the centre, so a quick second press would otherwise repeat the first.
+ */
+const heading = new WeakMap();
+
+/** Centres the item `step` places from the one the strip holds or is heading for; a no-op at an end. */
 function stepStrip(strip, step) {
   const items = [...strip.querySelectorAll('[data-snap-item]')];
-  const from = items.findIndex((item) => item.hasAttribute('data-selected'));
+  const aimed = heading.get(strip);
+  const from = aimed?.isConnected
+    ? items.indexOf(aimed)
+    : items.findIndex((item) => item.hasAttribute('data-selected'));
   const target = items[from + step];
   // Not inert: a locked Styling row's neighbours are, and stay unchosen.
   if (from < 0 || !target || target.inert) return;
+  heading.set(strip, target);
   centre(strip, target, smooth());
 }
+
+// Whatever ended the scroll (arrival or a swipe taking over), the strip's own
+// state is the truth again.
+document.addEventListener(
+  'scrollend',
+  (event) => heading.delete(event.target),
+  { capture: true },
+);
 
 document.addEventListener('click', (event) => {
   const button = event.target.closest('[data-snap-step]');
