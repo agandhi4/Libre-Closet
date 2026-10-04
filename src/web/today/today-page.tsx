@@ -19,6 +19,7 @@ import type { WaitingDraft } from '../plans/queries';
 import { reviewUrl, SHOPPING_PATH } from '../plans/urls';
 import { EntrySelfie } from '../selfies/views';
 import type { ViewContext } from '../view-context';
+import { categoryLabel } from '../wardrobe/garment';
 import { UserWeatherLine } from '../weather/views';
 import { PlanWeekForm } from '../week-plan/views';
 import type { IdeasRow, PlannedRow, TodayModel } from './today';
@@ -131,8 +132,8 @@ function DraftCard({ draft }: { draft: WaitingDraft }) {
  */
 function NextPurchaseCard({ purchase }: { purchase: NextPurchase }) {
   const params = {
-    product: purchase.name ?? purchase.category,
-    count: purchase.loved,
+    product: purchase.name ?? categoryLabel(purchase.category),
+    count: purchase.completes,
   };
   return (
     <article
@@ -141,7 +142,7 @@ function NextPurchaseCard({ purchase }: { purchase: NextPurchase }) {
     >
       <div class="card-body p-3 flex-row items-center gap-3">
         <p class="text-sm flex-1 min-w-0 break-words">
-          {purchase.loved === 1
+          {purchase.completes === 1
             ? t('today.NEXT_STEP_ONE', params)
             : t('today.NEXT_STEP', params)}
         </p>

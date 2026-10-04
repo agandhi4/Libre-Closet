@@ -47,7 +47,7 @@ describe('plan covers and the next step (#302)', () => {
     ownerId: number,
     status: GarmentStatus,
     category: string,
-    name: string,
+    name: string | null,
     photo = true,
   ) => {
     let photoId: number | null = null;
@@ -232,6 +232,34 @@ describe('plan covers and the next step (#302)', () => {
       expect(after).toContain('6 items · 0 looks · 5 to buy');
     });
 
+    it('lets a photoless look not take a place: a later look with a photo still shows', async () => {
+      const o = await owner();
+      const planId = await o.plan('Order');
+      for (let i = 0; i < 5; i += 1) {
+        const bareTop = await newGarment(
+          o.ownerId,
+          'closet',
+          'tops',
+          `T${i}`,
+          false,
+        );
+        const bareBottom = await newGarment(
+          o.ownerId,
+          'closet',
+          'bottoms',
+          `B${i}`,
+          false,
+        );
+        await look(o.ownerId, planId, `Bare ${i}`, [bareTop, bareBottom]);
+      }
+      const top = await newGarment(o.ownerId, 'closet', 'tops', 'Oxford');
+      const bottom = await newGarment(o.ownerId, 'closet', 'bottoms', 'Chinos');
+      await look(o.ownerId, planId, 'Pretty', [top, bottom]);
+      const html = unescapeHtml((await get('/wardrobe/plans', o.cookie)).body);
+      expect([...html.matchAll(/data-cover-cell="look"/g)]).toHaveLength(1);
+      expect(html).toContain('6 looks');
+    });
+
     it('is one batched statement for every plan: the count does not grow with the plans', async () => {
       const o = await owner();
       const first = await o.plan('One');
@@ -365,6 +393,58 @@ describe('plan covers and the next step (#302)', () => {
       // Somebody else sees none of it.
       const stranger = await owner();
       expect(await today(stranger.cookie)).not.toContain('data-next-purchase');
+    });
+
+    it('counts a look only once the candidate is the one piece left to buy', async () => {
+      const f = await fixture();
+      // Two products and a closet top: buying either leaves the other missing.
+      const both = await look(f.ownerId, f.planId, 'Both', [
+        f.top,
+        f.first,
+        f.second,
+      ]);
+      await love(f.ownerId, f.planId, both);
+      expect(await today(f.cookie)).not.toContain('data-next-purchase');
+
+      // An archived piece is no owned piece either.
+      const archived = await newGarment(f.ownerId, 'closet', 'bags', 'Old');
+      const sparse = await look(f.ownerId, f.planId, 'Sparse', [
+        archived,
+        f.first,
+      ]);
+      await t.db
+        .update(garment)
+        .set({ status: 'archived' })
+        .where(eq(garment.id, archived));
+      await love(f.ownerId, f.planId, sparse);
+      expect(await today(f.cookie)).not.toContain('data-next-purchase');
+
+      // A look missing only the coat completes for the coat alone.
+      const one = await look(f.ownerId, f.planId, 'One', [f.top, f.second]);
+      await love(f.ownerId, f.planId, one);
+      let html = await today(f.cookie);
+      expect(html).toContain(`data-next-purchase="${f.second}"`);
+      expect(html).toContain('Wool coat completes your loved look');
+
+      // Two such looks: "completes 2".
+      const two = await look(f.ownerId, f.planId, 'Two', [f.bottom, f.second]);
+      await love(f.ownerId, f.planId, two);
+      html = await today(f.cookie);
+      expect(html).toContain('Wool coat completes 2 of your loved looks');
+    });
+
+    it('names an unnamed product by its category label', async () => {
+      const f = await fixture();
+      const [bare] = await candidatesFor(f.ownerId, f.planId, 'bags', ['x']);
+      await t.db
+        .update(garment)
+        .set({ name: null })
+        .where(eq(garment.id, bare));
+      const mine = await look(f.ownerId, f.planId, 'Bag', [f.top, bare]);
+      await love(f.ownerId, f.planId, mine);
+      const html = await today(f.cookie);
+      expect(html).toContain(`data-next-purchase="${bare}"`);
+      expect(html).toContain('Bags completes your loved look');
     });
 
     it('gives way to Review N ideas while anything is proposed: one card', async () => {

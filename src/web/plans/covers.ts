@@ -47,7 +47,8 @@ type CoverRow = {
 
 /**
  * `ownerId`'s plans' covers by plan id (every plan has an entry). A look
- * with no photo among its usable pieces is no cover. A candidate is its
+ * with no photo among its usable pieces is no cover (judged in the
+ * statement, before the per-plan limit, so it never takes a place). A candidate is its
  * item's first (the agent's rank, then the oldest link) among those with a
  * photo, only while on the wishlist and only of an accepted item (the "N items"
  * the card says counts the accepted ones; onWishlist is the shopping list's rule).
@@ -65,13 +66,22 @@ export async function planCovers(
           'name', top.name, 'slots', top.slots
         ) order by top.loved desc, top.id), '[]')
         from (
-          select ${planLook.id} as id, ${planLook.name} as name,
-            ${planLook.reaction} = 'loved' as loved,
-            ${lookSlotsSql(ownerId)} as slots
-          from ${planLook}
-          where ${planLook.planId} = ${wardrobePlan.id}
-            and ${planLook.reaction} <> 'declined'
-          order by (${planLook.reaction} = 'loved') desc, ${planLook.id}
+          select shown.id, shown.name, shown.loved, shown.slots
+          from (
+            select ${planLook.id} as id, ${planLook.name} as name,
+              ${planLook.reaction} = 'loved' as loved,
+              ${lookSlotsSql(ownerId)} as slots
+            from ${planLook}
+            where ${planLook.planId} = ${wardrobePlan.id}
+              and ${planLook.reaction} <> 'declined'
+          ) shown
+          where exists (
+            select from json_array_elements(shown.slots) piece
+            where piece->>'photo' is not null
+              and (piece->>'status' = 'closet'
+                or (piece->>'status' = 'wishlist'
+                  and (piece->>'candidate')::boolean)))
+          order by shown.loved desc, shown.id
           limit ${COVER_CELLS}
         ) top) as "topLooks",
       (select coalesce(json_agg(json_build_object(
@@ -98,19 +108,13 @@ export async function planCovers(
 }
 
 function coverOf(row: CoverRow): PlanCover {
-  const looks = row.topLooks
-    .map(
-      ({ name, slots }): CoverCell => ({
-        kind: 'look',
-        name,
-        slots: withSlots({}, slots).slots,
-      }),
-    )
-    .filter(
-      (cell) =>
-        cell.kind === 'look' &&
-        cell.slots.some((slot) => slot.state !== 'missing' && slot.photo),
-    );
+  const looks = row.topLooks.map(
+    ({ name, slots }): CoverCell => ({
+      kind: 'look',
+      name,
+      slots: withSlots({}, slots).slots,
+    }),
+  );
   const photos = row.candidates.map(
     ({ name, photo }): CoverCell => ({ kind: 'photo', name, photo }),
   );

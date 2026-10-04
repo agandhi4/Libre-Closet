@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Db, Queryable } from '../../db/client';
 import {
   file,
@@ -524,13 +525,38 @@ function lookCountSql(): SQL<LookCount> {
       and ${planLook.reaction} <> 'declined')`;
 }
 
-/** The product to buy next: the one that is in the most loved looks of the active plan. */
+/**
+ * How many loved looks of the candidate's own plan this candidate COMPLETES:
+ * every other slot is an owned closet garment of `ownerId`'s (no other
+ * wishlist product, no archived, deleted or empty slot), so buying it is
+ * the one thing left. A sibling of lookCountSql, correlated the same way
+ * on the joined plan_item and garment; Today's next step ranks by it (#302).
+ */
+function completedLookCountSql(ownerId: number): SQL<number> {
+  const other = alias(planLookSlot, 'other_slot');
+  const owned = alias(garment, 'owned_garment');
+  return sql<number>`(select count(*)::int from ${planLookSlot}
+    inner join ${planLook} on ${planLook.id} = ${planLookSlot.lookId}
+    where ${planLookSlot.garmentId} = ${garment.id}
+      and ${planLook.planId} = ${planItem.planId}
+      and ${planLook.reaction} = 'loved'
+      and not exists (
+        select from ${planLookSlot} ${other}
+        left join ${garment} ${owned} on ${owned.id} = ${other.garmentId}
+        where ${other.lookId} = ${planLook.id}
+          and ${other.position} <> ${planLookSlot.position}
+          and (${owned.id} is null
+            or ${owned.status} <> 'closet'
+            or ${owned.ownerId} <> ${ownerId})))`;
+}
+
+/** The product to buy next: the one that completes the most loved looks of the active plan. */
 export interface NextPurchase {
   garmentId: number;
   name: string | null;
   category: string;
-  /** Loved looks holding it (lookCountSql's `loved`, never zero). */
-  loved: number;
+  /** Loved looks it completes (completedLookCountSql, never zero). */
+  completes: number;
 }
 
 /** A loved-look product of the active plan, ranked, with the accepted items it is a candidate of. */
@@ -542,9 +568,9 @@ export interface RankedPurchase extends NextPurchase {
 /**
  * The first step of Today's next step (#302) as a scalar subquery: every
  * wishlist product of `ownerId`'s active plan that is a candidate of an
- * ACCEPTED item and sits in a loved look, best first: the most loved looks
- * (the counts the strips show, lookCountSql, so the card and the review
- * never disagree), then the most looks of any kind, then the lowest garment
+ * ACCEPTED item and completes a loved look (completedLookCountSql), best
+ * first: the most completed looks, then the most looks of any kind
+ * (lookCountSql, the strips' count), then the lowest garment
  * id, the same answer on every read. A product that is a candidate of two
  * items is one entry. Read beside the day in todayFor's one statement, so
  * the home screen's statement count stays; nextPurchaseOf finishes it.
@@ -553,15 +579,16 @@ export function rankedPurchasesSql(ownerId: number): SQL<RankedPurchase[]> {
   return sql<RankedPurchase[]>`(
     select coalesce(json_agg(json_build_object(
       'garmentId', best.id, 'name', best.name, 'category', best.category,
-      'loved', (best.looks->>'loved')::int, 'planId', best.plan_id,
+      'completes', best.completes, 'planId', best.plan_id,
       'itemIds', best.item_ids)
-      order by (best.looks->>'loved')::int desc,
+      order by best.completes desc,
         (best.looks->>'total')::int desc, best.id), '[]')
     from (
       select ${garment.id} as id, ${garment.name} as name,
         ${garment.category} as category, ${planItem.planId} as plan_id,
         json_agg(${planItem.id} order by ${planItem.id}) as item_ids,
-        ${lookCountSql()} as looks
+        ${lookCountSql()} as looks,
+        ${completedLookCountSql(ownerId)} as completes
       from ${planItemCandidate}
       inner join ${planItem} on ${planItem.id} = ${planItemCandidate.planItemId}
       inner join ${wardrobePlan} on ${wardrobePlan.id} = ${planItem.planId}
@@ -573,7 +600,7 @@ export function rankedPurchasesSql(ownerId: number): SQL<RankedPurchase[]> {
         and ${onWishlist()}
       group by ${garment.id}, ${planItem.planId}
     ) best
-    where (best.looks->>'loved')::int > 0)`;
+    where best.completes > 0)`;
 }
 
 /**
@@ -600,7 +627,7 @@ export async function nextPurchaseOf(
     garmentId: next.garmentId,
     name: next.name,
     category: next.category,
-    loved: next.loved,
+    completes: next.completes,
   };
 }
 
