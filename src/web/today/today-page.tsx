@@ -75,15 +75,17 @@ export function TodayPage(props: {
         ) : model.nextPurchase ? (
           <NextPurchaseCard purchase={model.nextPurchase} />
         ) : null}
-        <div class={PAIR_GRID}>
-          {model.rows.map((row) =>
-            row.kind === 'planned' ? (
-              <PlannedRowView row={row} today={model.today} />
-            ) : (
-              <IdeasRowView row={row} today={model.today} />
-            ),
-          )}
-        </div>
+        {model.rows.length > 0 && (
+          <div class={PAIR_GRID}>
+            {model.rows.map((row) =>
+              row.kind === 'planned' ? (
+                <PlannedRowView row={row} today={model.today} />
+              ) : (
+                <IdeasRowView row={row} today={model.today} />
+              ),
+            )}
+          </div>
+        )}
         <div class="flex flex-wrap items-center gap-2">
           <a
             href={`/calendar/plan?for=day:${model.today}`}
@@ -266,7 +268,7 @@ export function IdeasRowView(props: { row: IdeasRow; today: IsoDate }) {
   const { row, today } = props;
   return (
     <section
-      class="flex flex-col gap-2 lg:col-span-full"
+      class="group/ideas flex flex-col gap-2 lg:only:col-span-full"
       data-today-row="ideas"
       data-occasion={row.occasion}
       data-page={row.page}
@@ -330,7 +332,7 @@ function IdeaCard(props: {
   const { idea } = props;
   return (
     <article
-      class="snap-center shrink-0 w-[85%] lg:w-[calc(50%-0.375rem)] card bg-base-100 shadow-sm"
+      class="snap-center shrink-0 w-[85%] lg:group-only/ideas:w-[calc(50%-0.375rem)] card bg-base-100 shadow-sm"
       data-idea={idea.garments.map((g) => g.id).join(',')}
     >
       <div class="card-body p-3 gap-3">

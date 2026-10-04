@@ -9,8 +9,9 @@
  *  - `CARD_COLUMNS`: blocks of mixed height (Insights' cards) flowing down
  *    CSS columns, so a short card leaves no hole: one on a phone (stacked
  *    with the same 1rem gap), two at `lg`, three at `xl`.
- *  - `PAIR_GRID`: two side by side from `lg` (Today's planned rows; its ideas
- *    row spans both and shows two ideas at a time).
+ *  - `PAIR_GRID`: two side by side from `lg` (Today's rows: the planned
+ *    suggestion beside the ideas strip; a lone ideas row spans both and
+ *    shows two ideas at a time).
  */
 export const GALLERY_GRID =
   'grid grid-cols-3 gap-x-3 gap-y-4 sm:grid-cols-4 lg:grid-cols-6';
