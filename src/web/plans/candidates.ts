@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
-import type { Queryable } from '../../db/client';
+import type { Db, Queryable } from '../../db/client';
 import {
   file,
   garment,
@@ -23,6 +23,7 @@ import type { SignablePhotoRef } from '../files/image-url';
 import { photoRefJson } from '../files/queries';
 import { t } from '../i18n';
 import { onWishlist } from '../wardrobe/status';
+import { itemsToBuy } from './gaps';
 import { itemNotFound } from './validation';
 
 /**
@@ -532,37 +533,75 @@ export interface NextPurchase {
   loved: number;
 }
 
+/** A loved-look product of the active plan, ranked, with the accepted items it is a candidate of. */
+export interface RankedPurchase extends NextPurchase {
+  planId: number;
+  itemIds: number[];
+}
+
 /**
- * Today's next step (#302) as a scalar subquery, null when no loved look of
- * `ownerId`'s active plan holds a product still to buy: the candidate in the
- * most loved looks (the counts the strips show, lookCountSql, so the card and
- * the review never disagree), ties broken by the most looks of any kind, then
- * the lowest garment id: the same answer on every read. A product that is a
- * candidate of two items counts once. Read beside the day in todayFor's one
- * statement, so the home screen's statement count stays.
+ * The first step of Today's next step (#302) as a scalar subquery: every
+ * wishlist product of `ownerId`'s active plan that is a candidate of an
+ * ACCEPTED item and sits in a loved look, best first: the most loved looks
+ * (the counts the strips show, lookCountSql, so the card and the review
+ * never disagree), then the most looks of any kind, then the lowest garment
+ * id, the same answer on every read. A product that is a candidate of two
+ * items is one entry. Read beside the day in todayFor's one statement, so
+ * the home screen's statement count stays; nextPurchaseOf finishes it.
  */
-export function nextPurchaseSql(ownerId: number): SQL<NextPurchase | null> {
-  return sql<NextPurchase | null>`(
-    select json_build_object(
+export function rankedPurchasesSql(ownerId: number): SQL<RankedPurchase[]> {
+  return sql<RankedPurchase[]>`(
+    select coalesce(json_agg(json_build_object(
       'garmentId', best.id, 'name', best.name, 'category', best.category,
-      'loved', (best.looks->>'loved')::int)
+      'loved', (best.looks->>'loved')::int, 'planId', best.plan_id,
+      'itemIds', best.item_ids)
+      order by (best.looks->>'loved')::int desc,
+        (best.looks->>'total')::int desc, best.id), '[]')
     from (
-      select distinct on (${garment.id}) ${garment.id} as id, ${garment.name} as name,
-        ${garment.category} as category, ${lookCountSql()} as looks
+      select ${garment.id} as id, ${garment.name} as name,
+        ${garment.category} as category, ${planItem.planId} as plan_id,
+        json_agg(${planItem.id} order by ${planItem.id}) as item_ids,
+        ${lookCountSql()} as looks
       from ${planItemCandidate}
       inner join ${planItem} on ${planItem.id} = ${planItemCandidate.planItemId}
       inner join ${wardrobePlan} on ${wardrobePlan.id} = ${planItem.planId}
       inner join ${garment} on ${garment.id} = ${planItemCandidate.garmentId}
       where ${wardrobePlan.ownerId} = ${ownerId}
         and ${wardrobePlan.active}
-        and ${planItem.review} <> 'declined'
+        and ${planItem.review} = 'accepted'
         and ${garment.ownerId} = ${ownerId}
         and ${onWishlist()}
+      group by ${garment.id}, ${planItem.planId}
     ) best
-    where (best.looks->>'loved')::int > 0
-    order by (best.looks->>'loved')::int desc,
-      (best.looks->>'total')::int desc, best.id
-    limit 1)`;
+    where (best.looks->>'loved')::int > 0)`;
+}
+
+/**
+ * Today's next step: the first of `ranked` that is a candidate of an item
+ * the shopping strip lists, an accepted item still missing or partly owned
+ * (planShoppingList's rule). Whether the closet already covers an item is
+ * matchPlan's greedy assignment over the whole closet, which SQL cannot
+ * express, so with something ranked this reads the plan's items and the
+ * closet once more (itemsToBuy, two statements in parallel); with nothing
+ * ranked it reads nothing.
+ */
+export async function nextPurchaseOf(
+  db: Db,
+  ownerId: number,
+  ranked: readonly RankedPurchase[],
+): Promise<NextPurchase | null> {
+  if (ranked.length === 0) return null;
+  const toBuy = await itemsToBuy(db, ranked[0].planId, ownerId);
+  const next = ranked.find((purchase) =>
+    purchase.itemIds.some((id) => toBuy.has(id)),
+  );
+  if (!next) return null;
+  return {
+    garmentId: next.garmentId,
+    name: next.name,
+    category: next.category,
+    loved: next.loved,
+  };
 }
 
 /**

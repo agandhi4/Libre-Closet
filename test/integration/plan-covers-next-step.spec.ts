@@ -162,6 +162,25 @@ describe('plan covers and the next step (#302)', () => {
       ]);
       await love(o.ownerId, planId, dressy);
       expect(plain).toBeLessThan(dressy);
+      // A proposed item is not counted in "N items", so its candidate is no cover photo either.
+      const [proposed] = (await addItems(
+        t.db,
+        o.ownerId,
+        planId,
+        [item('bags')],
+        {
+          review: 'proposed',
+        },
+      ))!;
+      const satchel = await newGarment(
+        o.ownerId,
+        'wishlist',
+        'bags',
+        'Satchel',
+      );
+      await changeCandidates(t.db, o.ownerId, {
+        add: { itemIds: [proposed], garmentIds: [satchel] },
+      });
 
       const res = await get('/wardrobe/plans', o.cookie);
       expect(res.statusCode).toBe(200);
@@ -283,7 +302,7 @@ describe('plan covers and the next step (#302)', () => {
 
     it('picks the product in the most loved looks, then the most looks, then the lowest id', async () => {
       const f = await fixture();
-      const shoes = await newGarment(f.ownerId, 'closet', 'footwear', 'Boots');
+      const shoes = await newGarment(f.ownerId, 'closet', 'bags', 'Tote');
       const a1 = await look(f.ownerId, f.planId, 'A1', [f.top, f.first]);
       const b1 = await look(f.ownerId, f.planId, 'B1', [f.top, f.second]);
       await love(f.ownerId, f.planId, a1);
@@ -372,15 +391,55 @@ describe('plan covers and the next step (#302)', () => {
       expect(html).not.toContain('data-next-purchase');
     });
 
-    it('costs no statement of its own', async () => {
+    it('only offers what the shopping strip lists: accepted items, missing or partly owned', async () => {
+      const f = await fixture();
+      const proposedItem = (await addItems(
+        t.db,
+        f.ownerId,
+        f.planId,
+        [item('bags')],
+        {
+          review: 'proposed',
+        },
+      ))![0];
+      const bag = await newGarment(f.ownerId, 'wishlist', 'bags', 'Satchel');
+      await changeCandidates(t.db, f.ownerId, {
+        add: { itemIds: [proposedItem], garmentIds: [bag] },
+      });
+      const satchel = await look(f.ownerId, f.planId, 'Bag', [f.top, bag]);
+      await love(f.ownerId, f.planId, satchel);
+      // A proposed item is not on the strip: no card.
+      expect(await today(f.cookie)).not.toContain('data-next-purchase');
+
+      // An accepted item the closet already covers is not either...
+      await newGarment(f.ownerId, 'closet', 'footwear', 'Owned shoes');
+      const loafers = await look(f.ownerId, f.planId, 'Shoes', [
+        f.top,
+        f.first,
+      ]);
+      await love(f.ownerId, f.planId, loafers);
+      expect(await today(f.cookie)).not.toContain('data-next-purchase');
+
+      // ...while a still-missing one is.
+      const mine = await look(f.ownerId, f.planId, 'Coat', [f.top, f.second]);
+      await love(f.ownerId, f.planId, mine);
+      expect(await today(f.cookie)).toContain(
+        `data-next-purchase="${f.second}"`,
+      );
+    });
+
+    it('costs only the closet read of its own, and nothing while nothing is loved', async () => {
       const f = await fixture();
       const bare = await recordStatements(() => get('/', f.cookie));
       const mine = await look(f.ownerId, f.planId, 'Mine', [f.top, f.first]);
+      // Proposed, nothing loved: nothing ranked, nothing more read.
+      const quiet = await recordStatements(() => get('/', f.cookie));
+      expect(quiet.statements).toHaveLength(bare.statements.length);
       await love(f.ownerId, f.planId, mine);
       const withStep = await recordStatements(() => get('/', f.cookie));
       expect(withStep.result.body).toContain('data-next-purchase');
-      expect(withStep.statements).toHaveLength(bare.statements.length);
-      expect(withStep.statements).toHaveLength(3);
+      // The plan's items and the closet, in parallel.
+      expect(withStep.statements).toHaveLength(bare.statements.length + 2);
     });
   });
 });

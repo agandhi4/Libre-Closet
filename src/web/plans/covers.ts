@@ -49,8 +49,8 @@ type CoverRow = {
  * `ownerId`'s plans' covers by plan id (every plan has an entry). A look
  * with no photo among its usable pieces is no cover. A candidate is its
  * item's first (the agent's rank, then the oldest link) among those with a
- * photo, only while on the wishlist and never of a declined item (the
- * shopping list's rule, onWishlist).
+ * photo, only while on the wishlist and only of an accepted item (the "N items"
+ * the card says counts the accepted ones; onWishlist is the shopping list's rule).
  */
 export async function planCovers(
   db: Db,
@@ -85,7 +85,7 @@ export async function planCovers(
           inner join ${garment} on ${garment.id} = ${planItemCandidate.garmentId}
           inner join ${file} on ${file.id} = ${garment.photoId}
           where ${planItem.planId} = ${wardrobePlan.id}
-            and ${planItem.review} <> 'declined'
+            and ${planItem.review} = 'accepted'
             and ${garment.ownerId} = ${ownerId}
             and ${onWishlist()}
           order by ${planItem.id}, ${planItemCandidate.rank} asc nulls last,
