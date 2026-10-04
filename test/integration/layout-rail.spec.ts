@@ -43,6 +43,7 @@ describe('the left rail', () => {
       const { body, statusCode } = await get(url);
       expect(statusCode).toBe(200);
       expect(body.match(/class="dock"/g)).toHaveLength(1);
+      expect(body).toMatch(/<nav class="dock" aria-label="Main">/);
       const dock = body.slice(body.indexOf('class="dock"'));
       const hrefs = [...dock.matchAll(/<a [^>]*href="([^"]+)"/g)]
         .slice(0, DOCK_TABS.length)

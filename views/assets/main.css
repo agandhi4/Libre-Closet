@@ -203,7 +203,9 @@ and response bandwidth/latency. */
   .dock {
     top: 0;
     right: auto;
-    width: var(--rail-width);
+    /* A literal, not --rail-width: a browser without :has keeps that at 0 and
+       would lose the navigation, not just the offset. */
+    width: 5rem;
     height: auto;
     flex-direction: column;
     justify-content: flex-start;

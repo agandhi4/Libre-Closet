@@ -363,7 +363,7 @@ function AddRow({ model }: { model: StylingModel }) {
 function ActionBar({ model }: { model: StylingModel }) {
   return (
     <div class="fixed left-rail right-0 bottom-dock z-20 bg-base-100 border-t border-base-300">
-      <div class="flex items-center gap-2 px-4 py-2 sm:max-w-lg sm:mx-auto">
+      <div class="flex items-center gap-2 px-4 py-2 max-w-page-narrow mx-auto">
         <button
           type="button"
           class="btn btn-outline"

@@ -15,7 +15,7 @@ import { DOCK_TABS, type Section, SECTION_HOME, sectionOf } from './sections';
 export function Dock({ ctx }: { ctx: ViewContext }) {
   const active = sectionOf(ctx.path);
   return (
-    <div class="dock">
+    <nav class="dock" aria-label={t('NAV_MAIN')}>
       {DOCK_TABS.map((section) => (
         <DockLink
           active={active}
@@ -25,7 +25,7 @@ export function Dock({ ctx }: { ctx: ViewContext }) {
           {TABS[section].icon}
         </DockLink>
       ))}
-    </div>
+    </nav>
   );
 }
 
