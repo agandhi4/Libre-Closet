@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { proposeLook } from '../src/web/plans/looks';
+import { proposeLook, reactToLooks } from '../src/web/plans/looks';
 import { createGarment } from './support/e2e-data';
 import { SAME_ORIGIN, signIn } from './support/e2e-session';
 import { pageErrors } from './support/page-errors';
@@ -151,6 +151,63 @@ test.describe('a strip of tiles with no focusable parts', () => {
       page.locator(`#look-${first}`).getByRole('button', { name: 'Love it' }),
     ).toBeFocused();
   });
+});
+
+test('a step keeps focus on the same action, never another', async ({
+  page,
+}) => {
+  test.skip(
+    test.info().project.use.isMobile === true,
+    'no step buttons on a coarse pointer',
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const email = await signIn(page, 'strip-actions');
+  const created = await page.request.post('/wardrobe/plans', {
+    form: { name: 'Winter' },
+    headers: SAME_ORIGIN,
+  });
+  const plan = new URL(created.url()).pathname;
+  const planId = Number(plan.split('/').pop());
+  const shirt = await createGarment(page, 'Oxford shirt', 'tops');
+  const chinos = await createGarment(page, 'Chinos', 'bottoms');
+  const knit = await createGarment(page, 'Merino knit', 'tops');
+  const [loved, proposed] = await withServerDb(async (db) => {
+    const ownerId = await userIdOf(db, email);
+    const look = async (name: string, garmentIds: number[]) =>
+      (
+        await proposeLook(
+          db,
+          ownerId,
+          planId,
+          { name, occasion: null, note: null },
+          garmentIds,
+        )
+      ).id;
+    const first = await look('Office Tuesday', [shirt, chinos]);
+    const second = await look('Friday knit', [knit, chinos]);
+    await reactToLooks(db, ownerId, planId, 'love', [{ lookId: first }]);
+    return [first, second];
+  });
+
+  await page.goto(plan);
+  // The loved look has no Love button, so Decline sits one place earlier.
+  await expect(
+    page.locator(`#look-${loved}`).getByRole('button', { name: 'Love it' }),
+  ).toHaveCount(0);
+  await page
+    .locator(`#look-${loved}`)
+    .getByRole('button', { name: 'Not for me' })
+    .focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator(`#look-${proposed}`)).toHaveAttribute(
+    'data-selected',
+    '',
+  );
+  await expect(page.locator(':focus')).toHaveAttribute(
+    'data-strip-action',
+    'decline',
+  );
+  await expect(page.locator(`#look-${proposed} :focus`)).toHaveCount(1);
 });
 
 test('a strip of one item has both step buttons disabled', async ({ page }) => {
