@@ -14,7 +14,6 @@ import type { Queryable } from '../../db/client';
 import {
   file,
   garment,
-  personalAccessToken,
   planItem,
   planItemCandidate,
   planLook,
@@ -42,6 +41,7 @@ import {
   OUTFIT_GARMENTS_MAX,
   OUTFIT_NOTES_MAX,
 } from '../outfits/queries';
+import { draftedBySql } from './queries';
 import { planNotFound } from './validation';
 
 /**
@@ -904,6 +904,9 @@ export function looksOfShownPlan(
         eq(wardrobePlan.ownerId, ownerId),
         or(
           wardrobePlan.active,
+          // At most one plan is active per owner (wardrobe_plan_owner_id_active_unique),
+          // so the `not exists` is what makes an active plan win, even one with
+          // no looks, over any draft.
           sql`(${wardrobePlan.draftedByTokenId} is not null
             and exists (select from ${planLook} where ${planLook.planId} = ${wardrobePlan.id})
             and not exists (select from ${wardrobePlan} as owner_active where owner_active.owner_id = ${ownerId} and owner_active.active))`,
@@ -936,7 +939,7 @@ async function readLooks(
       // An active plan is not shown as a draft, whoever drafted it first.
       draftedBy: sql<
         string | null
-      >`case when ${wardrobePlan.active} then null else (select ${personalAccessToken.name} from ${personalAccessToken} where ${personalAccessToken.id} = ${wardrobePlan.draftedByTokenId}) end`,
+      >`case when ${wardrobePlan.active} then null else ${draftedBySql} end`,
       position: planLookSlot.position,
       category: planLookSlot.category,
       garmentId: garment.id,
