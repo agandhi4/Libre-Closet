@@ -23,7 +23,7 @@ import { HttpError } from '../errors';
 import type { SignablePhotoRef } from '../files/image-url';
 import { photoRefJson } from '../files/queries';
 import { t } from '../i18n';
-import { onWishlist } from '../wardrobe/status';
+import { onWishlist, wanted } from '../wardrobe/status';
 import { itemsToBuy } from './gaps';
 import { itemNotFound } from './validation';
 
@@ -38,9 +38,11 @@ import { itemNotFound } from './validation';
  *
  * Private like plans: every read and write names the signed-in owner, and
  * a pair counts only when the item's plan and the garment are both theirs.
- * A candidate is read only while it is on the wishlist (onWishlist): once
- * "Bought it" moves it into the closet its link stops mattering, and the
- * closet side is matchPlan's, derived, never this table.
+ * A candidate is read only while it is still wanted (wanted: on the
+ * wishlist and not set aside as a suggestion, #333): once "Bought it" moves
+ * it into the closet its link stops mattering, and the closet side is
+ * matchPlan's, derived, never this table. The cap counts every candidate
+ * still on the wishlist (onWishlist), set aside or not.
  */
 
 /** Every pairing of these items with these garments. */
@@ -599,7 +601,7 @@ export function rankedPurchasesSql(ownerId: number): SQL<RankedPurchase[]> {
         and ${wardrobePlan.active}
         and ${planItem.review} = 'accepted'
         and ${garment.ownerId} = ${ownerId}
-        and ${onWishlist()}
+        and ${wanted()}
       group by ${garment.id}, ${planItem.planId}
     ) best
     where best.completes > 0)`;
@@ -671,7 +673,7 @@ function candidateRows(db: Queryable, ownerId: number, which: SQL) {
         eq(wardrobePlan.ownerId, ownerId),
         // The writer's rule, kept on read: never another wardrobe's garment.
         eq(garment.ownerId, ownerId),
-        onWishlist(),
+        wanted(),
       ),
     )
     .orderBy(
@@ -776,7 +778,7 @@ export async function candidaciesOf(
         inArray(planItemCandidate.garmentId, garmentIds),
         eq(wardrobePlan.ownerId, ownerId),
         eq(garment.ownerId, ownerId),
-        onWishlist(),
+        wanted(),
       ),
     )
     .orderBy(
