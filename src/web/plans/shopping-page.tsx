@@ -193,7 +193,7 @@ function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
       </div>
       {entry.candidates.length > 0 && (
         <ul
-          class={`${CANDIDATE_GRID} px-3`}
+          class={`${CANDIDATE_GRID} px-3 pt-2`}
           aria-label={t('shopping.STRIP_LABEL', { item: itemTitle(item) })}
         >
           {entry.candidates.map(({ candidate, budget }) => (
