@@ -12,6 +12,9 @@
  *  - `CANDIDATE_GRID`: large product photos with their price and actions
  *    under them (the shopping list's candidates): two on a phone, four at
  *    `lg`.
+ *  - `OUTFIT_GRID`: saved-outfit tiles (collage and name); two on a phone,
+ *    three at `sm`, four at `lg`, five at `xl` (about 215 px at `lg`,
+ *    235 px at 1440).
  *  - `PAIR_GRID`: two side by side from `lg` (Today's rows: the planned
  *    suggestion beside the ideas strip; a lone ideas row spans both and
  *    shows two ideas at a time).
@@ -23,3 +26,5 @@ export const CARD_COLUMNS =
 export const PAIR_GRID = 'grid grid-cols-1 items-start gap-4 lg:grid-cols-2';
 export const CANDIDATE_GRID =
   'grid grid-cols-2 items-start gap-x-3 gap-y-4 lg:grid-cols-4';
+export const OUTFIT_GRID =
+  'grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5';
