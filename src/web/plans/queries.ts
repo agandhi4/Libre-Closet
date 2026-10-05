@@ -680,11 +680,27 @@ export async function updateItem(
 export interface ReviewMove {
   itemId: number;
   note?: string | null;
+  /**
+   * When the agent last wrote the item as the owner's page drew it, in
+   * epoch milliseconds (null: never; `agentChangedAtOf`). A move is stale
+   * when the agent wrote since. Left out, the move is not guarded (the
+   * review page's post, which judges by its own `shown`).
+   */
+  asOf?: number | null;
+}
+
+/** An item's `agent_changed_at` as a move's `asOf` carries it. */
+export function agentChangedAtOf(item: {
+  agentChangedAt: Date | null;
+}): number | null {
+  return item.agentChangedAt?.getTime() ?? null;
 }
 
 export interface ReviewMoves {
   /** The items moved, in id order. */
   moved: number[];
+  /** Items the agent rewrote since the owner's page drew them (`asOf`): left as they are. */
+  stale: number[];
   /** Items of the plan whose review does not take the event, with where they stay. */
   refused: { itemId: number; review: PlanItemReview }[];
 }
@@ -707,10 +723,14 @@ export async function reviewItems(
   event: PlanItemReviewEvent,
   moves: readonly ReviewMove[],
 ): Promise<ReviewMoves> {
-  if (moves.length === 0) return { moved: [], refused: [] };
+  if (moves.length === 0) return { moved: [], stale: [], refused: [] };
   return ownerTransaction(db, ownerId, 'reviewItems', async (tx) => {
     const rows = await tx
-      .select({ id: planItem.id, review: planItem.review })
+      .select({
+        id: planItem.id,
+        review: planItem.review,
+        agentChangedAt: planItem.agentChangedAt,
+      })
       .from(planItem)
       .where(
         and(
@@ -722,11 +742,18 @@ export async function reviewItems(
         ),
       )
       .orderBy(asc(planItem.id));
+    const asOf = new Map(moves.map((move) => [move.itemId, move.asOf]));
     const moved: number[] = [];
+    const stale: number[] = [];
     const refused: ReviewMoves['refused'] = [];
     let to: PlanItemReview | undefined;
     let effect: OwnerNoteEffect = 'keep';
     for (const row of rows) {
+      const seen = asOf.get(row.id);
+      if (seen !== undefined && seen !== agentChangedAtOf(row)) {
+        stale.push(row.id);
+        continue;
+      }
       const move = planItemReviewTransition(row.review, event);
       if (move.ok) {
         moved.push(row.id);
@@ -737,7 +764,7 @@ export async function reviewItems(
         refused.push({ itemId: row.id, review: move.review });
       }
     }
-    if (to === undefined) return { moved, refused };
+    if (to === undefined) return { moved, stale, refused };
     const notes = new Map(
       moves.map((move) => [move.itemId, move.note ?? null]),
     );
@@ -748,7 +775,7 @@ export async function reviewItems(
         ...ownerNoteSet(effect, moved, notes),
       })
       .where(inArray(planItem.id, moved));
-    return { moved, refused };
+    return { moved, stale, refused };
   });
 }
 

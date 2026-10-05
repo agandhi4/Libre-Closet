@@ -6,6 +6,7 @@ import { categoryRole } from '../../wardrobe/properties';
 import { type BudgetFit, rankCandidates } from '../../wardrobe/shopping';
 import { ownerTransaction } from '../auth/queries';
 import type { StoredPhoto } from '../files/image-variant';
+import type { Photos } from '../files/photos';
 import { deleteGarment } from '../wardrobe/queries';
 import type { WardrobeDeps } from '../wardrobe/writes';
 import {
@@ -106,6 +107,16 @@ export interface ReviewChoice {
   /** The candidates ticked "Not this one", with each reason (null: none). */
   rejected: Map<number, string | null>;
 }
+
+/**
+ * What the release rule reads of a decision (releasedCandidates): the pick,
+ * the candidates ticked "Not this one", and the candidates the choice saw
+ * (undefined: every current one, as a per-item decision from the sheet
+ * judges by what the item holds now).
+ */
+export type ReleaseChoice = Pick<ReviewChoice, 'pick' | 'rejected'> & {
+  offered?: readonly number[];
+};
 
 /** Why a post the page could have sent is still refused, per item or look: the page again, 400. */
 export type ReviewError = 'note-required';
@@ -468,17 +479,7 @@ export async function applyReview(
           await reviewItems(tx, ownerId, planId, event, moves)
         ).moved;
       }
-      await recordRejections(tx, release.rejected);
-      for (const set of release.unlink) {
-        await changeCandidates(tx, ownerId, { remove: set });
-      }
-      const removed: { id: number; photo: StoredPhoto | null }[] = [];
-      const kept: number[] = [];
-      for (const id of release.deletable) {
-        const deleted = await deleteGarment(tx, id, ownerId, 'wishlist');
-        if (deleted === undefined) kept.push(id);
-        else removed.push({ id, photo: deleted.photo });
-      }
+      const { removed, kept } = await applyRelease(tx, ownerId, release);
       const looks = await reactToLooksOfPost(
         tx,
         ownerId,
@@ -504,10 +505,7 @@ export async function applyReview(
     },
   );
   if (!outcome.ok) return outcome;
-  // Only after commit: an unlink cannot be rolled back.
-  for (const { photo } of outcome.removed) {
-    if (photo) await photos.deleteVariants(photo);
-  }
+  await dropPhotos(photos, outcome.removed);
   const removed = outcome.removed.map((r) => r.id);
   const list = (ids: number[]) => ids.join(', ') || 'none';
   logger.info(
@@ -572,6 +570,53 @@ async function reactToLooksOfPost(
   return result;
 }
 
+/** What a decision lets go (releasedCandidates). */
+export interface Release {
+  rejected: RejectedCandidate[];
+  deletable: number[];
+  unlink: { itemIds: number[]; garmentIds: number[] }[];
+}
+
+/**
+ * Carries out a release inside the caller's owner transaction: records the
+ * rejections, unlinks what is kept, deletes the rest from the wishlist.
+ * The one place a candidate leaves an item or the wishlist by a review
+ * (the page's post and the sheet's decisions both end here). The deleted
+ * photos' bytes go after the commit (`dropPhotos`); `kept` were bought
+ * meanwhile and stay.
+ */
+export async function applyRelease(
+  tx: Queryable,
+  ownerId: number,
+  release: Release,
+): Promise<{
+  removed: { id: number; photo: StoredPhoto | null }[];
+  kept: number[];
+}> {
+  await recordRejections(tx, release.rejected);
+  for (const set of release.unlink) {
+    await changeCandidates(tx, ownerId, { remove: set });
+  }
+  const removed: { id: number; photo: StoredPhoto | null }[] = [];
+  const kept: number[] = [];
+  for (const id of release.deletable) {
+    const deleted = await deleteGarment(tx, id, ownerId, 'wishlist');
+    if (deleted === undefined) kept.push(id);
+    else removed.push({ id, photo: deleted.photo });
+  }
+  return { removed, kept };
+}
+
+/** After the commit only: an unlink cannot be rolled back. */
+export async function dropPhotos(
+  photos: Photos,
+  removed: readonly { photo: StoredPhoto | null }[],
+): Promise<void> {
+  for (const { photo } of removed) {
+    if (photo) await photos.deleteVariants(photo);
+  }
+}
+
 /**
  * What the post lets go among the candidates the `open` items' strips
  * offered that are still theirs: the rejections to record, the garments to
@@ -586,17 +631,13 @@ async function reactToLooksOfPost(
  * that lets it go and no item here picked it. Reads nothing when nothing
  * can be let go.
  */
-async function releasedCandidates(
+export async function releasedCandidates(
   tx: Queryable,
   ownerId: number,
   open: readonly number[],
-  choices: ReadonlyMap<number, ReviewChoice>,
+  choices: ReadonlyMap<number, ReleaseChoice>,
   removeUnpicked: boolean,
-): Promise<{
-  rejected: RejectedCandidate[];
-  deletable: number[];
-  unlink: { itemIds: number[]; garmentIds: number[] }[];
-}> {
+): Promise<Release> {
   const judged = open.filter(
     (id) => removeUnpicked || choices.get(id)!.rejected.size > 0,
   );
@@ -614,7 +655,9 @@ async function releasedCandidates(
   for (const itemId of judged) {
     const choice = choices.get(itemId)!;
     const held: CandidateGarment[] = (candidates.get(itemId) ?? []).filter(
-      (candidate) => choice.offered.includes(candidate.garmentId),
+      (candidate) =>
+        choice.offered === undefined ||
+        choice.offered.includes(candidate.garmentId),
     );
     const { pick } = choice;
     const pickHeld =

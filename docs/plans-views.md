@@ -7,3 +7,4 @@
 - **Header**: one tally line (`PlanTally`); a draft with only proposals has no "0 owned" tally, the proposals banner (with Review) says what waits (an active plan with no accepted items but proposals keeps just its Active badge). Shopping list and Compare are in the plan's ⋯ menu.
 - **The plans list card** counts a draft with nothing accepted as "N proposed · N looks", never "0 items".
 - The page's statement count is pinned in `plan-look-reactions.spec.ts` (6); views add none.
+- **Inline review** (#315): `?show=proposed` lists only the proposals, and a proposal's sheet holds its decision (`docs/plans-review.md`). The banner's Review still opens the review page until it retires.

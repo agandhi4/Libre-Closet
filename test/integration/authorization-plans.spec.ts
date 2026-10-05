@@ -557,6 +557,25 @@ const ROUTES: Route[] = [
     },
   },
   {
+    // #315: "Not this one" on the fixture's proposal turns down its candidate (the wishlist item), so it writes.
+    name: 'POST /wardrobe/plans/:id/items/:itemId/candidates/:garmentId/reject',
+    kind: 'write',
+    ok: 303,
+    secret: planName,
+    vias: BOTH,
+    request: (f, q) => ({
+      method: 'POST',
+      url: `/wardrobe/plans/${f.planId}/items/${f.planItemId}/candidates/${f.wishlistId}/reject${q}`,
+      payload: { reason: 'Too baggy' },
+    }),
+    expect: {
+      owner: 'ok',
+      manager: 'notFound',
+      viewer: 'notFound',
+      stranger: 'notFound',
+    },
+  },
+  {
     name: 'GET /wardrobe/:id/plan-items',
     kind: 'read',
     ok: 200,

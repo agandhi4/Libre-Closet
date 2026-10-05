@@ -64,6 +64,11 @@ export const STYLE_NOTES_MAX = 2000;
 
 export const PlanParams = Type.Object({ id: RowId });
 export const ItemParams = Type.Object({ id: RowId, itemId: RowId });
+export const CandidateRejectParams = Type.Object({
+  id: RowId,
+  itemId: RowId,
+  garmentId: RowId,
+});
 export const LookParams = Type.Object({ id: RowId, lookId: RowId });
 
 // ---- The plan form ----------------------------------------------------------
@@ -117,6 +122,12 @@ export const PlanPageQuery = Type.Object({
   reviewed: Type.Optional(Type.String({ maxLength: 5 })),
   /** With `reviewed`: how many products the review removed from the wishlist. A hand-made bad value is the 400 page. */
   removed: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
+  /** `proposed`: only the items awaiting a decision (the inline review, #315); anything else is all of them, not a 400: it is URL state (planShow). */
+  show: Type.Optional(Type.String()),
+  /** After a decision: which sheet to open on load (an item id, or `next` for the first proposal); read by script, so only its length is bounded here. */
+  open: Type.Optional(Type.String({ maxLength: 12 })),
+  /** With `open`: the agent rewrote that item since the owner's page drew it (`stale=1`), so its sheet says so. */
+  stale: Type.Optional(Type.String({ maxLength: 5 })),
 });
 
 // ---- The plan review (#271) -------------------------------------------------
@@ -217,21 +228,62 @@ export function lookReactionName(lookId: number): `look-${number}` {
 }
 
 /**
+ * The guard and the place every decision from an item's sheet (#315) posts
+ * back: `asOf`, the item's `agent_changed_at` as the page drew it (epoch
+ * milliseconds, empty: never; `asOfOf`), and `show`, the page's filter, kept
+ * so the owner lands where they were. A post without `asOf` (Reconsider, the
+ * look moves) is not guarded.
+ */
+const SheetFields = {
+  asOf: Type.Optional(Type.String({ pattern: '^[0-9]{0,15}$' })),
+  show: Type.Optional(Type.Literal('proposed')),
+};
+
+/** An `asOf` as `reviewItems` takes it: undefined (not posted), null (never written by the agent) or epoch milliseconds. */
+export function asOfOf(raw: string | undefined): number | null | undefined {
+  if (raw === undefined) return undefined;
+  return raw === '' ? null : Number(raw);
+}
+
+/**
  * "Change this…" of an item or a look (#291) from the plan page (its own
  * small form): the note for the agent, required (a blank one is the form
  * again, 400).
  */
 export const ChangeBody = Type.Object({
   note: Type.String({ maxLength: ITEM_NOTE_MAX }),
+  ...SheetFields,
 });
 
 /** "Don't buy" (an item) or "Not for me" (a look) from the plan page: an optional note for the agent. */
 export const DeclineBody = Type.Union([
   Type.Object({
     note: Type.Optional(Type.String({ maxLength: ITEM_NOTE_MAX })),
+    removeUnpicked: Type.Optional(Type.Literal('1')),
+    ...SheetFields,
   }),
   Type.Null(),
 ]);
+
+/**
+ * Keep, or "Use this" on a candidate (`pick`, its garment id), from an
+ * item's sheet; with `removeUnpicked` (the owner's box, unticked by
+ * default) the item's other candidates are let go with the pick.
+ */
+export const AcceptBody = Type.Union([
+  Type.Object({
+    pick: Type.Optional(Type.String({ pattern: '^[0-9]{1,10}$' })),
+    removeUnpicked: Type.Optional(Type.Literal('1')),
+    ...SheetFields,
+  }),
+  Type.Null(),
+]);
+
+/** "Not this one" on a candidate from an item's sheet, with an optional reason. */
+export const RejectBody = Type.Object({
+  reason: Type.Optional(Type.String({ maxLength: REJECT_REASON_MAX })),
+  ...SheetFields,
+});
 
 // ---- The plan item form -----------------------------------------------------
 

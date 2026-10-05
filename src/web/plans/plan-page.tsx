@@ -13,7 +13,13 @@ import type { ViewContext } from '../view-context';
 import { categoryLabel, priceLabel } from '../wardrobe/garment';
 import { roleGroupLabel } from '../wardrobe/labels';
 import { garmentUrl } from '../wardrobe/urls';
-import { candidateName, DETAILS, isAgentsPick } from './candidate-tile';
+import {
+  AgentsPick,
+  candidateName,
+  CandidateNote,
+  DETAILS,
+  isAgentsPick,
+} from './candidate-tile';
 import type { CandidatesByItem } from './candidates';
 import { awaitingReview, byPriority, type PlanGaps } from './gaps';
 import { itemTitle, priorityLabel } from './labels';
@@ -25,7 +31,11 @@ import {
   LooksStrip,
 } from './look-tile';
 import type { LookGroups, PlanLookView } from './looks';
-import type { ClosetGarment, PlanItemRow } from './queries';
+import {
+  agentChangedAtOf,
+  type ClosetGarment,
+  type PlanItemRow,
+} from './queries';
 import { type ListedCandidate, listedCandidate } from './shopping';
 import {
   candidatesUrl,
@@ -34,11 +44,15 @@ import {
   lookUrl,
   planUrl,
   PLANS_PATH,
+  PLAN_SHOWS,
   PLAN_VIEWS,
+  type PlanShow,
   type PlanView,
+  proposedUrl,
   reviewUrl,
   shoppingUrl,
 } from './urls';
+import { ITEM_NOTE_MAX, REJECT_REASON_MAX } from './validation';
 
 export interface PlanPageModel {
   gaps: PlanGaps;
@@ -48,6 +62,10 @@ export interface PlanPageModel {
   looks: LookGroups;
   /** Which view of the plan the page draws (`?view=`, planView). */
   view: PlanView;
+  /** Which items the Items view lists (`?show=`, planShow): all, or only those awaiting a decision. */
+  show: PlanShow;
+  /** The item whose sheet says the agent rewrote it since the owner's page drew it (`?stale=1&open=`). */
+  staleItemId?: number;
   /** The one-shot toast after a write (PlanPageQuery). */
   toast?: 'created' | 'saved' | 'reviewed';
   /** With the review's toast: the products it removed from the wishlist. */
@@ -70,8 +88,20 @@ export function planView(raw: string | undefined): PlanView {
   return PLAN_VIEWS.find((view) => view === raw) ?? 'items';
 }
 
-/** The page's one-shot flags, stripped from the address once shown. */
-const FLAGS = ['created', 'saved', 'reviewed', 'removed'] as const;
+/** `?show=`: only the proposals when asked for them, else everything (URL state falls back, never a 400). */
+export function planShow(raw: string | undefined): PlanShow {
+  return PLAN_SHOWS.find((show) => show === raw) ?? 'all';
+}
+
+/** The page's one-shot flags, stripped from the address once shown (after OpenSheet has read `open`). */
+const FLAGS = [
+  'created',
+  'saved',
+  'reviewed',
+  'removed',
+  'open',
+  'stale',
+] as const;
 
 const TOASTS = {
   created: 'plans.CREATED',
@@ -177,7 +207,9 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
   const { plan } = model.gaps;
   const { declined } = model.gaps.review;
   const awaiting = awaitingReview(model.gaps);
-  const sections = planSections(model.gaps, model.candidates);
+  const allSections = planSections(model.gaps, model.candidates);
+  const sections =
+    model.show === 'proposed' ? onlyProposed(allSections) : allSections;
   const { looks } = model;
   return (
     <Layout ctx={ctx} title={plan.name}>
@@ -209,21 +241,39 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             <p class="text-sm">
               {t('plans.PROPOSED_COUNT', { count: awaiting })}
             </p>
-            <a
-              href={reviewUrl(plan.id)}
-              class="btn btn-primary btn-sm shrink-0"
-              id="plan-review"
-            >
-              {t('plans.REVIEW')}
-            </a>
+            <div class="flex shrink-0 gap-2">
+              {model.show !== 'proposed' && (
+                <a
+                  href={proposedUrl(plan.id)}
+                  class="btn btn-outline btn-sm"
+                  id="plan-decide-here"
+                >
+                  {t('plans.DECIDE_HERE')}
+                </a>
+              )}
+              <a
+                href={reviewUrl(plan.id)}
+                class="btn btn-primary btn-sm shrink-0"
+                id="plan-review"
+              >
+                {t('plans.REVIEW')}
+              </a>
+            </div>
           </div>
+        )}
+        {model.show === 'proposed' && (
+          <ProposedFilter
+            plan={plan}
+            awaiting={awaiting}
+            draft={plan.draftedBy !== null}
+          />
         )}
         <div class={`flex flex-col gap-4 ${PLAN_VIEW_PANELS}`}>
           <div class="flex items-center justify-between gap-2">
             <PlanViewTabs
               view={model.view}
               items={
-                sections.reduce((sum, { items }) => sum + items.length, 0) +
+                allSections.reduce((sum, { items }) => sum + items.length, 0) +
                 declined.length
               }
               outfits={
@@ -261,16 +311,26 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
             />
           </div>
           <div id="plan-panel-items" class="space-y-4">
-            {sections.length === 0 && declined.length === 0 ? (
+            {sections.length === 0 &&
+            (model.show === 'proposed' || declined.length === 0) ? (
               <p class="text-sm text-muted text-center pt-8">
-                {t('plans.NO_ITEMS')}
+                {model.show === 'proposed'
+                  ? t('plans.NOTHING_TO_REVIEW')
+                  : t('plans.NO_ITEMS')}
               </p>
             ) : (
               sections.map((section) => (
-                <RoleSection section={section} gaps={model.gaps} />
+                <RoleSection
+                  section={section}
+                  gaps={model.gaps}
+                  show={model.show}
+                  staleItemId={model.staleItemId}
+                />
               ))
             )}
-            {declined.length > 0 && <DeclinedList items={declined} />}
+            {model.show !== 'proposed' && declined.length > 0 && (
+              <DeclinedList items={declined} />
+            )}
           </div>
         </div>
       </PageMain>
@@ -280,9 +340,74 @@ export function PlanPage(props: { ctx: ViewContext; model: PlanPageModel }) {
           text={toastText(model.toast, model.removed)}
         />
       )}
+      <OpenSheet />
       <StripFlags names={FLAGS} />
       <Dock ctx={ctx} />
     </Layout>
+  );
+}
+
+/** The proposals only (`?show=proposed`): the sections without what is decided already. */
+function onlyProposed(sections: RoleGroup<PlanCard>[]): RoleGroup<PlanCard>[] {
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((card) => card.status === 'proposed'),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+/**
+ * Opens a sheet on load: `?open=<item id>`, or `open=next`, the first
+ * proposal (where a decision from a sheet lands, so the owner goes on to the
+ * next one). A decision's redirect and the stale notice use it; it must come
+ * before StripFlags, which strips `open` from the address.
+ */
+function OpenSheet() {
+  const script = `(() => {
+  const open = new URL(window.location.href).searchParams.get('open');
+  const sheet = open === 'next'
+    ? document.querySelector('[data-status="proposed"] dialog')
+    : document.getElementById('plan-sheet-' + open);
+  if (sheet) sheet.showModal();
+})();`;
+  return <script dangerouslySetInnerHTML={{ __html: script }} />;
+}
+
+/**
+ * Above the proposals-only view: which view it is, the way back to all
+ * items, and, once nothing waits, Make active for a draft (the plan's ⋯
+ * menu has it too).
+ */
+function ProposedFilter(props: {
+  plan: { id: number; active: boolean };
+  awaiting: number;
+  draft: boolean;
+}) {
+  const { plan, awaiting, draft } = props;
+  return (
+    <div
+      class="flex items-center justify-between gap-3 rounded-box bg-base-200 px-3 py-2"
+      id="plan-proposed-filter"
+    >
+      <p class="text-sm">
+        {awaiting === 0
+          ? t('plans.NOTHING_TO_REVIEW')
+          : t('plans.REVIEWING_PROPOSED', { count: awaiting })}
+      </p>
+      <div class="flex shrink-0 gap-2">
+        {awaiting === 0 && draft && !plan.active && (
+          <PostForm action={planUrl(plan.id, '/activate')} needsNetwork>
+            <button type="submit" class="btn btn-primary btn-sm">
+              {t('plans.MAKE_ACTIVE')}
+            </button>
+          </PostForm>
+        )}
+        <a href={planUrl(plan.id)} class="btn btn-ghost btn-sm">
+          {t('plans.SHOW_ALL')}
+        </a>
+      </div>
+    </div>
   );
 }
 
@@ -356,7 +481,12 @@ const PLAN_VIEW_PANELS =
   '[&:has(#plan-view-items:checked)_#plan-panel-outfits]:hidden [&:has(#plan-view-outfits:checked)_#plan-panel-items]:hidden';
 
 /** A role's cards under its heading and count: "Shoes · 2". */
-function RoleSection(props: { section: RoleGroup<PlanCard>; gaps: PlanGaps }) {
+function RoleSection(props: {
+  section: RoleGroup<PlanCard>;
+  gaps: PlanGaps;
+  show: PlanShow;
+  staleItemId: number | undefined;
+}) {
   const { role, items } = props.section;
   return (
     <section
@@ -370,7 +500,12 @@ function RoleSection(props: { section: RoleGroup<PlanCard>; gaps: PlanGaps }) {
       </h2>
       <ul class="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {items.map((card) => (
-          <ItemCard card={card} gaps={props.gaps} />
+          <ItemCard
+            card={card}
+            gaps={props.gaps}
+            show={props.show}
+            stale={props.staleItemId === card.item.id}
+          />
         ))}
       </ul>
     </section>
@@ -557,8 +692,13 @@ function LeadPhoto(props: { lead: Lead | null }) {
  * other sheets' way). The photo is the closet garment that fulfils it, else
  * its likeliest product, else the glyph; copies wanted sit on it small.
  */
-function ItemCard(props: { card: PlanCard; gaps: PlanGaps }) {
-  const { card, gaps } = props;
+function ItemCard(props: {
+  card: PlanCard;
+  gaps: PlanGaps;
+  show: PlanShow;
+  stale: boolean;
+}) {
+  const { card, gaps, show, stale } = props;
   const { item } = card;
   const lead = leadOf(card, gaps.closet);
   return (
@@ -588,7 +728,13 @@ function ItemCard(props: { card: PlanCard; gaps: PlanGaps }) {
           {statusLine(card, lead)}
         </span>
       </button>
-      <ItemSheet card={card} gaps={gaps} lead={lead} />
+      <ItemSheet
+        card={card}
+        gaps={gaps}
+        lead={lead}
+        show={show}
+        stale={stale}
+      />
     </li>
   );
 }
@@ -603,8 +749,10 @@ function ItemSheet(props: {
   card: PlanCard;
   gaps: PlanGaps;
   lead: Lead | null;
+  show: PlanShow;
+  stale: boolean;
 }) {
-  const { card, gaps, lead } = props;
+  const { card, gaps, lead, show, stale } = props;
   const { item } = card;
   const titleId = `plan-sheet-${item.id}-title`;
   return (
@@ -613,9 +761,14 @@ function ItemSheet(props: {
       class="modal modal-bottom sm:modal-middle"
       aria-labelledby={titleId}
     >
-      <div class="modal-box flex flex-col gap-3 pb-8">
+      <div class="modal-box flex flex-col gap-3 pb-8 sm:max-w-2xl">
         <SheetHeader card={card} lead={lead} titleId={titleId} />
-        <SheetBody card={card} gaps={gaps} lead={lead} />
+        {stale && (
+          <p class="alert alert-warning text-sm" role="alert" data-stale="">
+            {t('plans.STALE')}
+          </p>
+        )}
+        <SheetBody card={card} gaps={gaps} lead={lead} show={show} />
         <div class="modal-action mt-2 items-center">
           <a
             href={itemUrl(item.planId, item.id, '/edit')}
@@ -686,12 +839,14 @@ function SheetBody(props: {
   card: PlanCard;
   gaps: PlanGaps;
   lead: Lead | null;
+  show: PlanShow;
 }) {
-  const { card, gaps, lead } = props;
+  const { card, gaps, lead, show } = props;
   const { item, match } = card;
+  const deciding = card.status === 'proposed';
   return (
     <>
-      {card.status !== 'owned' && (
+      {card.status !== 'owned' && !deciding && (
         <Options card={card} onPhoto={lead?.candidateId} />
       )}
       {match && match.fulfilledBy.length > 0 && (
@@ -707,7 +862,11 @@ function SheetBody(props: {
           {t('plans.YOUR_NOTE', { note: item.ownerNote })}
         </p>
       )}
-      <ReviewMoves item={item} status={card.status} />
+      {deciding ? (
+        <Decision card={card} show={show} />
+      ) : (
+        <ReviewMoves item={item} status={card.status} show={show} />
+      )}
     </>
   );
 }
@@ -808,38 +967,251 @@ function FulfilledBy(props: {
 }
 
 /**
- * An item's own review moves (#278), each its own small native post (no
- * swipe state to keep here, unlike the review page): a proposal's Accept,
- * Change this… and Don't buy; one sent back for a change, Accept as it is
- * and Don't buy; an accepted one, Change this….
+ * The hidden fields every decision from an item's sheet posts back (#315):
+ * the guard, `asOf` (when the agent last wrote the item, as this page drew
+ * it: if it wrote since, nothing is saved and the sheet opens again with a
+ * notice), and the page's filter, so the owner lands where they were.
  */
-function ReviewMoves(props: { item: PlanItemRow; status: CardStatus }) {
-  const { item, status } = props;
-  const action = (suffix: string) => itemUrl(item.planId, item.id, suffix);
-  const change = (
-    <a href={action('/change')} class="link link-primary text-xs self-start">
-      {t('plans.CHANGE_THIS')}
-    </a>
+function SheetFields(props: { item: PlanItemRow; show: PlanShow }) {
+  return (
+    <>
+      <input
+        type="hidden"
+        name="asOf"
+        value={String(agentChangedAtOf(props.item) ?? '')}
+      />
+      {props.show === 'proposed' && (
+        <input type="hidden" name="show" value="proposed" />
+      )}
+    </>
   );
-  if (status !== 'proposed' && status !== 'revise') {
-    return <div class="relative z-10 flex">{change}</div>;
+}
+
+/**
+ * The review moves of an item that is no proposal (#278), each its own
+ * small native post: one sent back for a change, Accept as it is and Don't
+ * buy; an accepted one, Change this…. A proposal's are the Decision block.
+ */
+function ReviewMoves(props: {
+  item: PlanItemRow;
+  status: CardStatus;
+  show: PlanShow;
+}) {
+  const { item, status, show } = props;
+  const action = (suffix: string) => itemUrl(item.planId, item.id, suffix);
+  if (status !== 'revise') {
+    return (
+      <div class="relative z-10 flex">
+        <a
+          href={action('/change')}
+          class="link link-primary text-xs self-start"
+        >
+          {t('plans.CHANGE_THIS')}
+        </a>
+      </div>
+    );
   }
   return (
-    <div class="relative z-10 mt-1 flex flex-col gap-1">
-      <div class="flex flex-wrap gap-1">
-        <PostForm action={action('/accept')} needsNetwork>
-          <button type="submit" class="btn btn-xs btn-primary">
-            {t(status === 'revise' ? 'plans.ACCEPT_AS_IS' : 'plans.ACCEPT')}
+    <div class="relative z-10 mt-1 flex flex-wrap gap-1">
+      <PostForm action={action('/accept')} needsNetwork>
+        <SheetFields item={item} show={show} />
+        <button type="submit" class="btn btn-xs btn-primary">
+          {t('plans.ACCEPT_AS_IS')}
+        </button>
+      </PostForm>
+      <PostForm action={action('/decline')} needsNetwork>
+        <SheetFields item={item} show={show} />
+        <button type="submit" class="btn btn-xs btn-ghost">
+          {t('plans.DONT_BUY')}
+        </button>
+      </PostForm>
+    </div>
+  );
+}
+
+/**
+ * A proposal's decision, in its sheet (#315): its candidates as large
+ * photos (each "Use this", or "Not this one" with an optional reason), Keep
+ * with no product, Don't buy, and Change this… with its note. Every choice
+ * posts as it is made, through the item's own routes (`/accept`,
+ * `/decline`, `/change`, `/candidates/:garmentId/reject`). The buttons that
+ * decide sit outside the one form that holds the removal box and the guard,
+ * joined to it by `form`, because forms do not nest.
+ */
+function Decision(props: { card: PlanCard; show: PlanShow }) {
+  const { card, show } = props;
+  const { item, candidates } = card;
+  const formId = `plan-decide-${item.id}`;
+  const action = (suffix: string) => itemUrl(item.planId, item.id, suffix);
+  return (
+    <div class="flex flex-col gap-3" data-decision="">
+      {candidates.length === 0 ? (
+        <Options card={card} onPhoto={undefined} />
+      ) : (
+        <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {candidates.map((candidate) => (
+            <DecisionTile
+              item={item}
+              candidate={candidate}
+              formId={formId}
+              show={show}
+            />
+          ))}
+        </ul>
+      )}
+      <PostForm
+        id={formId}
+        action={action('/accept')}
+        class="flex flex-col gap-2"
+        needsNetwork
+      >
+        <SheetFields item={item} show={show} />
+        {candidates.length > 0 && (
+          <label class="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              name="removeUnpicked"
+              value="1"
+              class="checkbox checkbox-xs mt-0.5"
+            />
+            <span>
+              {t('plans.REVIEW_REMOVE_UNPICKED')}
+              <span class="block text-muted">
+                {t('plans.REMOVE_UNPICKED_HINT')}
+              </span>
+            </span>
+          </label>
+        )}
+        <div class="flex flex-wrap gap-2">
+          <button type="submit" class="btn btn-primary btn-sm">
+            {t('plans.REVIEW_KEEP')}
           </button>
-        </PostForm>
-        <PostForm action={action('/decline')} needsNetwork>
-          <button type="submit" class="btn btn-xs btn-ghost">
+          <button
+            type="submit"
+            formaction={action('/decline')}
+            class="btn btn-ghost btn-sm"
+          >
             {t('plans.DONT_BUY')}
           </button>
+        </div>
+      </PostForm>
+      <details class="rounded-box border border-base-300 px-3 py-2">
+        <summary class="cursor-pointer text-sm link link-primary">
+          {t('plans.CHANGE_THIS')}
+        </summary>
+        <PostForm
+          action={action('/change')}
+          class="mt-2 flex flex-col gap-2"
+          needsNetwork
+        >
+          <SheetFields item={item} show={show} />
+          <label for={`plan-change-${item.id}`} class="text-sm font-medium">
+            {t('plans.REVIEW_NOTE_LABEL')}
+          </label>
+          <textarea
+            id={`plan-change-${item.id}`}
+            name="note"
+            rows={3}
+            required
+            maxlength={ITEM_NOTE_MAX}
+            class="textarea w-full"
+            placeholder={t('plans.REVIEW_NOTE_PLACEHOLDER')}
+          />
+          <button type="submit" class="btn btn-primary btn-sm self-start">
+            {t('plans.SEND_TO_AGENT')}
+          </button>
         </PostForm>
-      </div>
-      {status === 'proposed' && change}
+      </details>
     </div>
+  );
+}
+
+/**
+ * A candidate as a large tile in a proposal's sheet: the photo (a link to
+ * its wishlist page), its name, the agent's pick, price and note, "Use
+ * this" (accepts the item with this product, through the item's decision
+ * form) and "Not this one" with an optional reason (its own form: a
+ * rejection records the product and lets it go; the item stays proposed).
+ */
+function DecisionTile(props: {
+  item: PlanItemRow;
+  candidate: ListedCandidate;
+  formId: string;
+  show: PlanShow;
+}) {
+  const { item, candidate, formId, show } = props;
+  const name = candidateName(candidate);
+  return (
+    <li
+      class="flex min-w-0 flex-col gap-1"
+      data-candidate={candidate.garmentId}
+    >
+      <a
+        href={garmentUrl(candidate.garmentId, undefined)}
+        class="flex aspect-square w-full items-center justify-center overflow-hidden rounded-box bg-base-200 p-2"
+        aria-label={name}
+      >
+        {candidate.photo ? (
+          <img
+            src={imageUrl(candidate.photo, 'thumb')}
+            alt=""
+            class="max-h-full max-w-full object-contain"
+            width="400"
+            height="400"
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <HangerIcon class="size-1/3 text-faint" strokeWidth="1" />
+        )}
+      </a>
+      <span class="text-sm font-medium break-words">{name}</span>
+      {isAgentsPick(candidate) && <AgentsPick />}
+      {candidate.price && (
+        <span class="text-xs">{priceLabel(candidate.price)}</span>
+      )}
+      <span class="flex flex-col text-xs text-muted">
+        <CandidateNote candidate={candidate} />
+      </span>
+      <button
+        type="submit"
+        form={formId}
+        formaction={itemUrl(item.planId, item.id, '/accept')}
+        name="pick"
+        value={candidate.garmentId}
+        class="btn btn-primary btn-sm"
+        data-needs-network
+      >
+        {t('plans.USE_THIS')}
+      </button>
+      <details>
+        <summary class="cursor-pointer text-xs link link-hover">
+          {t('plans.NOT_THIS_ONE')}
+        </summary>
+        <PostForm
+          action={itemUrl(
+            item.planId,
+            item.id,
+            `/candidates/${candidate.garmentId}/reject`,
+          )}
+          class="mt-1 flex flex-col gap-1"
+          needsNetwork
+        >
+          <SheetFields item={item} show={show} />
+          <input
+            type="text"
+            name="reason"
+            maxlength={REJECT_REASON_MAX}
+            class="input input-sm w-full"
+            placeholder={t('plans.REJECT_REASON_PLACEHOLDER')}
+            aria-label={t('plans.REJECT_REASON_LABEL', { name })}
+          />
+          <button type="submit" class="btn btn-ghost btn-xs self-start">
+            {t('plans.NOT_THIS_ONE')}
+          </button>
+        </PostForm>
+      </details>
+    </li>
   );
 }
 

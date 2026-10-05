@@ -25,6 +25,15 @@ export function planViewUrl(id: number, view: PlanView): string {
   return view === 'items' ? planUrl(id) : `${planUrl(id)}?view=${view}`;
 }
 
+/** What the Items view lists: everything, or only the proposals awaiting a decision (#315). */
+export const PLAN_SHOWS = ['all', 'proposed'] as const;
+export type PlanShow = (typeof PLAN_SHOWS)[number];
+
+/** The plan page's Items view filtered to the proposals, where each is decided in its sheet. */
+export function proposedUrl(planId: number): string {
+  return `${planUrl(planId)}?show=proposed`;
+}
+
 /**
  * A plan's review (#271): its proposals as strips, decided in one post.
  * Linked from the gap view, the plans list and "Drafted by" while

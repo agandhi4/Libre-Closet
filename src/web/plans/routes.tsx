@@ -23,10 +23,11 @@ import { allPlanGaps, planGaps } from './gaps';
 import { ItemFormPage, type ItemFormModel } from './item-form-page';
 import { PlansPage } from './list-page';
 import { PlanFormPage, type PlanFormModel } from './plan-form-page';
-import { PlanPage, planView } from './plan-page';
+import { PlanPage, planShow, planView } from './plan-page';
 import type { PlanItemReviewEvent } from '../../wardrobe/plan-review';
 import type { LookReactionEvent } from '../../wardrobe/look-reaction';
 import { ChangeItemPage, ChangeLookPage } from './change-page';
+import { decideItem, rejectCandidate } from './item-decision';
 import {
   copyLooks,
   groupLooks,
@@ -59,7 +60,6 @@ import {
   itemsOf,
   type PlanDetail,
   type PlanItemRow,
-  reviewItems,
   saveStyleProfile,
   setActivePlan,
   styleProfileSql,
@@ -79,7 +79,10 @@ import {
   STYLE_PROFILE_PATH,
 } from './urls';
 import {
+  AcceptBody,
+  asOfOf,
   BLANK_ITEM_VALUES,
+  CandidateRejectParams,
   ChangeBody,
   DeclineBody,
   EMPTY_STYLE_PROFILE,
@@ -98,6 +101,7 @@ import {
   readPlanForm,
   ReviewBody,
   readPlanItemForm,
+  RejectBody,
   readStyleProfileForm,
   storedItemValues,
   StyleProfileBody,
@@ -314,7 +318,8 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const userId = sessionUserId(request);
       const plan = await requirePlan(request, request.params.id);
-      const { created, saved, reviewed, removed, view } = request.query;
+      const { created, saved, reviewed, removed, view, show, open, stale } =
+        request.query;
       const [gaps, candidates, looks] = await Promise.all([
         planGaps(db, plan, userId),
         candidatesOfPlan(db, userId, plan.id),
@@ -329,6 +334,11 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
             candidates,
             looks: groupLooks(looks),
             view: planView(view),
+            show: planShow(show),
+            staleItemId:
+              stale === '1' && /^[0-9]+$/.test(open ?? '')
+                ? Number(open)
+                : undefined,
             toast:
               created === '1'
                 ? 'created'
@@ -717,39 +727,100 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
   );
 
   /**
-   * The owner's review move `event` on item `itemId` of plan `id`
-   * (reviewItems asks the machine): its 404 when no item of the owner's
-   * plan, a 409 when the item's review does not take the move (a second
-   * tap, a stale page: it moved already), else back to the plan.
+   * Where the owner lands after a decision from an item's sheet (#315): the
+   * plan, kept in its proposals-only view when they came from it (`show`),
+   * with the sheet of `open` opened (`next`: the first proposal, so they go
+   * on to the next one). `removed`: the products it took off the wishlist,
+   * which the toast names; `stale`: nothing was saved, the sheet says why.
+   */
+  function landing(
+    planId: number,
+    where: {
+      show?: 'proposed';
+      open?: number | 'next';
+      removed?: number;
+      stale?: boolean;
+    },
+  ): string {
+    const { show, open, removed = 0, stale = false } = where;
+    const query = new URLSearchParams();
+    if (show) query.set('show', show);
+    if (open !== undefined) query.set('open', String(open));
+    if (stale) query.set('stale', '1');
+    else if (removed > 0) {
+      query.set('reviewed', '1');
+      query.set('removed', String(removed));
+    } else query.set('saved', '1');
+    return `${planUrl(planId)}?${query.toString()}`;
+  }
+
+  /**
+   * The owner's review move `event` on item `itemId` of plan `id` through
+   * decideItem (reviewItems asks the machine; a release rides in the same
+   * transaction): its 404 when no item of the owner's plan, a 409 when the
+   * item's review does not take the move (a second tap, a stale page: it
+   * moved already), the sheet again when the agent rewrote it since the
+   * page was drawn, else back to the plan.
    */
   async function moveItem(
     request: FastifyRequest,
     { id, itemId }: { id: number; itemId: number },
     reply: FastifyReply,
     event: PlanItemReviewEvent,
-    note: string | null = null,
+    input: {
+      note?: string | null;
+      asOf?: string;
+      pick?: string;
+      removeUnpicked?: '1';
+      show?: 'proposed';
+    } = {},
   ): Promise<FastifyReply> {
     const userId = sessionUserId(request);
-    const { moved, refused } = await reviewItems(db, userId, id, event, [
-      { itemId, note },
-    ]);
-    if (refused.length > 0) {
-      logger.warn(
-        `Plan item ${itemId} of plan ${id}: ${event} refused for user ${userId}, the item is ${refused[0].review}`,
-      );
-      throw new HttpError(409, t('plans.ALREADY_MOVED'));
+    const { note = null, show } = input;
+    const outcome = await decideItem(options, userId, id, itemId, {
+      event,
+      note,
+      asOf: asOfOf(input.asOf),
+      pick: input.pick === undefined ? null : Number(input.pick),
+      removeUnpicked: input.removeUnpicked === '1',
+    });
+    switch (outcome.kind) {
+      case 'stale':
+        logger.warn(
+          `Plan item ${itemId} of plan ${id}: ${event} by user ${userId} not saved, the agent changed the item since the page was drawn`,
+        );
+        return reply.redirect(
+          landing(id, { show, open: itemId, stale: true }),
+          303,
+        );
+      case 'refused':
+        logger.warn(
+          `Plan item ${itemId} of plan ${id}: ${event} refused for user ${userId}, the item is ${outcome.review}`,
+        );
+        throw new HttpError(409, t('plans.ALREADY_MOVED'));
+      case 'not-found':
+        throw await itemMiss(request, id);
+      case 'moved': {
+        logger.info(
+          `Plan item ${itemId} of plan ${id}: ${event} by user ${userId}${note ? ' with a note' : ''}${input.pick ? `, candidate ${input.pick} picked` : ''}${outcome.removed.length > 0 ? `, candidates ${outcome.removed.join(', ')} removed from the wishlist` : ''}${outcome.kept.length > 0 ? `, candidates ${outcome.kept.join(', ')} kept, no longer on the wishlist` : ''}`,
+        );
+        return reply.redirect(
+          landing(id, {
+            show,
+            open: show === 'proposed' ? 'next' : undefined,
+            removed: outcome.removed.length,
+          }),
+          303,
+        );
+      }
     }
-    if (moved.length === 0) throw await itemMiss(request, id);
-    logger.info(
-      `Plan item ${itemId} of plan ${id}: ${event} by user ${userId}${note ? ' with a note' : ''}`,
-    );
-    return reply.redirect(`${planUrl(id)}?saved=1`, 303);
   }
 
   app.post(
     `${PLANS_PATH}/:id/items/:itemId/accept`,
-    { schema: { params: ItemParams } },
-    (request, reply) => moveItem(request, request.params, reply, 'accept'),
+    { schema: { params: ItemParams, body: AcceptBody } },
+    (request, reply) =>
+      moveItem(request, request.params, reply, 'accept', request.body ?? {}),
   );
 
   // "Don't buy" (#278): declined, kept so the agent never proposes it again.
@@ -757,13 +828,63 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     `${PLANS_PATH}/:id/items/:itemId/decline`,
     { schema: { params: ItemParams, body: DeclineBody } },
     (request, reply) =>
-      moveItem(
-        request,
-        request.params,
-        reply,
-        'decline',
-        request.body?.note?.trim() || null,
-      ),
+      moveItem(request, request.params, reply, 'decline', {
+        ...request.body,
+        note: request.body?.note?.trim() || null,
+      }),
+  );
+
+  // "Not this one" on a proposal's candidate, from its sheet (#315): the one
+  // writer of a rejection (rejectCandidate); the item stays proposed.
+  app.post(
+    `${PLANS_PATH}/:id/items/:itemId/candidates/:garmentId/reject`,
+    { schema: { params: CandidateRejectParams, body: RejectBody } },
+    async (request, reply) => {
+      const userId = sessionUserId(request);
+      const { id, itemId, garmentId } = request.params;
+      const { show } = request.body;
+      const outcome = await rejectCandidate(
+        options,
+        userId,
+        id,
+        itemId,
+        garmentId,
+        {
+          reason: request.body.reason?.trim() || null,
+          asOf: asOfOf(request.body.asOf),
+        },
+      );
+      switch (outcome.kind) {
+        case 'stale':
+          logger.warn(
+            `Plan item ${itemId} of plan ${id}: candidate ${garmentId} not rejected by user ${userId}, the agent changed the item since the page was drawn`,
+          );
+          return reply.redirect(
+            landing(id, { show, open: itemId, stale: true }),
+            303,
+          );
+        case 'not-found':
+          throw await itemMiss(request, id);
+        case 'refused':
+        case 'not-a-candidate':
+          logger.warn(
+            `Plan item ${itemId} of plan ${id}: rejecting candidate ${garmentId} refused for user ${userId}: ${outcome.kind === 'refused' ? `the item is ${outcome.review}` : 'no longer its candidate'}`,
+          );
+          throw new HttpError(409, t('plans.ALREADY_MOVED'));
+        case 'rejected':
+          logger.info(
+            `Plan item ${itemId} of plan ${id}: candidate ${garmentId} turned down by user ${userId}${outcome.deleted ? ', removed from the wishlist' : ', unlinked from the item'}`,
+          );
+          return reply.redirect(
+            landing(id, {
+              show,
+              open: itemId,
+              removed: outcome.deleted ? 1 : 0,
+            }),
+            303,
+          );
+      }
+    },
   );
 
   app.post(
@@ -810,7 +931,11 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           { status: 400 },
         );
       }
-      return moveItem(request, request.params, reply, 'change', note);
+      return moveItem(request, request.params, reply, 'change', {
+        asOf: request.body.asOf,
+        show: request.body.show,
+        note,
+      });
     },
   );
 

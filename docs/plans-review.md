@@ -70,6 +70,14 @@ The owner read the first production draft as "a flat list" with no photos and no
 
 - **After the commit.** Photos go only after the commit. The toast counts what was removed (`?removed=`).
 
+## Inline review in the item sheet (#315, part A)
+
+The review page stays until part B retires it. A proposal's `ItemSheet` (`plan-page.tsx`, `Decision`) carries the decision, each choice saved as it is made (the owner's save model: per item, no batch held).
+
+- **Controls and writers.** Use this (a candidate's `pick`) and Keep post to `/accept`, Don't buy to `/decline`, Change this… (a note, required) to `/change`; all end in `decideItem` (`item-decision.ts`), which calls `reviewItems` (the one writer of the move) and, when the removal box is ticked and a pick or Don't buy was made, `releasedCandidates` and `applyRelease` (`review.ts`) in the same owner transaction. Keep releases nothing, whatever the box says. Not this one posts to `/items/:itemId/candidates/:garmentId/reject`, `rejectCandidate`: the same release rule for one candidate, the item stays `proposed`; a decided item or a product no longer its candidate is a 409. "Accept these" and the sheet share `applyRelease` and `dropPhotos`, so a candidate leaves an item or the wishlist in one place.
+- **The guard.** Every decision form posts `asOf`, the item's `agent_changed_at` in epoch milliseconds (empty: never), and `show`. `reviewItems` and `rejectCandidate` compare it under the owner lock; null equals null; a post without `asOf` (Reconsider, the review page) is not guarded. On a mismatch nothing is written (`ReviewMoves.stale`) and the route answers a 303 to `?open=<item>&stale=1` (not a 409: a native post needs a page to land on), whose sheet shows "Your agent changed this".
+- **Where it lands.** `?show=proposed` (`planShow`, URL state; anything else lists all) keeps the owner there, with `open=next`: `OpenSheet` opens the first remaining proposal's sheet (`open` and `stale` are in `FLAGS`, stripped after it reads them). Not this one reopens its own sheet. With none left the view says so, and a draft offers Make active (`/activate`).
+
 ## What each page reads, and why (#167)
 
 These were measured with `npm run audit:pages -- --only '#167'`. Every table here is tiny per owner, so the cost is the number of statements, not the query plans.
@@ -185,6 +193,7 @@ A look is an outfit the agent designs from a plan, mixing closet garments with t
   - its reaction, a radio group of its own named `look-<id>`. Radios group by name, so the body schema is a `Type.Intersect` with a `Type.Record` over the `look-${number}` template. The values are Love it, Change this…, Not for me, and `''` for Clear, which shows only once a reaction is checked. A loved look is not offered Love it.
 
   A post whose notes do not pair with its looks, or that names a look twice, is a mismatch: the page as it stands, 400. Change this without a note is the page as posted, 400, with the marked look centred. Nothing is written in either case.
+
 - **`applyReview` reacts inside its own transaction.** It makes one `reactToLooks` per reaction chosen, naming only the looks the strip drew. So a look the agent proposed after the GET waits for the next review, and a look left alone keeps its reaction. A look whose reaction moved meanwhile takes only what the machine allows and is logged. A look deletes and unlinks nothing.
 - **The plan page.** The centred tile's moves are small native posts: `POST /wardrobe/plans/:id/looks/:lookId/love|decline|reconsider`, and Change this… on its own form (`GET|POST .../change`, `ChangeLookPage`, the item's `NoteForm`). A refused move is a 409 (`plans.looks.ALREADY_MOVED`). A look that is not the plan's is a 404, after the plan's own 404. Revise looks are listed apart with "Love it as it is" and Not for me; declined ones with Reconsider.
 - **Statements.** The review page reads 5 (the looks were added) and the plan page reads 6, `looksOfPlan` each.
