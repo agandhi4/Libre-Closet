@@ -344,6 +344,85 @@ describe('incomplete outfits', () => {
       expect(await slotsOf(id)).toEqual([blazer, tee, shoes]);
     });
 
+    /** Styling's rows as the page posts them back (Shuffle, "Add row"), editing `outfitId`. */
+    const rowsQuery = (
+      outfitId: number,
+      rows: [role: string, garmentId: number | null, locked: boolean][],
+      extra: Record<string, string> = {},
+    ) => {
+      const query = new URLSearchParams({ outfit: String(outfitId), ...extra });
+      for (const [role, garmentId, locked] of rows) {
+        query.append('role', role);
+        query.append('garmentId', garmentId === null ? '' : String(garmentId));
+        query.append('lock', locked ? '1' : '');
+      }
+      return query.toString();
+    };
+    const carries = (html: string, garmentId: number) =>
+      html.includes(`name="garmentId" value="${garmentId}"`);
+
+    it('Shuffle (the piece locked), "Add row" and a refused Save keep it, and the Save after them does', async () => {
+      const id = await savedId('Styled round trips', [tee, blazer]);
+      const shuffled = await get(
+        `/styling/shuffle?${rowsQuery(
+          id,
+          [
+            ['layer', blazer, true],
+            ['top', tee, false],
+            ['bottom', null, false],
+          ],
+          { seed: '3' },
+        )}`,
+      );
+      expect(shuffled.statusCode).toBe(200);
+      expect(carries(shuffled.body, blazer)).toBe(true);
+      const added = await get(
+        `/styling/row?${rowsQuery(
+          id,
+          [
+            ['layer', blazer, false],
+            ['top', tee, false],
+          ],
+          { add: 'footwear' },
+        )}`,
+      );
+      expect(added.statusCode).toBe(200);
+      expect(carries(added.body, blazer)).toBe(true);
+      // Refused for a garment that is gone: the page again, the piece kept.
+      const refused = await post('/styling', {
+        outfit: String(id),
+        role: ['layer', 'top', 'footwear'],
+        garmentId: [blazer, tee, 2147483000].map(String),
+        lock: ['', '', ''],
+        name: 'Styled round trips',
+      });
+      expect(refused.statusCode).toBe(404);
+      expect(carries(refused.body, blazer)).toBe(true);
+      const saved = await post('/styling', {
+        outfit: String(id),
+        garmentId: [blazer, tee, shoes].map(String),
+        name: 'Styled round trips',
+      });
+      expect(saved.statusCode, saved.body).toBe(303);
+      expect(await slotsOf(id)).toEqual([blazer, tee, shoes]);
+    });
+
+    it('a row carries a wishlist item only while it edits a saved outfit', async () => {
+      const fresh = new URLSearchParams();
+      for (const [role, garmentId] of [
+        ['layer', blazer],
+        ['top', tee],
+      ] as const) {
+        fresh.append('role', role);
+        fresh.append('garmentId', String(garmentId));
+        fresh.append('lock', '');
+      }
+      const added = await get(`/styling/row?${fresh.toString()}&add=footwear`);
+      expect(added.statusCode).toBe(200);
+      expect(carries(added.body, blazer)).toBe(false);
+      expect(carries(added.body, tee)).toBe(true);
+    });
+
     it('a save adding one to a planned outfit names the plan, not a wishlist item', async () => {
       const id = await savedId('Styled, planned', [tee, shoes]);
       expect(

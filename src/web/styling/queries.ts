@@ -229,16 +229,22 @@ export async function roleGarmentsBefore(
 }
 
 /**
- * The wardrobe's owned garments (in the closet or archived) among `ids`:
- * what a posted row may hold. Fewer than asked when any is someone else's,
- * a wishlist item or gone. With `anyStatus`, the wardrobe's garments
- * whatever their status (an edit's Save: ownGarments). A scalar subquery;
- * read with readGarments.
+ * The garments among `ids` the posted rows may carry: the one rule of it,
+ * for every Styling read of posted rows (stripsReads, ideaReads: the page,
+ * Shuffle, "Add row", a refused Save's page) and for an edit's Save. The
+ * wardrobe's owned garments (in the closet or archived); while the rows
+ * edit one of the requester's saved outfits (`editing`, StylingScope), the
+ * owner's garments whatever their status (#335). What an outfit may hold
+ * is updateOutfit's to judge (insertSlots: a piece not bought yet, while
+ * nothing holds the outfit), so an edit carries its piece to buy through
+ * every round trip to the Save, which refuses it only where it must.
+ * Fewer than asked when one is someone else's or gone, or, not editing, a
+ * wishlist item. A scalar subquery; read with readGarments.
  */
-export function ownGarmentsSql(
+export function rowGarmentsSql(
   ownerId: number,
   ids: readonly number[],
-  { anyStatus = false }: { anyStatus?: boolean } = {},
+  editing: boolean,
 ): SQL<RowGarmentJson[]> {
   return sql<RowGarmentJson[]>`(
     select coalesce(json_agg(${rowGarmentJson}), '[]')
@@ -247,33 +253,27 @@ export function ownGarmentsSql(
     where ${and(
       eq(garment.ownerId, ownerId),
       inArray(garment.id, [...ids]),
-      anyStatus ? undefined : ownedGarment(),
+      editing ? undefined : ownedGarment(),
     )}
   )`;
 }
 
-/** ownGarmentsSql's (or an outfit's) garments, each with its role. */
+/** rowGarmentsSql's garments (or an outfit's), each with its role. */
 export function readGarments(rows: readonly RowGarmentJson[]): RoledGarment[] {
   return rows.map((row) => roled(readRowGarment(row)));
 }
 
-/**
- * An edit's Save: the wardrobe's garments among `ids`, whatever their
- * status, in one statement. What the outfit may hold is updateOutfit's to
- * judge (insertSlots: the outfit's own Holdable, #335), so an incomplete
- * outfit's piece to buy is kept, and refused only where the outfit is
- * planned or packed; fewer than asked only when one is not the owner's.
- */
-export async function ownGarments(
+/** An edit's Save: rowGarmentsSql for the edited outfit's rows, in one statement. */
+export async function editedGarments(
   db: Db,
   ownerId: number,
   ids: readonly number[],
 ): Promise<RoledGarment[]> {
   if (ids.length === 0) return [];
-  const { owned } = await selectScalars(db, {
-    owned: ownGarmentsSql(ownerId, ids, { anyStatus: true }),
+  const { carried } = await selectScalars(db, {
+    carried: rowGarmentsSql(ownerId, ids, true),
   });
-  return readGarments(owned);
+  return readGarments(carried);
 }
 
 /** An outfit as Styling opens it (`?outfit=`). */

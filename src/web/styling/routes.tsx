@@ -49,7 +49,7 @@ import {
 } from './rows';
 import {
   type Chosen,
-  ownGarments,
+  editedGarments,
   type RoledGarment,
   roleGarmentsBefore,
   type SavedOutfit,
@@ -482,7 +482,12 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
    */
   async function scopeOf(
     request: FastifyRequest,
-    query: { ownerId?: number | ''; capsule?: number; plan?: number },
+    query: {
+      ownerId?: number | '';
+      capsule?: number;
+      plan?: number;
+      outfit?: number;
+    },
   ): Promise<Scope> {
     const { access, viewOwner } = await authorizeWardrobe(
       db,
@@ -499,6 +504,8 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       capsuleId: query.capsule,
       // Plans are never shared: a grantee's `?plan=` is ignored.
       planId: viewOwner === undefined ? query.plan : undefined,
+      // Neither are outfits: over a shared wardrobe there is no edit.
+      editing: viewOwner === undefined && query.outfit !== undefined,
     };
   }
 
@@ -910,6 +917,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       viewOwner: undefined,
       capsuleId: body.capsule,
       planId: body.plan,
+      editing: body.outfit !== undefined,
     };
     const [aimed, read] = await Promise.allSettled([
       aimIdeas(db, userId, postedDestination(body), today),
@@ -992,7 +1000,9 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       destination.kind === 'day'
         ? { day: destination.day, occasion: destination.occasion }
         : input.schedule;
-    const garments = topToToe(await ownGarments(db, userId, input.garmentIds));
+    const garments = topToToe(
+      await editedGarments(db, userId, input.garmentIds),
+    );
     if (garments.length !== input.garmentIds.length) {
       throw await garmentsGoneError(db, userId, input.garmentIds, 'considered');
     }
