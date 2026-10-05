@@ -236,18 +236,36 @@ interface Wardrobe {
   capsule?: CapsuleRef;
   /** Include picks is on (`?picks=1`, StylingScope.picks). */
   picks: boolean;
+  /**
+   * Include picks may be turned on here: one's own wardrobe, no
+   * destination, and not an edit of a planned or packed outfit (which
+   * takes no pick). The switch shows only then.
+   */
+  picksOffered: boolean;
 }
 
-/** A request's scope (reads.ts) with the owner its links carry. */
-type Scope = StylingScope & Pick<Wardrobe, 'viewOwner'>;
+/**
+ * A request's scope (reads.ts) with the owner its links carry, and whether
+ * Include picks may be offered before the reads (scopeOf).
+ */
+type Scope = StylingScope &
+  Pick<Wardrobe, 'viewOwner'> & { picksOffered: boolean };
 
-/** The wardrobe once the reads checked its capsule. */
-function wardrobeOf(scope: Scope, capsule: CapsuleRef | undefined): Wardrobe {
+/**
+ * The wardrobe once the reads checked its capsule and whether the outfit
+ * the rows edit is held (StripsReads.editingHeld): then no pick.
+ */
+function wardrobeOf(
+  scope: Scope,
+  capsule: CapsuleRef | undefined,
+  editingHeld: boolean,
+): Wardrobe {
   return {
     ownerId: scope.ownerId,
     viewOwner: scope.viewOwner,
     capsule,
-    picks: scope.picks === true,
+    picks: scope.picks === true && !editingHeld,
+    picksOffered: scope.picksOffered && !editingHeld,
   };
 }
 
@@ -306,6 +324,7 @@ function pageModel(input: {
     seed: styled.seed,
     notice: styled.missed ? 'no-idea' : undefined,
     capsule: wardrobe.capsule,
+    picksOffered: wardrobe.picksOffered,
     capsules: input.capsules,
     outfit: opened.saved,
     trip: aim.trip,
@@ -494,6 +513,8 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       'view',
       'Wardrobe not found',
     );
+    const picksOffered =
+      viewOwner === undefined && parseDestination(query).kind === 'none';
     return {
       userId: sessionUserId(request),
       ownerId: access.ownerId,
@@ -502,10 +523,8 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       capsuleId: query.capsule,
       // Picks are the requester's own, and never offered while the page
       // picks for a day or a trip: an incomplete outfit is never planned.
-      picks:
-        viewOwner === undefined &&
-        query.picks === '1' &&
-        parseDestination(query).kind === 'none',
+      picksOffered,
+      picks: picksOffered && query.picks === '1',
       // Neither are outfits: over a shared wardrobe there is no edit.
       editingOutfitId: viewOwner === undefined ? query.outfit : undefined,
     };
@@ -554,7 +573,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     const aim = valueOf(aimed);
     const saved = checkedOutfit(query.outfit, reads.outfit);
     return {
-      wardrobe: wardrobeOf(scope, capsule),
+      wardrobe: wardrobeOf(scope, capsule, reads.editingHeld),
       aim,
       opened: { saved },
       styled: {},
@@ -603,7 +622,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       menu: true,
     });
     return {
-      wardrobe: wardrobeOf(scope, capsule),
+      wardrobe: wardrobeOf(scope, capsule, reads.editingHeld),
       aim,
       opened,
       styled: { idea, seed: shuffledSeed(seed), missed: !idea },
@@ -727,10 +746,10 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       );
       // The ideas draw from the closet alone: a pick is never drawn, and a
       // row the rows may carry it in (rowGarmentsSql) keeps it while locked.
-      const { windows } = await stripsReads(db, scope, {
+      const { windows, editingHeld } = await stripsReads(db, scope, {
         chosen: [...chosenOf(states), ...(idea?.garments ?? []).map(chosen)],
       });
-      const wardrobe = wardrobeOf(scope, capsule);
+      const wardrobe = wardrobeOf(scope, capsule, editingHeld);
       const rows = withEveryRole(states, windows);
       logger.debug(
         `Styling shuffle for user ${userId} over ${describeScope(wardrobe)}: ${lockedIds.length} locked, seed ${seed}, ${idea ? `idea of garments ${ids(idea.garments).join(', ')}` : 'no idea fits'} in ${Math.round(performance.now() - started)} ms`,
@@ -744,6 +763,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         context: {
           state: postedState(query, wardrobe),
           viewOwner: wardrobe.viewOwner,
+          picksOffered: wardrobe.picksOffered,
         },
       });
     },
@@ -764,7 +784,11 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         heldIds: heldIdsOf(posted),
         chosen: chosenOf(posted),
       });
-      const wardrobe = wardrobeOf(scope, checkedCapsule(reads.capsule));
+      const wardrobe = wardrobeOf(
+        scope,
+        checkedCapsule(reads.capsule),
+        reads.editingHeld,
+      );
       const states = checkedStates(posted, reads.held);
       if (query.add !== undefined && states.length < MAX_ROWS) {
         states.push({ role: query.add, garmentId: null, locked: false });
@@ -777,6 +801,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         context: {
           state: postedState(query, wardrobe),
           viewOwner: wardrobe.viewOwner,
+          picksOffered: wardrobe.picksOffered,
         },
       });
     },
@@ -924,6 +949,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       shared: false,
       viewOwner: undefined,
       capsuleId: body.capsule,
+      picksOffered: postedDestination(body).kind === 'none',
       picks: body.picks === '1' && postedDestination(body).kind === 'none',
       editingOutfitId: body.outfit,
     };
@@ -942,7 +968,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     const aim = valueOf(aimed);
     const saved = checkedOutfit(body.outfit, reads.outfit);
     const model = pageModel({
-      wardrobe: wardrobeOf(scope, capsule),
+      wardrobe: wardrobeOf(scope, capsule, reads.editingHeld),
       aim,
       opened: { saved },
       styled: {},

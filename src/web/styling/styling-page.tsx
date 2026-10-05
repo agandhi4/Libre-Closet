@@ -55,6 +55,11 @@ export interface StylingModel {
   /** Shuffle's next seed; absent until something shuffled (the bare page stays byte-stable). */
   seed?: number;
   capsule?: CapsuleRef;
+  /**
+   * Include picks may be turned on: one's own wardrobe, no destination,
+   * not an edit of a planned or packed outfit (PicksToggle).
+   */
+  picksOffered: boolean;
   /** The addressed wardrobe's capsules, for the scope menu. */
   capsules: CapsuleRef[];
   /** `?outfit=`: the saved outfit being changed. */
@@ -100,7 +105,11 @@ initStyling(document.getElementById('styling-rows'));`;
 export function StylingPage(props: { ctx: ViewContext; model: StylingModel }) {
   const { ctx, model } = props;
   const viewOwner = model.shared?.ownerId;
-  const context: RowContext = { state: model.state, viewOwner };
+  const context: RowContext = {
+    state: model.state,
+    viewOwner,
+    picksOffered: model.picksOffered,
+  };
   return (
     <Layout ctx={ctx} title={t('styling.TITLE')}>
       <AppBar
@@ -287,15 +296,15 @@ function Header({ model }: { model: StylingModel }) {
  * so a reload or a shared link opens the same way. The bare page (off)
  * stays byte-stable. On, every strip leads with the garments not bought
  * yet that are offered to style with (picksSql), badged "To buy", and
- * Save keeps them: the outfit is incomplete until they are bought. Never
- * over a shared wardrobe, and never while the page picks for a day or a
- * trip, where Save plans or packs the outfit and a piece to buy would
- * refuse it.
+ * Save keeps them: the outfit is incomplete until they are bought. Only
+ * where `picksOffered`: never over a shared wardrobe, while the page picks
+ * for a day or a trip, or in an edit of a planned or packed outfit, where
+ * Save plans, packs or keeps a held outfit and a piece to buy would refuse
+ * it. With no rows to keep (an empty closet or capsule), PicksLink.
  */
 function PicksToggle({ context }: { context: RowContext }) {
   const { state } = context;
-  const destination = state.destination?.kind ?? 'none';
-  if (context.viewOwner !== undefined || destination !== 'none') return null;
+  if (!context.picksOffered) return null;
   const on = state.picks === true;
   return (
     <div class="px-4">
@@ -581,10 +590,33 @@ function ScheduleFields(props: { day?: IsoDate; occasion?: Occasion }) {
   );
 }
 
+/**
+ * The switch with no rows to keep (an empty closet or capsule, picks off):
+ * a plain link turning Include picks on, which may bring rows of picks
+ * alone. PicksToggle's conditions.
+ */
+function PicksLink({ model }: { model: StylingModel }) {
+  if (!model.picksOffered) return null;
+  const on = model.state.picks === true;
+  return (
+    <a
+      href={stylingUrl({ ...model.state, picks: !on })}
+      class={`btn btn-sm rounded-full ${on ? 'btn-primary' : 'btn-outline'}`}
+      role="switch"
+      aria-checked={on ? 'true' : 'false'}
+      data-styling-picks={on ? 'on' : 'off'}
+    >
+      {on && <span aria-hidden="true">✓</span>}
+      {t('styling.INCLUDE_PICKS')}
+    </a>
+  );
+}
+
 function Empty({ model }: { model: StylingModel }) {
   if (model.capsule) {
     return (
       <EmptyState message={t('styling.EMPTY_CAPSULE')}>
+        <PicksLink model={model} />
         <a
           href={stylingUrl({ ...model.state, capsuleId: undefined })}
           class="btn btn-primary btn-sm"
@@ -596,6 +628,7 @@ function Empty({ model }: { model: StylingModel }) {
   }
   return (
     <EmptyState message={t('styling.EMPTY')}>
+      <PicksLink model={model} />
       {!model.shared && (
         <a href="/wardrobe/new" class="btn btn-primary btn-sm">
           {t('NEW_GARMENT')}

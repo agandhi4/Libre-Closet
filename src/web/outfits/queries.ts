@@ -39,6 +39,7 @@ import { prunePacked, tripsOfOutfit } from '../trips/packed';
 import { detachOutfitWears } from '../wears/queries';
 import { adoptPlannerOutfit } from '../week-plan/adopt';
 import {
+  offeredIntoSql,
   OutfitGarmentsGone,
   slotMayNameSql,
   slotRefusals,
@@ -481,7 +482,7 @@ async function insertSlots(
         inArray(garment.id, requested),
         slotMayNameSql({
           outfitId,
-          offered: sql`not ${outfitIsHeld(sql`${outfitId}::int`)}`,
+          offered: offeredIntoSql(outfitId),
         }),
       ),
     )

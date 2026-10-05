@@ -362,6 +362,88 @@ describe('Styling: Include picks (#335)', () => {
     });
   });
 
+  describe('where the switch is offered', () => {
+    it('an empty closet, or an empty capsule, offers it as a link: picks alone make rows', async () => {
+      const cookie = await t.register('empty-closet-picks@example.com');
+      await createWishlistItem(t, {
+        name: 'First coat',
+        category: 'outerwear',
+        cookie,
+      });
+      const empty = unescapeHtml((await get('/styling', cookie)).body);
+      expect(empty).toMatch(
+        /<a href="\/styling\?picks=1"[^>]*role="switch"[^>]*aria-checked="false"/,
+      );
+      const on = (await get('/styling?picks=1', cookie)).body;
+      expect(on).toContain('data-to-buy');
+      expect(on).toContain('data-styling-row="layer"');
+      const capsule = await t.inject({
+        method: 'POST',
+        url: '/capsules',
+        payload: { name: 'Empty for now' },
+      });
+      const capsuleId = Number(
+        /^\/capsules\/(\d+)/.exec(String(capsule.headers.location))![1],
+      );
+      const inCapsule = unescapeHtml(
+        (await get(`/styling?capsule=${capsuleId}`)).body,
+      );
+      expect(inCapsule).toContain(
+        `href="/styling?capsule=${capsuleId}&picks=1"`,
+      );
+    });
+
+    it('an edit of a planned outfit offers none, and its rows drop a pick posted to them', async () => {
+      // Garment sets of their own: a save of a set already saved reuses it.
+      const saved = await save({
+        role: ['bottom'],
+        garmentId: [String(jeans)],
+        lock: [''],
+        name: 'Planned jeans',
+      });
+      const id = Number(
+        /^\/outfits\/(\d+)/.exec(String(saved.headers.location))![1],
+      );
+      expect(
+        (
+          await t.inject({
+            method: 'POST',
+            url: '/calendar',
+            payload: { outfitId: String(id), date: t.today() },
+          })
+        ).statusCode,
+      ).toBe(302);
+      const page = (await get(`/styling?outfit=${id}&picks=1`)).body;
+      expect(page).not.toContain('data-styling-picks');
+      expect(page).not.toContain('data-to-buy');
+      const rows = await get(
+        `/styling/row?${rowsQuery(
+          [
+            ['layer', blazerOne, false],
+            ['top', tee, false],
+          ],
+          { outfit: String(id), picks: '1' },
+        )}`,
+      );
+      expect(carries(rows.body, blazerOne)).toBe(false);
+      expect(carries(rows.body, tee)).toBe(true);
+      expect(switchOf(rows.body)).toBeUndefined();
+      // Unplanned, the same edit offers it again.
+      const unplanned = await save({
+        role: ['top'],
+        garmentId: [String(tee)],
+        lock: [''],
+        name: 'Tee alone',
+      });
+      const free = Number(
+        /^\/outfits\/(\d+)/.exec(String(unplanned.headers.location))![1],
+      );
+      expect(
+        switchOf((await get(`/styling?outfit=${free}&picks=1`)).body)?.checked,
+      ).toBe('true');
+    });
+  });
+
   describe('Shuffle and "Add row"', () => {
     it('Shuffle never draws a pick, and keeps a locked one', async () => {
       const res = await get(

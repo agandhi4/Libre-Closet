@@ -5,7 +5,7 @@ import type { GarmentStatus } from '../../wardrobe/status';
 import { HttpError } from '../errors';
 import { t } from '../i18n';
 import { inCloset, offeredToStyle } from '../wardrobe/status';
-import type { PieceToBuy } from './references';
+import { outfitIsHeld, type PieceToBuy } from './references';
 
 /**
  * A save that names a garment it cannot hold is refused whole (#219):
@@ -27,6 +27,16 @@ export type Holdable = 'closet' | 'wardrobe';
 
 function holds(holdable: Holdable, status: GarmentStatus): boolean {
   return holdable === 'wardrobe' || status === 'closet';
+}
+
+/**
+ * Whether outfit `outfitId` may take a garment not bought yet: while
+ * nothing holds it (an incomplete outfit is never planned or packed). The
+ * `offered` of slotMayNameSql for the writer (insertSlots) and for
+ * Styling's rows that edit the outfit (rowGarmentsSql), so they agree.
+ */
+export function offeredIntoSql(outfitId: number): SQL {
+  return sql`not ${outfitIsHeld(sql`${outfitId}::int`)}`;
 }
 
 /**

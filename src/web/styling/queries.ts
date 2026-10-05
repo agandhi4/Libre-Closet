@@ -20,7 +20,7 @@ import {
 } from '../../wardrobe/properties';
 import type { GarmentStatus } from '../../wardrobe/status';
 import { inCapsule } from '../capsules/queries';
-import { slotMayNameSql } from '../outfits/gone-garments';
+import { offeredIntoSql, slotMayNameSql } from '../outfits/gone-garments';
 import { inCloset, offeredToStyle } from '../wardrobe/status';
 import {
   type RoleWindow,
@@ -253,7 +253,12 @@ export function rowGarmentsSql(
       inArray(garment.id, [...ids]),
       slotMayNameSql({
         outfitId: carry.editingOutfitId,
-        offered: carry.picks,
+        // Into an edited outfit, a pick only while nothing holds it: the
+        // writer's own condition, so a row never holds what Save refuses.
+        offered:
+          carry.picks &&
+          (carry.editingOutfitId === undefined ||
+            offeredIntoSql(carry.editingOutfitId)),
       }),
     )}
   )`;

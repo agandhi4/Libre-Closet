@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import type { Db } from '../../db/client';
 import { type ScalarValues, selectScalars } from '../../db/select-scalars';
 import type { Idea } from '../../wardrobe/generator';
@@ -21,6 +22,7 @@ import {
   readPool,
   styledGarmentsSql,
 } from '../gallery/queries';
+import { outfitIsHeld } from '../outfits/references';
 import { sharedWardrobesSql, toSharedWardrobe } from '../sharing/access';
 import type { WeatherService } from '../weather/service';
 import {
@@ -142,6 +144,12 @@ export interface StripsReads extends CheckedReads {
   capsules: CapsuleRef[];
   /** A shared wardrobe's owner by name (`menu`); undefined for one's own. */
   owner: string | undefined;
+  /**
+   * The outfit the rows edit is planned or packed: it takes no pick
+   * (offeredIntoSql), so the strips carry none and Include picks is not
+   * offered.
+   */
+  editingHeld: boolean;
 }
 
 /**
@@ -150,7 +158,8 @@ export interface StripsReads extends CheckedReads {
  * the page opens on), the checks, and with `menu` what a full page shows
  * around the rows (the capsule menu, whose wardrobe a grantee browses).
  * With the scope's `picks`, the garments offered to style with ride in
- * the same statement (picksSql). One statement.
+ * the same statement (picksSql), and whether the outfit the rows edit is
+ * held, which leaves them off the strips. One statement.
  */
 export async function stripsReads(
   db: Db,
@@ -170,15 +179,21 @@ export async function stripsReads(
       outfitId: ask.chosenOutfit,
     }),
     picks: scope.picks ? picksSql(ownerId) : undefined,
+    editingHeld:
+      scope.editingOutfitId === undefined
+        ? undefined
+        : outfitIsHeld(sql`${scope.editingOutfitId}::int`),
     capsules: ask.menu ? capsuleNamesSql(ownerId) : undefined,
     shares: ask.menu && shared ? sharedWardrobesSql(userId) : undefined,
   });
+  const editingHeld = row.editingHeld === true;
   return {
     ...readChecks(row),
     windows: withPicks(
       readRoleWindows(row.windows),
-      readGarments(row.picks ?? []),
+      editingHeld ? [] : readGarments(row.picks ?? []),
     ),
+    editingHeld,
     capsules: row.capsules ?? [],
     owner: row.shares
       ?.map(toSharedWardrobe)
