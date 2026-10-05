@@ -249,34 +249,37 @@ function PieceTile(props: {
   const toBuy = isPieceToBuy(piece);
   return (
     <li class="flex flex-col gap-1 min-w-0" data-piece={String(piece.id)}>
-      <div class="relative aspect-square overflow-hidden rounded-box bg-base-200 flex items-center justify-center p-1 sm:p-2">
-        {piece.photo ? (
-          <button
-            type="button"
-            class="size-full cursor-zoom-in"
-            aria-label={enlargeLabel(name)}
-            {...viewerTrigger(props.viewerSet, piece.photo)}
-          >
-            <img
-              src={imageUrl(piece.photo, 'thumb')}
-              alt=""
-              class="size-full object-contain"
-              width="200"
-              height="200"
-              loading={props.eager ? 'eager' : 'lazy'}
-              decoding="async"
-            />
-          </button>
-        ) : (
-          <HangerIcon class="size-8 text-muted" strokeWidth="1.5" />
-        )}
+      {/* The badge sits outside the clipped photo frame, so its 44 px hit area is never cut off. */}
+      <div class="relative">
+        <div class="aspect-square overflow-hidden rounded-box bg-base-200 flex items-center justify-center p-1 sm:p-2">
+          {piece.photo ? (
+            <button
+              type="button"
+              class="size-full cursor-zoom-in"
+              aria-label={enlargeLabel(name)}
+              {...viewerTrigger(props.viewerSet, piece.photo)}
+            >
+              <img
+                src={imageUrl(piece.photo, 'thumb')}
+                alt=""
+                class="size-full object-contain"
+                width="200"
+                height="200"
+                loading={props.eager ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            </button>
+          ) : (
+            <HangerIcon class="size-8 text-muted" strokeWidth="1.5" />
+          )}
+        </div>
         {toBuy && (
           // The piece's page (This one, Bought it, its need's options): the
-          // badge is the link, its hit area grown to 44 px around it; the
-          // rest of the tile opens the viewer.
+          // badge is the link, its hit area a 44 px band centred on it (the
+          // ::after, never clipped); the rest of the tile opens the viewer.
           <a
             href={`/wardrobe/${piece.id}`}
-            class={`badge badge-xs sm:badge-sm absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap after:absolute after:-inset-x-2 after:-inset-y-3 ${piece.setAside ? 'badge-warning' : 'badge-accent'}`}
+            class={`badge badge-xs sm:badge-sm absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap after:absolute after:-inset-x-2 after:top-1/2 after:h-11 after:-translate-y-1/2 ${piece.setAside ? 'badge-warning' : 'badge-accent'}`}
             aria-label={t('outfits.muse.PIECE_LINK', {
               name,
               label: badgeText(piece),

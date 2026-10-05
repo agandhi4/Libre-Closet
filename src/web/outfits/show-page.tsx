@@ -3,6 +3,7 @@ import { PostForm } from '../auth/form';
 import type { IsoDate } from '../calendar/calendar-date';
 import { dayLabel, occasionLabel } from '../calendar/labels';
 import { AlreadySavedToast } from '../gallery/already-saved';
+import type { AlreadySaved } from '../gallery/urls';
 import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
@@ -55,8 +56,8 @@ export function OutfitPage(props: {
   entries: OutfitEntries;
   /** The household's today: the Plan sheet's first day. */
   today: IsoDate;
-  /** The gallery's pick found this outfit already saved (?alreadySaved=1). */
-  alreadySaved?: boolean;
+  /** The gallery's pick or a save found this outfit already saved (?alreadySaved=). */
+  alreadySaved?: AlreadySaved;
   /** A reaction to Muse's proposal came back here (`?decided=`). */
   toast?: DecisionToast;
 }) {
@@ -124,7 +125,7 @@ export function OutfitPage(props: {
         {outfit.garments.length > 0 && <GarmentList outfit={outfit} />}
       </main>
       {mayBePlanned && <PlanSheet outfitId={outfit.id} today={props.today} />}
-      <AlreadySavedToast shown={props.alreadySaved === true} />
+      <AlreadySavedToast kind={props.alreadySaved} />
       <DecisionToastView toast={props.toast} />
       <Dock ctx={ctx} />
     </Layout>

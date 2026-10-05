@@ -2,6 +2,7 @@ import type { FastifyPluginCallbackTypebox } from '@fastify/type-provider-typebo
 import { Type } from '@sinclair/typebox';
 import { sessionUserId } from '../auth/require-session';
 import { HttpError } from '../errors';
+import { alreadySavedOf } from '../gallery/urls';
 import type { WebOptions } from '../plugin';
 import { navigateTo, renderFragment, renderPage } from '../render';
 import { DEFAULT_OCCASION } from '../../wardrobe/occasions';
@@ -187,7 +188,7 @@ export const calendarRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         <CalendarPage
           ctx={viewContext(reply)}
           view={view}
-          alreadySaved={request.query.alreadySaved === '1'}
+          alreadySaved={alreadySavedOf(request.query.alreadySaved)}
           banner={banner}
           undone={
             undone !== undefined && /^\d+$/.test(undone)

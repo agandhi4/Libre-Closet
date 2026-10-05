@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   garment,
@@ -6,6 +6,7 @@ import {
   outfitCalendar,
   personalAccessToken,
 } from '../../src/db/schema';
+import { wearOutfitOn } from '../../src/web/calendar/queries';
 import { createGarment, createWishlistItem } from './garments';
 import {
   createTestApp,
@@ -390,6 +391,88 @@ describe('Muse’s outfits (#335)', () => {
       expect(page).not.toContain('data-outfit-plan=""');
       expect(page).not.toContain('id="outfit-plan-sheet"');
       expect(page).toContain(`action="/outfits/${id}/love"`);
+    });
+
+    it('a replace and a wear refuse it too (setEntryOutfit, planToWear)', async () => {
+      const id = await proposed('Not yours, replaced', [
+        tee,
+        shoes,
+        await belt(),
+      ]);
+      const own = await post('/outfits', {
+        name: 'Own, planned',
+        notes: '',
+        category: ['tops', 'accessories'],
+        garmentId: [tee, await belt()].map(String),
+        scheduleDate: t.today(),
+      });
+      expect(own.statusCode).toBe(302);
+      const [entry] = await t.db
+        .select({ id: outfitCalendar.id, outfitId: outfitCalendar.outfitId })
+        .from(outfitCalendar)
+        .where(eq(outfitCalendar.day, t.today()))
+        .orderBy(desc(outfitCalendar.id))
+        .limit(1);
+      const replaced = await post('/calendar', {
+        outfitId: id,
+        date: t.today(),
+        replace: entry.id,
+      });
+      expect(replaced.statusCode).toBe(409);
+      expect(unescapeHtml(replaced.body)).toContain('Save it first');
+      const [kept] = await t.db
+        .select({ outfitId: outfitCalendar.outfitId })
+        .from(outfitCalendar)
+        .where(eq(outfitCalendar.id, entry.id));
+      expect(kept.outfitId).toBe(entry.outfitId);
+      await expect(
+        wearOutfitOn(t.db, {
+          ownerId: t.owner.id,
+          outfitId: id,
+          day: t.today(),
+          occasion: 'all-day',
+          at: new Date(),
+          today: t.today(),
+        }),
+      ).rejects.toMatchObject({ name: 'OutfitNotYours', statusCode: 409 });
+      expect(
+        await t.db
+          .select({ id: outfitCalendar.id })
+          .from(outfitCalendar)
+          .where(eq(outfitCalendar.outfitId, id)),
+      ).toEqual([]);
+    });
+
+    it('a save of an incomplete proposal’s set with a day is refused whole: the proposal stays pending', async () => {
+      const extra = await belt();
+      const id = await proposed('Still pending', [blazer, jeans, extra]);
+      const res = await post('/outfits', {
+        name: 'Same set, planned',
+        notes: '',
+        category: ['outerwear', 'bottoms', 'accessories'],
+        garmentId: [blazer, jeans, extra].map(String),
+        scheduleDate: t.today(),
+      });
+      expect(res.statusCode).toBe(409);
+      expect(await rowOf(id)).toMatchObject({
+        reaction: 'proposed',
+        reactedAt: null,
+      });
+    });
+
+    it('a save of its set says it saved Muse’s outfit, not "Already saved"', async () => {
+      const extra = await belt();
+      const id = await proposed('Saved from Muse', [jeans, extra]);
+      const res = await post('/outfits', {
+        name: 'Mine now',
+        notes: '',
+        category: ['bottoms', 'accessories'],
+        garmentId: [jeans, extra].map(String),
+      });
+      expect(res.headers.location).toBe(`/outfits/${id}?alreadySaved=muse`);
+      const page = unescapeHtml((await get(String(res.headers.location))).body);
+      expect(page).toContain('Saved Muse’s outfit: it’s yours now');
+      expect(page).not.toContain('Already saved');
     });
 
     it('a Styling save of its garments with a day adopts it: loved, then planned', async () => {

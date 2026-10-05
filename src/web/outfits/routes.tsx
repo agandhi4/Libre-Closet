@@ -9,7 +9,7 @@ import type { WebOptions } from '../plugin';
 import { navigateTo, renderPage } from '../render';
 import { DEFAULT_OCCASION } from '../../wardrobe/occasions';
 import { IsoDateSchema, OccasionSchema, RowId } from '../schemas';
-import { ALREADY_SAVED_FLAG } from '../gallery/urls';
+import { alreadySavedOf, alreadySavedParam } from '../gallery/urls';
 import { stylingUrl } from '../styling/urls';
 import { viewContext } from '../view-context';
 import { type OutfitDestination, parseDestination } from './destination';
@@ -194,8 +194,15 @@ function linkedReturnTo(
  * outfit; either says "Already saved" when the garments were an outfit
  * already (createOutfit reused it, ALREADY_SAVED_FLAG).
  */
-function afterSave(body: OutfitForm, id: number, alreadySaved = false): string {
-  const flag = alreadySaved ? `${ALREADY_SAVED_FLAG}=1` : '';
+function afterSave(
+  body: OutfitForm,
+  id: number,
+  saved: { alreadySaved: boolean; adoptedProposal: boolean } = {
+    alreadySaved: false,
+    adoptedProposal: false,
+  },
+): string {
+  const flag = alreadySavedParam(saved);
   if (body.returnTo === '/calendar') {
     const week = body.returnToWeek || body.scheduleDate;
     return week
@@ -316,7 +323,7 @@ export const outfitRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           outfit={found.outfit}
           entries={found.entries}
           today={today}
-          alreadySaved={request.query.alreadySaved === '1'}
+          alreadySaved={alreadySavedOf(request.query.alreadySaved)}
           toast={decisionToastOf(request.query[DECISION_FLAG])}
         />,
       );
@@ -350,10 +357,7 @@ export const outfitRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           ? `Outfit form by user ${ownerId}: its garments are already outfit ${result.id}, nothing created (${describeSave(result, input.plan)})${result.adopted ? '; taken over from the week planner' : ''}`
           : `Outfit ${result.id} created by user ${ownerId}: ${describeSave(result, input.plan)}`,
       );
-      return reply.redirect(
-        afterSave(request.body, result.id, result.alreadySaved),
-        302,
-      );
+      return reply.redirect(afterSave(request.body, result.id, result), 302);
     },
   );
 

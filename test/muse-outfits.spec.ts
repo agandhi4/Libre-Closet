@@ -242,6 +242,25 @@ for (const [label, device] of [
         page.locator(`[data-muse-outfit="${ids[3]}"] [data-muse-primary]`),
       ).toHaveAttribute('data-muse-primary', 'save');
       if (label === '390') {
+        // A to-buy piece's badge (its page's link) is hittable over a full
+        // 44 px band: the points 21 px above and below its middle land on it.
+        const badge = page
+          .locator(`[data-muse-outfit="${ids[1]}"] [data-piece-link]`)
+          .first();
+        await badge.scrollIntoViewIfNeeded();
+        const hits = await badge.evaluate((link) => {
+          const box = link.getBoundingClientRect();
+          const x = box.left + box.width / 2;
+          const y = box.top + box.height / 2;
+          return [-21, 0, 21].map(
+            (dy) =>
+              document
+                .elementFromPoint(x, y + dy)
+                ?.closest('[data-piece-link]') === link,
+          );
+        });
+        expect(hits).toEqual([true, true, true]);
+        await page.evaluate(() => window.scrollTo(0, 0));
         for (const primary of await page.locator('[data-muse-primary]').all()) {
           expect((await primary.boundingBox())!.height).toBeGreaterThanOrEqual(
             44,

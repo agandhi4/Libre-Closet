@@ -110,7 +110,9 @@ export async function adoptProposal(
 ): Promise<boolean> {
   const loved = await reactToOutfit(tx, ownerId, outfitId, { event: 'love' });
   if (loved.ok || loved.reason !== 'not-allowed') return loved.ok;
-  // Set aside: Undo first (the machine's only way back), then Love.
+  // Set aside: Undo first (the machine's only way back), then Love. Its
+  // result needs no check: Love only refused a set-aside one, which Undo
+  // takes, and the Love after it answers for both.
   await reactToOutfit(tx, ownerId, outfitId, { event: 'reconsider' });
   return (await reactToOutfit(tx, ownerId, outfitId, { event: 'love' })).ok;
 }

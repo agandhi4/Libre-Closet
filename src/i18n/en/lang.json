@@ -1157,6 +1157,7 @@
     },
     "PLAN_IDEAS": "Choose from ideas",
     "ALREADY_SAVED": "Already saved: this outfit was picked before.",
+    "SAVED_MUSE": "Saved Muse’s outfit: it’s yours now",
     "FOR_TRIP": "For {name}",
     "PICK_TRIP": "Add to the trip"
   },

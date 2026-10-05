@@ -112,6 +112,8 @@ export interface CreateResult extends SaveResult {
   name: string | null;
   /** The garments were already an outfit of the owner's: it was reused, nothing was created. */
   alreadySaved: boolean;
+  /** That outfit was one of Muse's proposals, which this save made the owner's (#335, adoptProposal). */
+  adoptedProposal: boolean;
   /**
    * A person's save took over what the week planner had made of it: the
    * reused outfit (no longer the planner's to remove) or the entry on the
@@ -717,6 +719,7 @@ export function createOutfit(
       slots: input.slots.length,
       schedule,
       alreadySaved: false,
+      adoptedProposal: false,
       adopted: false,
     };
   });
@@ -739,9 +742,10 @@ export async function reuseOutfit(
   // any plan: a proposal not theirs may not be held (outfitMayBeHeld). The
   // week planner never adopts one (its ideas never equal a saved set:
   // savedSlotsSql counts proposals).
-  if (existing.pending && plan?.plannedBy !== 'auto') {
-    await adoptProposal(tx, ownerId, existing.id);
-  }
+  const adoptedProposal =
+    existing.pending &&
+    plan?.plannedBy !== 'auto' &&
+    (await adoptProposal(tx, ownerId, existing.id));
   const scheduled =
     plan &&
     (await insertEntry(tx, { ownerId, outfitId: existing.id, ...plan }));
@@ -756,6 +760,7 @@ export async function reuseOutfit(
     slots: 0,
     schedule: scheduled?.outcome,
     alreadySaved: true,
+    adoptedProposal,
     adopted: outfitAdopted || entryAdopted,
   };
 }
