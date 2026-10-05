@@ -2,6 +2,7 @@ import { imageUrl } from '../files/image-url';
 import { t } from '../i18n';
 import { HangerIcon } from '../layout/parts';
 import type { GarmentOutfit } from './queries';
+import { buyFirstNote } from './to-buy';
 
 /** Garments shown per saved outfit: three fit beside the name at phone width. */
 const THUMBS = 3;
@@ -9,14 +10,17 @@ const THUMBS = 3;
 /**
  * One saved outfit as a submit button of a picking form (its id is the
  * submitter's value, `outfitId`): the calendar's plan page and a trip's add
- * page (#10). `note` says why it is disabled (already on the day, already
- * on the trip), since picking it again would change nothing.
+ * page (#10). Disabled, saying why, when picking it would change nothing
+ * (`note`: already on the day, already on the trip) or be refused: an
+ * incomplete outfit (#335) is neither planned nor packed until its pieces
+ * are bought.
  */
 export function SavedOutfitButton(props: {
   outfit: GarmentOutfit;
   note: string | undefined;
 }) {
-  const { outfit, note } = props;
+  const { outfit } = props;
+  const note = props.note ?? buyFirstNote(outfit.garments);
   return (
     <button
       type="submit"
