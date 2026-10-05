@@ -8,7 +8,6 @@ import {
   personalAccessToken,
 } from '../../src/db/schema';
 import { MAX_OPTIONS_PER_GROUP } from '../../src/wardrobe/suggestions';
-import { RETIRED_TOOLS } from '../../src/web/mcp/tools/retired';
 import { markSuggestion } from '../../src/web/wishlist/decisions';
 import { FEEDBACK_MARGIN_MS } from '../../src/web/wishlist/feedback';
 import { createGarment, createWishlistItem, garmentRow } from './garments';
@@ -20,7 +19,7 @@ import {
   productShot,
   startLinkSites,
 } from './link-sites';
-import { callTool, createAccessToken, tool } from './mcp';
+import { callTool, createAccessToken, mcpRequest, tool } from './mcp';
 
 /**
  * Muse's MCP tools (#337, docs/plans/2026-10-05-muse-suggestions.md
@@ -29,8 +28,8 @@ import { callTool, createAccessToken, tool } from './mcp';
  * (suggest_outfit), what stands where (list_suggestions), the closet's
  * coverage, and the owner's decisions coming back (get_suggestion_feedback)
  * with the never-again rules: a dismissed product's link, a need set
- * aside and an outfit declined are refused. The plans' tools answer their
- * successor's name. Rows are asserted through t.db.
+ * aside and an outfit declined are refused. The plans' tools are gone.
+ * Rows are asserted through t.db.
  */
 
 interface Feedback {
@@ -709,31 +708,28 @@ describe('MCP: Muse’s tools', () => {
     });
   });
 
-  describe('the plans’ tools, retired', () => {
-    it.each(RETIRED_TOOLS)(
-      '%s answers its successor, whatever it is passed',
-      async (name) => {
-        const answer = await callTool(t, token, name, {
-          planId: 1,
-          anything: true,
-        });
-        expect(answer.isError).toBe(true);
-        expect(answer.value.error).toMatch(
-          new RegExp(`^${name} is retired: wardrobe plans are gone\\. Use `),
-        );
-      },
-    );
-
-    it('add_garment_from_link refuses a planItemId before fetching anything', async () => {
-      const hits = sites.hits.length;
-      const answer = await callTool(t, token, 'add_garment_from_link', {
-        url: await product('Unlinked'),
-        planItemId: 1,
-      });
-      expect(answer.isError).toBe(true);
-      expect(answer.value.error).toContain('suggest_garment');
-      expect(sites.hits.length).toBe(hits);
-    });
+  it('lists none of the plans’ tools, retired with plans (#337)', async () => {
+    const res = await mcpRequest(t, token, 'tools/list');
+    const listed = res
+      .json<{ result: { tools: { name: string }[] } }>()
+      .result.tools.map((listedTool) => listedTool.name);
+    for (const name of [
+      'create_plan',
+      'propose_plan_item',
+      'update_plan_item',
+      'list_plans',
+      'get_plan_gaps',
+      'get_plan_feedback',
+      'get_shopping_list',
+      'add_candidate',
+      'update_candidate',
+      'compare_plans',
+      'list_looks',
+      'propose_look',
+      'update_look',
+    ]) {
+      expect(listed).not.toContain(name);
+    }
   });
 
   it('never marks anything owned: a suggestion leaves the wishlist only through Bought it', async () => {
