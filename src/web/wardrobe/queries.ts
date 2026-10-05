@@ -10,6 +10,7 @@ import {
   isNull,
   lt,
   ne,
+  not,
   notInArray,
   or,
   type SQL,
@@ -35,7 +36,13 @@ import {
 import { dirtyCopiesSql, needsWash } from '../wears/queries';
 import { compareSizes } from './garment';
 import { GRID_PAGE_SIZE } from './grid-page-size';
-import { type GarmentScope, inCloset, inScope, ownedGarment } from './status';
+import {
+  type GarmentScope,
+  inCloset,
+  inScope,
+  onWishlist,
+  ownedGarment,
+} from './status';
 import {
   type Condition,
   type Formality,
@@ -672,14 +679,19 @@ export type DeleteOutcome =
  * without one. Nothing is deleted when the garment is not in `ownerId`'s
  * wardrobe, or not (any more) in `status` when one is given (buyCandidate's
  * clean-up of other candidates deletes only what is still on the wishlist,
- * so a candidate bought meanwhile is kept), or is a suggestion: those are
- * set aside through decide (src/web/wishlist/decisions.ts), never deleted,
+ * so a candidate bought meanwhile is kept), or is a suggestion still on the
+ * wishlist: those are set aside through decide (src/web/wishlist/decisions.ts), never deleted,
  * the one place that rule lives. The DELETE locks the row and judges its
  * conditions as a transaction it waited on committed them, as lockGarment
  * would, without a statement of its own (#161); only a refusal reads the
  * row again, to say which. Outfit slots that wore it are emptied by their
  * foreign key.
  */
+// Only while it is still wanted or set aside: a bought pick is an ordinary
+// owned garment, deleted like any (its group's undo copes with a nulled
+// resolved_garment_id).
+const isSuggestionOnWishlist = sql<boolean>`(${isNotNull(garment.suggestedAt)} and ${onWishlist()})`;
+
 export function deleteGarment(
   db: Queryable,
   id: number,
@@ -694,7 +706,7 @@ export function deleteGarment(
           eq(garment.id, id),
           eq(garment.ownerId, ownerId),
           status && eq(garment.status, status),
-          isNull(garment.suggestedAt),
+          not(isSuggestionOnWishlist),
         ),
       )
       .returning({ photoId: garment.photoId, status: garment.status });
@@ -706,7 +718,7 @@ export function deleteGarment(
       };
     }
     const [kept] = await tx
-      .select({ suggested: isNotNull(garment.suggestedAt) })
+      .select({ suggested: isSuggestionOnWishlist })
       .from(garment)
       .where(
         and(

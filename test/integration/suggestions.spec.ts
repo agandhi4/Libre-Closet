@@ -14,6 +14,8 @@ import {
 import { selectScalars } from '../../src/db/select-scalars';
 import {
   candidaciesOf,
+  changeCandidates,
+  MAX_CANDIDATES_PER_ITEM,
   rankedPurchasesSql,
 } from '../../src/web/plans/candidates';
 import { planCovers } from '../../src/web/plans/covers';
@@ -504,6 +506,74 @@ describe('suggestions', () => {
       });
       expect((await dismissal(unpicked)).reason).toBe('chose_another');
       expect((await dismissal(picked)).reason).toBeNull();
+    });
+
+    it('a bought pick is an ordinary garment: it can be deleted, and its group can still be undone', async () => {
+      const need = await group('Cap');
+      const a = await pick('Cap A', need, 1);
+      const b = await pick('Cap B', need, 2);
+      const bought = await post(`/wardrobe/${a}/bought`, {
+        acquiredOn: t.today(),
+        price: '30',
+      });
+      expect(bought.statusCode).toBe(303);
+      const res = await t.inject({ method: 'DELETE', url: `/wardrobe/${a}` });
+      expect(res.statusCode).toBeLessThan(400);
+      expect(await garmentRow(t, a)).toBeUndefined();
+      // The foreign key nulled what resolved it: the undo still reopens it.
+      expect(await groupRow(need)).toMatchObject({
+        status: 'resolved',
+        resolvedGarmentId: null,
+      });
+      expect(
+        await decide(t.db, ownerId, { kind: 'undo-group', groupId: need }),
+      ).toMatchObject({ ok: true, restored: [b] });
+      expect(await groupRow(need)).toMatchObject({ status: 'open' });
+      expect((await dismissal(b)).reason).toBeNull();
+    });
+
+    it('picks set aside in the plans review free their slots under the candidate cap', async () => {
+      const [plan] = await t.db
+        .insert(wardrobePlan)
+        .values({ ownerId, name: 'Muse cap plan', draftedByTokenId: tokenId })
+        .returning({ id: wardrobePlan.id });
+      const [item] = await t.db
+        .insert(planItem)
+        .values({ planId: plan.id, category: 'tops', review: 'proposed' })
+        .returning({ id: planItem.id });
+      const need = await group('Cap need');
+      const options: number[] = [];
+      for (let rank = 1; rank <= MAX_CANDIDATES_PER_ITEM; rank++) {
+        options.push(await pick(`Cap option ${rank}`, need, rank));
+      }
+      await changeCandidates(t.db, ownerId, {
+        add: { itemIds: [item.id], garmentIds: options },
+      });
+      const offered = options.map((garmentId) => `${item.id}:${garmentId}`);
+      const rejected = options.slice(2);
+      const res = await post(`/wardrobe/plans/${plan.id}/review`, {
+        shown: [String(item.id)],
+        pick: [`${item.id}:${options[0]}`],
+        note: [''],
+        offered,
+        reject: rejected.map((garmentId) => `${item.id}:${garmentId}`),
+        rejectReason: options.map((garmentId) =>
+          rejected.includes(garmentId) ? 'not this' : '',
+        ),
+      });
+      expect(res.statusCode, res.body).toBeLessThan(400);
+      for (const id of rejected) {
+        expect((await dismissal(id)).note).toBe('not this');
+      }
+      const fresh = await createWishlistItem(t, {
+        name: 'Cap option new',
+        category: 'tops',
+      });
+      expect(
+        await changeCandidates(t.db, ownerId, {
+          add: { itemIds: [item.id], garmentIds: [fresh] },
+        }),
+      ).toMatchObject({ added: 1 });
     });
 
     it('Bought it with the plan follow-up keeps the siblings, set aside', async () => {
