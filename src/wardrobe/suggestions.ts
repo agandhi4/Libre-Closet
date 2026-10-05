@@ -89,6 +89,39 @@ export type OutfitDismissReason = (typeof OUTFIT_DISMISS_REASONS)[number];
 /** Muse's options for one need: the most a group holds, ranked 1 to this. */
 export const MAX_OPTIONS_PER_GROUP = 5;
 
+/** A need's name ("A navy blazer"): a card's title. */
+export const NEED_NAME_MAX = 120;
+/** The agent's reasoning for a need, behind a tap on its screen. */
+export const NEED_NOTE_MAX = 1000;
+/** The agent's note on a pick: clamped under its card (the plans' candidate note's length). */
+export const PICK_NOTE_MAX = 240;
+
+/** Query parameters that say where a visitor came from, never which product. */
+const TRACKING_PARAM = /^(utm_.*|gclid|fbclid|ref)$/i;
+
+/**
+ * What makes two product links the same product, for the agent's "never
+ * propose again what was set aside" (#337: suggest_garment, matched by
+ * URL): the host in lower case (a URL's host already is), no fragment, no
+ * tracking parameters, no trailing slash on the path. The other
+ * parameters stay: a shop may name the colour or size in them. Undefined
+ * for a link that is not a URL (a stored link the garment form took).
+ */
+export function productUrlKey(url: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined;
+  }
+  const kept = [...parsed.searchParams].filter(
+    ([name]) => !TRACKING_PARAM.test(name),
+  );
+  const query = new URLSearchParams(kept).toString();
+  const path = parsed.pathname.replace(/\/+$/, '');
+  return `${parsed.protocol}//${parsed.host}${path}${query ? `?${query}` : ''}`;
+}
+
 /** A group as the writer read it. */
 export interface GroupState {
   status: OptionGroupStatus;

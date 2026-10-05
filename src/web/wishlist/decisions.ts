@@ -20,7 +20,8 @@ import { onWishlist, setGarmentStatus, wanted } from '../wardrobe/status';
  * The writers of suggestions and option groups (Muse, #333). decide is the
  * one writer of a decision: every This one, Not for me, Bought it's
  * settling of the group, Returned and Undo, and the plans pages' removals
- * of a suggestion. markSuggestion is the one writer of provenance. Both
+ * of a suggestion. markSuggestion is the one writer of provenance, and
+ * createOptionGroup of a new need (the agent's tools, #337). All three
  * hold the owner lock, and so does every other writer of option_group and
  * of a suggestion's columns (only drizzle/0040's migration wrote them
  * otherwise, alone at boot), so no row lock is needed. Nothing is deleted:
@@ -301,6 +302,75 @@ export function decide(
   });
 }
 
+/** The group's open options (on the wishlist, not set aside): what MAX_OPTIONS_PER_GROUP bounds. */
+function openOptionsSql(groupId: number): SQL<number> {
+  return sql<number>`(select count(*)::int from ${garment} where ${and(
+    eq(garment.suggestionGroupId, groupId),
+    wanted(),
+  )})`;
+}
+
+/** A product the agent suggested before, by its link: what a new suggestion is checked against. */
+export interface SuggestedProduct {
+  id: number;
+  sourceUrl: string;
+  /** Set aside: never proposed again, with its reason (null for a migrated rejection). */
+  dismissed: boolean;
+  dismissedReason: DismissReason | null;
+}
+
+/** Where markSuggestion would put a new pick of group `groupId`, judged before its product is fetched. */
+export interface SuggestionRoom {
+  /** missing: not the owner's; closed: resolved or set aside; full: MAX_OPTIONS_PER_GROUP open options. */
+  group: 'missing' | 'closed' | 'full' | 'room';
+  /** Every suggestion of the owner's with a link, in any state. */
+  products: SuggestedProduct[];
+}
+
+/**
+ * markSuggestion's rule read ahead, for suggest_garment (#337) to refuse
+ * before it spends a link import: the group's state and room, and the
+ * owner's suggested products to match the new link against
+ * (productUrlKey). One statement, no lock: markSuggestion judges again
+ * under the owner lock as it writes.
+ */
+export async function suggestionRoom(
+  db: Queryable,
+  ownerId: number,
+  groupId: number,
+): Promise<SuggestionRoom> {
+  const read = await selectScalars(db, {
+    status: sql<OptionGroupStatus | null>`(select ${optionGroup.status} from ${optionGroup} where ${and(
+      eq(optionGroup.id, groupId),
+      eq(optionGroup.ownerId, ownerId),
+    )})`,
+    openOptions: openOptionsSql(groupId),
+    products: sql<SuggestedProduct[]>`(
+      select coalesce(json_agg(json_build_object(
+        'id', ${garment.id},
+        'sourceUrl', ${garment.sourceUrl},
+        'dismissed', ${garment.dismissedAt} is not null,
+        'dismissedReason', ${garment.dismissedReason}
+      ) order by ${garment.id}), '[]')
+      from ${garment}
+      where ${and(
+        eq(garment.ownerId, ownerId),
+        sql`${garment.suggestedAt} is not null`,
+        sql`${garment.sourceUrl} is not null`,
+      )}
+    )`,
+  });
+  const group =
+    read.status === null
+      ? 'missing'
+      : read.status !== 'open'
+        ? 'closed'
+        : read.openOptions >= MAX_OPTIONS_PER_GROUP
+          ? 'full'
+          : 'room';
+  return { group, products: read.products };
+}
+
 /** What makes a wishlist garment a suggestion: who proposed it, where, why, and its rank. */
 export interface Provenance {
   tokenId: number | null;
@@ -327,10 +397,7 @@ export function markSuggestion(
   provenance: Provenance,
 ): Promise<'marked' | 'refused' | 'full'> {
   const { groupId } = provenance;
-  const openOptions = sql`(select count(*) from ${garment} where ${and(
-    eq(garment.suggestionGroupId, groupId ?? -1),
-    wanted(),
-  )})`;
+  const openOptions = openOptionsSql(groupId ?? -1);
   const groupOpen = sql`exists (select 1 from ${optionGroup} where ${and(
     eq(optionGroup.id, groupId ?? -1),
     eq(optionGroup.ownerId, ownerId),
@@ -370,5 +437,85 @@ export function markSuggestion(
       .from(garment)
       .where(markable);
     return markableRow ? 'full' : 'refused';
+  });
+}
+
+/** A new need as the agent states it (create_option_group, #337). */
+export interface NeedInput {
+  /** Trimmed, never blank. */
+  name: string;
+  /** Per piece, '300.00'; null for none. */
+  budget: string | null;
+  note: string | null;
+  /** The agent's token (null as Provenance's: a need with no agent to name). */
+  tokenId: number | null;
+}
+
+export type CreateGroupOutcome =
+  | { ok: true; id: number }
+  /** A need of that name is open already: add options to it instead. */
+  | { ok: false; reason: 'open'; id: number }
+  /**
+   * The owner set a need of that name aside: never proposed again (the
+   * agent's feedback), whatever the reason; the owner's Undo reopens it.
+   */
+  | {
+      ok: false;
+      reason: 'dismissed';
+      id: number;
+      dismissedReason: DismissReason | null;
+    };
+
+/**
+ * The one writer of a new option group: the owner's open need, its
+ * provenance the agent's token. A name is the need's identity for the
+ * agent's "never again" (doc section 5): the same name, trimmed and in
+ * any case, as an open need or one set aside is refused with that need;
+ * a resolved one is history (a need settled may come round again). Under
+ * the owner lock, so two calls with one name make one need; the lookup
+ * and the insert are one statement.
+ */
+export function createOptionGroup(
+  db: Queryable,
+  ownerId: number,
+  need: NeedInput,
+): Promise<CreateGroupOutcome> {
+  return ownerTransaction(db, ownerId, 'createOptionGroup', async (tx) => {
+    const { rows } = await tx.execute<{
+      id: number;
+      status: OptionGroupStatus | 'created';
+      dismissedReason: DismissReason | null;
+    }>(sql`
+      with same as (
+        select ${optionGroup.id} as id, ${optionGroup.status} as status,
+          ${optionGroup.dismissedReason} as dismissed_reason
+        from ${optionGroup}
+        where ${and(
+          eq(optionGroup.ownerId, ownerId),
+          sql`lower(trim(${optionGroup.name})) = lower(${need.name})`,
+          sql`${optionGroup.status} <> 'resolved'`,
+        )}
+        order by ${optionGroup.status} = 'open' desc, ${optionGroup.id} desc
+        limit 1
+      ),
+      created as (
+        insert into ${optionGroup} (owner_id, name, budget, note, suggested_by_token_id)
+        select ${ownerId}::int, ${need.name}::text, ${need.budget}::numeric,
+          ${need.note}::text, ${need.tokenId}::int
+        where not exists (select from same)
+        returning id
+      )
+      select id, 'created' as status, null as "dismissedReason" from created
+      union all
+      select id, status, dismissed_reason from same`);
+    const [row] = rows;
+    if (row.status === 'created') return { ok: true, id: row.id };
+    if (row.status === 'open') return { ok: false, reason: 'open', id: row.id };
+    return {
+      ok: false,
+      reason: 'dismissed',
+      id: row.id,
+      dismissedReason: row.dismissedReason,
+    };
   });
 }

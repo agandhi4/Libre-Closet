@@ -37,10 +37,12 @@ export interface LinkOverrides {
   category?: string;
   type?: string;
   size?: string;
+  /** The listed price, '149.00' (the form's own field: it validates it). */
+  price?: string;
   notes?: string;
 }
 
-/** More rows the save writes with the garment (add_candidate's link, 34b). */
+/** More rows the save writes with the garment (suggest_garment's provenance, #337). */
 export interface LinkSaveOptions {
   withGarment?: WithGarment;
 }
@@ -58,8 +60,9 @@ export interface LinkSaveOptions {
  * kept, and the garment page changes it.
  *
  * Lands where the caller says (add_garment_from_link defaults to the
- * wishlist, #18). add_candidate (34b) saves through it too, its candidate
- * link written in the garment's transaction (`withGarment`).
+ * wishlist, #18). suggest_garment (#337) saves through it too, the
+ * suggestion's provenance written in the garment's transaction
+ * (`withGarment`: markSuggestion, whose refusal rolls the garment back).
  */
 export async function addGarmentFromLink(
   ctx: ToolContext,
@@ -172,6 +175,7 @@ function withOverrides(
     name: overrides.name ?? values.name,
     category,
     size: overrides.size ?? values.size,
+    price: overrides.price ?? values.price,
     notes: overrides.notes ?? values.notes,
     replaces:
       overrides.replacesGarmentId === undefined

@@ -3,6 +3,7 @@ import {
   decideSuggestion,
   type GroupState,
   type PickState,
+  productUrlKey,
 } from './suggestions';
 
 const AT = new Date('2026-10-05T12:00:00.000Z');
@@ -385,5 +386,28 @@ describe('decideSuggestion', () => {
       dismiss: [{ garmentId: 1, reason: 'fit_size', note: null }],
       restore: [2],
     });
+  });
+});
+
+describe('productUrlKey', () => {
+  it('drops what does not name the product', () => {
+    expect(
+      productUrlKey(
+        'https://Shop.Example/products/blazer/?utm_source=muse&gclid=x&fbclid=y&ref=home#reviews',
+      ),
+    ).toBe('https://shop.example/products/blazer');
+  });
+
+  it('keeps what may name the variant', () => {
+    expect(
+      productUrlKey('https://shop.example/p/blazer?color=navy&utm_medium=x'),
+    ).toBe('https://shop.example/p/blazer?color=navy');
+    expect(productUrlKey('https://shop.example/p/blazer?color=navy')).not.toBe(
+      productUrlKey('https://shop.example/p/blazer?color=black'),
+    );
+  });
+
+  it('answers nothing for what is not a URL', () => {
+    expect(productUrlKey('not a link')).toBeUndefined();
   });
 });
