@@ -168,6 +168,8 @@ export async function stripsReads(
     chosen: readonly Chosen[];
     chosenOutfit?: number;
     menu?: boolean;
+    /** The capsule menu alone (`menu` reads it too): the scope a rows fragment replaces. */
+    capsules?: boolean;
   },
 ): Promise<StripsReads> {
   const { userId, ownerId, shared } = scope;
@@ -183,7 +185,7 @@ export async function stripsReads(
       scope.editingOutfitId === undefined
         ? undefined
         : outfitIsHeld(sql`${scope.editingOutfitId}::int`),
-    capsules: ask.menu ? capsuleNamesSql(ownerId) : undefined,
+    capsules: ask.menu || ask.capsules ? capsuleNamesSql(ownerId) : undefined,
     shares: ask.menu && shared ? sharedWardrobesSql(userId) : undefined,
   });
   const editingHeld = row.editingHeld === true;

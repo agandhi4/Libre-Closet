@@ -67,6 +67,7 @@ import {
 } from './reads';
 import {
   type SaveDraft,
+  ScopeMenu,
   type StylingModel,
   StylingPage,
   StylingRows,
@@ -676,22 +677,33 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       seed?: number;
       notice?: 'no-idea';
       context: RowContext;
+      /**
+       * The capsule menu again, out of band: "Add row" and the Include
+       * picks switch answer here, and the switch changes the state the
+       * menu's links carry (ScopeMenu).
+       */
+      scope?: { capsule: CapsuleRef | undefined; capsules: CapsuleRef[] };
     },
   ) {
     return renderFragment(
       reply,
-      <StylingRows
-        model={{
-          rows: stylingRows(
-            withEveryRole(input.states, input.windows),
-            input.windows,
-            input.held,
-          ),
-          seed: input.seed,
-          notice: input.notice,
-        }}
-        context={input.context}
-      />,
+      <>
+        <StylingRows
+          model={{
+            rows: stylingRows(
+              withEveryRole(input.states, input.windows),
+              input.windows,
+              input.held,
+            ),
+            seed: input.seed,
+            notice: input.notice,
+          }}
+          context={input.context}
+        />
+        {input.scope && (
+          <ScopeMenu {...input.scope} state={input.context.state} oob />
+        )}
+      </>,
     );
   }
 
@@ -783,6 +795,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         checkCapsule: true,
         heldIds: heldIdsOf(posted),
         chosen: chosenOf(posted),
+        capsules: true,
       });
       const wardrobe = wardrobeOf(
         scope,
@@ -803,6 +816,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           viewOwner: wardrobe.viewOwner,
           picksOffered: wardrobe.picksOffered,
         },
+        scope: { capsule: wardrobe.capsule, capsules: reads.capsules },
       });
     },
   );

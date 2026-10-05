@@ -332,6 +332,38 @@ describe('Styling: Include picks (#335)', () => {
       });
     });
 
+    it('replaces the capsule menu out of band, its links carrying the new state', async () => {
+      const created = await t.inject({
+        method: 'POST',
+        url: '/capsules',
+        payload: { name: 'Office' },
+      });
+      const capsuleId = Number(
+        /^\/capsules\/(\d+)/.exec(String(created.headers.location))![1],
+      );
+      const rows: [string, number | null, boolean][] = [['top', tee, false]];
+      const scopeOf = (body: string) => {
+        const html = unescapeHtml(body);
+        const start = html.indexOf('id="styling-scope"');
+        expect(start, 'the scope menu').toBeGreaterThan(-1);
+        return html.slice(
+          html.lastIndexOf('<div', start),
+          html.indexOf('</details>', start),
+        );
+      };
+      const on = scopeOf(
+        (await get(`/styling/row?${rowsQuery(rows, { picks: '1' })}`)).body,
+      );
+      expect(on).toContain('hx-swap-oob="true"');
+      expect(on).toContain(`href="/styling?capsule=${capsuleId}&picks=1"`);
+      expect(on).toContain('href="/styling?picks=1"');
+      const off = scopeOf(
+        (await get(`/styling/row?${rowsQuery(rows, { picks: '' })}`)).body,
+      );
+      expect(off).toContain(`href="/styling?capsule=${capsuleId}"`);
+      expect(off).not.toContain('picks=1');
+    });
+
     it('off again, a pick chosen leaves its row; the closet’s stay', async () => {
       const off = await get(
         `/styling/row?${rowsQuery(

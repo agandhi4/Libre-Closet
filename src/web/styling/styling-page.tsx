@@ -119,7 +119,13 @@ export function StylingPage(props: { ctx: ViewContext; model: StylingModel }) {
         // Save posts natively and lands elsewhere (the outfit, a week); on a
         // shared wardrobe nothing saves.
         formPage={!model.shared}
-        scope={<ScopeMenu model={model} />}
+        scope={
+          <ScopeMenu
+            capsule={model.capsule}
+            capsules={model.capsules}
+            state={model.state}
+          />
+        }
       />
       <PageMain width="wide" class="pt-20 pb-40 flex flex-col gap-3">
         <Header model={model} />
@@ -351,9 +357,32 @@ function DestinationLine({ model }: { model: StylingModel }) {
   return null;
 }
 
-/** The capsule scope: every row, and Shuffle's pool, only its garments. */
-function ScopeMenu({ model }: { model: StylingModel }) {
-  const { capsule, capsules, state } = model;
+/**
+ * The capsule scope: every row, and Shuffle's pool, only its garments. Its
+ * links carry the page's state (Include picks among it), so the switch's
+ * answer replaces it out of band (`oob`, the rows fragment of
+ * GET /styling/row): no link outside the rows keeps a stale state. Its
+ * wrapper is there without capsules too, so the swap always finds it.
+ */
+export function ScopeMenu(props: {
+  capsule: CapsuleRef | undefined;
+  capsules: readonly CapsuleRef[];
+  state: StylingState;
+  oob?: boolean;
+}) {
+  return (
+    <div id="styling-scope" hx-swap-oob={props.oob ? 'true' : undefined}>
+      <CapsuleLinks {...props} />
+    </div>
+  );
+}
+
+function CapsuleLinks(props: {
+  capsule: CapsuleRef | undefined;
+  capsules: readonly CapsuleRef[];
+  state: StylingState;
+}) {
+  const { capsule, capsules, state } = props;
   if (capsules.length === 0) return null;
   return (
     <details class="dropdown dropdown-end">

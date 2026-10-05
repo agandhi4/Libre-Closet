@@ -88,6 +88,10 @@ for (const [label, device] of [
       await expect(page).toHaveURL('/styling?picks=1');
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
       await expect(topChoice).toHaveValue(top);
+      // The capsule menu outside the rows came with them, its links on.
+      await expect(
+        page.locator('#styling-scope a[href*="capsule="]').first(),
+      ).toHaveAttribute('href', /picks=1/);
       // The blazer need's open options, in Muse's rank, side by side.
       const [one, two] = seed.options[0];
       const layer = await stripOf(page, 'layer');
