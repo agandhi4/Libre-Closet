@@ -55,8 +55,6 @@ export interface StylingModel {
   /** Shuffle's next seed; absent until something shuffled (the bare page stays byte-stable). */
   seed?: number;
   capsule?: CapsuleRef;
-  /** `?plan=`: the plan whose candidates are on the strips, badged "To buy". */
-  plan?: { id: number; name: string };
   /** The addressed wardrobe's capsules, for the scope menu. */
   capsules: CapsuleRef[];
   /** `?outfit=`: the saved outfit being changed. */
@@ -189,9 +187,7 @@ function StateFields({ model }: { model: StylingModel }) {
       {state.capsuleId !== undefined && (
         <input type="hidden" name="capsule" value={String(state.capsuleId)} />
       )}
-      {state.planId !== undefined && (
-        <input type="hidden" name="plan" value={String(state.planId)} />
-      )}
+      {state.picks && <input type="hidden" name="picks" value="1" />}
       {state.ownerId !== undefined && (
         <input type="hidden" name="ownerId" value={String(state.ownerId)} />
       )}
@@ -238,11 +234,7 @@ function Header({ model }: { model: StylingModel }) {
           )}
         </div>
       )}
-      {model.plan && (
-        <p class="text-sm" data-styling-plan={model.plan.id}>
-          {t('styling.PLAN', { name: model.plan.name })}
-        </p>
-      )}
+      <PicksToggle model={model} />
       {model.outfit && (
         <p class="text-sm" data-styling-outfit={model.outfit.id}>
           {t('styling.EDITING', {
@@ -268,6 +260,32 @@ function Header({ model }: { model: StylingModel }) {
         {t('styling.OFFLINE')}
       </p>
     </div>
+  );
+}
+
+/**
+ * Include picks (#335): a boosted link that turns `?picks=1` on or off, so
+ * the toggle is URL state and the bare page (off) stays byte-stable. On,
+ * every strip leads with the garments not bought yet that are offered to
+ * style with (picksSql), badged "To buy", and Save keeps them: the outfit
+ * is incomplete until they are bought. Never over a shared wardrobe, and
+ * never while the page picks for a day or a trip, where Save plans or
+ * packs the outfit and a piece to buy would refuse it.
+ */
+function PicksToggle({ model }: { model: StylingModel }) {
+  if (model.shared || model.destination.kind !== 'none') return null;
+  const on = model.state.picks === true;
+  return (
+    <a
+      href={stylingUrl({ ...model.state, picks: !on })}
+      class={`btn btn-sm rounded-full self-start ${on ? 'btn-primary' : 'btn-outline'}`}
+      role="switch"
+      aria-checked={on ? 'true' : 'false'}
+      data-styling-picks={on ? 'on' : 'off'}
+    >
+      {on && <span aria-hidden="true">✓</span>}
+      {t('styling.INCLUDE_PICKS')}
+    </a>
   );
 }
 
