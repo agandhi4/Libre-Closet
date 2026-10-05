@@ -10,6 +10,7 @@ import {
 import { MAX_OPTIONS_PER_GROUP } from '../../src/wardrobe/suggestions';
 import { RETIRED_TOOLS } from '../../src/web/mcp/tools/retired';
 import { markSuggestion } from '../../src/web/wishlist/decisions';
+import { FEEDBACK_MARGIN_MS } from '../../src/web/wishlist/feedback';
 import { createGarment, createWishlistItem, garmentRow } from './garments';
 import { createTestApp, type TestApp } from './harness';
 import {
@@ -577,6 +578,46 @@ describe('MCP: Muse’s tools', () => {
       expect(everything.since).toBeNull();
       expect(everything.purchases.map((p) => p.garmentId)).toContain(bag.id);
       expect(everything.picksSetAside.length).toBeGreaterThan(0);
+    });
+
+    it('answers an until behind the read, so a decision stamped before the read and committed after it is told next round', async () => {
+      const groupId = await need('A linen blazer');
+      const blazer = await createWishlistItem(t, {
+        name: 'Linen blazer',
+        category: 'outerwear',
+      });
+      await markSuggestion(t.db, t.owner.id, blazer, {
+        tokenId,
+        groupId,
+        note: null,
+        rank: null,
+      });
+      // The last round ended a minute ago (its cursor behind its read).
+      await t.db
+        .update(personalAccessToken)
+        .set({ feedbackReadAt: sql`now() - interval '1 minute'` })
+        .where(eq(personalAccessToken.id, tokenId));
+      const read = await feedback();
+      const until = Date.parse(read.until);
+      expect(until).toBeLessThan(Date.now() - FEEDBACK_MARGIN_MS / 2);
+      // A decision whose transaction began a second after `until`, before
+      // the read, and committed only now (decide stamps its start).
+      await t.db
+        .update(garment)
+        .set({
+          dismissedAt: new Date(until + 1_000),
+          dismissedReason: 'colour',
+        })
+        .where(eq(garment.id, blazer));
+      // The round ends as part A2's finish_round moves the cursor.
+      await t.db
+        .update(personalAccessToken)
+        .set({
+          feedbackReadAt: sql`greatest(${personalAccessToken.feedbackReadAt}, least(${read.until}::timestamptz, now()))`,
+        })
+        .where(eq(personalAccessToken.id, tokenId));
+      const next = await feedback();
+      expect(next.picksSetAside.map((p) => p.garmentId)).toContain(blazer);
     });
 
     it('tells a migrated reaction (no reacted_at) before the first round only', async () => {

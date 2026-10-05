@@ -117,9 +117,18 @@ export async function addGarmentFromLink(
     });
   } catch (error) {
     // A refusal from `withGarment` (suggest_garment's mark) rolled the
-    // garment back: its photo is nobody's, like a refused form's.
+    // garment back: its photo is nobody's, like a refused form's. A
+    // failed discard is logged; the refusal is still the answer.
     if (photo) {
-      await discardPendingPhoto(deps, photo, { userId: ctx.userId, ownerId });
+      await discardPendingPhoto(deps, photo, {
+        userId: ctx.userId,
+        ownerId,
+      }).catch((discardError: unknown) => {
+        ctx.webLogger.error(
+          { err: discardError },
+          `Pending photo ${photo} of user ${ctx.userId} not discarded after a refused save (MCP)`,
+        );
+      });
     }
     throw error;
   }

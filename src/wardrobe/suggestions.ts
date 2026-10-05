@@ -98,7 +98,7 @@ export const PICK_NOTE_MAX = 240;
 
 /** Query parameters that say where a visitor came from, never which product. */
 const TRACKING_PARAM =
-  /^(utm_.*|gclid|fbclid|msclkid|srsltid|igshid|mc_cid|mc_eid|_ga|spm|ref)$/i;
+  /^(utm_.*|gclid|fbclid|msclkid|srsltid|igshid|mc_cid|mc_eid|_ga|spm)$/i;
 
 /** A mobile or www host is the shop's own: the same product either way. */
 const HOST_PREFIX = /^(www|m)\./;

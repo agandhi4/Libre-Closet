@@ -14,6 +14,7 @@ import type {
   DismissReason,
   OutfitDismissReason,
 } from '../../wardrobe/suggestions';
+import { OWNER_LOCK_TIMEOUT_MS } from '../auth/queries';
 
 /**
  * What the owner decided about the agent's work since the agent last
@@ -37,16 +38,19 @@ import type {
  * call only, or with `all`.
  *
  * **A pure read: the call never moves the cursor.** It answers `until`,
- * its statement's own time, and the agent hands that back when it ends
- * its round (finish_round, #337 part A2), which moves the cursor to
- * `greatest(cursor, least(until, now() - 2 × OWNER_LOCK_TIMEOUT_MS))`. So
- * an answer lost on the way is told again, never lost, and a decision is
- * never skipped: one stamps its transaction's start (`now()`), which may
- * come before a read while it waits on the owner lock and does its work,
- * and commit after it; twice the lock's timeout covers the wait and the
- * work. One may be told twice (ids say which). State, not events: an Undo
- * since leaves the row as it was before the decision, so the agent sees
- * it in list_suggestions. One statement.
+ * its statement's `now()` less FEEDBACK_MARGIN_MS (twice the owner
+ * lock's timeout): a decision stamps its transaction's start (`now()`),
+ * which may come before this read while it waits on the owner lock and
+ * does its work, and commit after it, so only what is older than the
+ * margin is surely in this answer. The agent hands `until` back when it
+ * ends its round (finish_round, #337 part A2), which moves the cursor to
+ * `greatest(cursor, least(until, now()))`: an answer lost on the way is
+ * told again, and a decision committed after the read with a time before
+ * `until`'s margin is still after the cursor, so it is told next time,
+ * never lost. What falls inside the margin is told twice (ids say
+ * which). State, not events: an Undo since leaves the row as it was
+ * before the decision, so the agent sees it in list_suggestions. One
+ * statement.
  */
 
 export interface NeedDecision {
@@ -109,7 +113,7 @@ export interface BoughtWears {
 export type SuggestionFeedback = {
   /** The cursor this call read: null for everything. */
   since: string | null;
-  /** This read's time: what finish_round takes to move the cursor (part A2). */
+  /** This read's time less FEEDBACK_MARGIN_MS: what finish_round takes to move the cursor (part A2). */
   until: string;
   needs: NeedDecision[];
   picksSetAside: PickSetAside[];
@@ -117,6 +121,12 @@ export type SuggestionFeedback = {
   outfits: OutfitReaction[];
   wears: BoughtWears[];
 };
+
+/**
+ * How far behind its statement's time a read's `until` is: twice the
+ * owner lock's timeout, the lock's wait and the work after it (see above).
+ */
+export const FEEDBACK_MARGIN_MS = 2 * OWNER_LOCK_TIMEOUT_MS;
 
 /** The calling token's cursor. */
 const cursor = sql.identifier('cursor');
@@ -269,7 +279,7 @@ export async function readSuggestionFeedback(
     select
       -- As JSON, as the lists' times: an ISO string, not the driver's Date.
       to_json(${since}) #>> '{}' as since,
-      to_json(now()) #>> '{}' as until,
+      to_json(now() - ${`${FEEDBACK_MARGIN_MS} milliseconds`}::interval) #>> '{}' as until,
       ${needsSql(ownerId, since)} as needs,
       ${picksSetAsideSql(ownerId, since)} as "picksSetAside",
       ${purchasesSql(ownerId, since)} as purchases,
