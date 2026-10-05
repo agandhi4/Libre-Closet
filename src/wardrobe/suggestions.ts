@@ -28,8 +28,10 @@
  *                 (or by a garment deleted since)
  *   bought        a garment bought for the group     group resolved by it; every
  *                 (a pick, or "a different one",     other open pick chose_another;
- *                 then only of a need still to buy   a pick set aside is restored
- *                 for: open, or its choice unbought)
+ *                 then only of a need still to buy   a pick set aside is restored.
+ *                 for: open, or its choice unbought) A pick bought once another
+ *                                                    purchase settled the group:
+ *                                                    only its own dismissal clears
  *   returned      the group's bought garment         it dismissed `returned`; the
  *                                                    group open again
  *
@@ -235,11 +237,31 @@ export function decideSuggestion(
       // the group with a garment of the owner's own, but only a need still
       // to buy for, so a second different one (two phones, a double post)
       // never takes the place of the first.
+      if (!picks.some((pick) => pick.id === decision.garmentId)) {
+        return stillToBuy(group, picks)
+          ? resolvedBy(picks, decision.garmentId)
+          : refused('not-allowed');
+      }
+      // A pick bought after the need was settled by another purchase (a
+      // different one, or a sibling bought): the purchase is recorded and
+      // the pick is no longer set aside, but the first purchase stays the
+      // need's answer: resolved_garment_id is never overwritten.
       if (
-        !picks.some((pick) => pick.id === decision.garmentId) &&
+        group.status === 'resolved' &&
+        group.resolvedGarmentId !== decision.garmentId &&
         !stillToBuy(group, picks)
       ) {
-        return refused('not-allowed');
+        return {
+          ok: true,
+          group: undefined,
+          dismiss: [],
+          restore: picks.some(
+            (pick) =>
+              pick.id === decision.garmentId && pick.dismissedAt !== null,
+          )
+            ? [decision.garmentId]
+            : [],
+        };
       }
       return resolvedBy(picks, decision.garmentId);
     default: {

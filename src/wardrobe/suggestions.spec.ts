@@ -223,6 +223,30 @@ describe('decideSuggestion', () => {
     ).toEqual({ ok: false, refusal: 'not-in-group' });
   });
 
+  it('records a pick bought after another purchase settled the need, keeping the first resolver', () => {
+    const settled: GroupState = {
+      status: 'resolved',
+      resolvedGarmentId: 42,
+      decidedAt: AT,
+    };
+    const after = [
+      pick(42, { wanted: false }),
+      pick(1, { dismissedAt: AT, dismissedReason: 'chose_another' }),
+      pick(2, { dismissedAt: AT, dismissedReason: 'chose_another' }),
+    ];
+    expect(
+      decideSuggestion(settled, after, { kind: 'bought', garmentId: 1 }),
+    ).toEqual({ ok: true, group: undefined, dismiss: [], restore: [1] });
+    // Settled by a resolver deleted since: the same, nothing to overwrite.
+    expect(
+      decideSuggestion(
+        { ...settled, resolvedGarmentId: null },
+        after.slice(1),
+        { kind: 'bought', garmentId: 2 },
+      ),
+    ).toEqual({ ok: true, group: undefined, dismiss: [], restore: [2] });
+  });
+
   it('takes a different one only for a need still to buy for: open, or its choice unbought', () => {
     const different = { kind: 'bought', garmentId: 42, groupId: 7 } as const;
     const boughtFirst: GroupState = {

@@ -181,13 +181,6 @@ describe('the Muse inbox', () => {
       await pick('White tee A', same);
       await pick('White tee B', same);
       const html = (await get('/wardrobe/wishlist')).body;
-      const cardOf = (id: number) => {
-        const start = html.indexOf(`data-need="${id}"`);
-        return html.slice(
-          start,
-          html.indexOf('</li>\n', start) + 1 || undefined,
-        );
-      };
       const chips = (card: string) =>
         [...card.matchAll(/data-unlocks="(\d+)\+?"/g)].map((m) => Number(m[1]));
       const sameCard = html.slice(
@@ -208,7 +201,6 @@ describe('the Muse inbox', () => {
       expect(counts).toHaveLength(2);
       // Most unlocks first.
       expect(counts[0]).toBeGreaterThan(counts[1]);
-      void cardOf;
       for (const id of [differ, same]) {
         await decide(t.db, ownerId, {
           kind: 'dismiss-group',
@@ -700,6 +692,35 @@ describe('the Muse inbox', () => {
       expect((await garmentRow(t, chosen))?.dismissedReason).toBe(
         'chose_another',
       );
+    });
+
+    it('keeps the different one as the answer when a set-aside sibling is bought after it', async () => {
+      const id = await need('A rain hat');
+      const sibling = await pick('Waxed rain hat', id, {
+        category: 'accessories',
+      });
+      const res = await post('/wardrobe', {
+        name: 'Bucket hat',
+        category: 'accessories',
+        forNeed: String(id),
+      });
+      const different = Number(
+        /\/wardrobe\/(\d+)/.exec(String(res.headers.location))![1],
+      );
+      expect((await garmentRow(t, sibling))?.dismissedReason).toBe(
+        'chose_another',
+      );
+      const bought = await post(`/wardrobe/${sibling}/bought`, {
+        acquiredOn: t.today(),
+        price: '60',
+      });
+      expect(bought.statusCode).toBe(303);
+      const row = await garmentRow(t, sibling);
+      expect(row?.status).toBe('closet');
+      expect(row?.dismissedAt).toBeNull();
+      const group = await groupRow(id);
+      expect(group.status).toBe('resolved');
+      expect(group.resolvedGarmentId).toBe(different);
     });
 
     it('settles a need once when two phones post a different one together: one garment, the other a 409', async () => {
