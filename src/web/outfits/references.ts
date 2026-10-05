@@ -52,7 +52,11 @@ export function outfitIsHeld(outfitId: AnyPgColumn | SQL): SQL<boolean> {
  * pick its drawn roles share with one would never be suggested.
  *
  * Bought it completes an outfit (the garment leaves the wishlist); nothing
- * in the outfit is written. Derived on every read, never stored.
+ * in the outfit is written. Derived on every read, never stored. Deleting
+ * an own wishlist item (Remove, or plans' buyCandidate clean-up) nulls its
+ * slot through the foreign key, so the outfit becomes complete with a gap,
+ * as a deleted closet garment leaves one (a suggestion is never deleted on
+ * the wishlist: a dismissed pick keeps its slot).
  */
 
 /** A piece an outfit holds that is not owned yet, as a refusal or a page names it. */
@@ -62,29 +66,30 @@ export interface PieceToBuy {
 }
 
 /**
- * The outfit's pieces not owned yet, in slot order, as a JSON list; empty
- * when it is complete. `outfitId` must render qualified (a parameter, or a
+ * The outfit's slots holding a piece not owned yet: the one join both
+ * readers below share. `outfitId` must render qualified (a parameter, or a
  * column inside a raw `sql` template): in a single-table drizzle select an
  * unqualified `id` would name this subquery's garment.
  */
+function piecesToBuyFrom(outfitId: SQL | AnyPgColumn): SQL {
+  return sql`from ${outfitSlot}
+    inner join ${garment} on ${eq(garment.id, outfitSlot.garmentId)}
+    where ${and(eq(outfitSlot.outfitId, outfitId), onWishlist())}`;
+}
+
+/** The outfit's pieces not owned yet, in slot order, as a JSON list; empty when it is complete. */
 export function piecesToBuySql(outfitId: SQL | AnyPgColumn): SQL<PieceToBuy[]> {
   return sql<PieceToBuy[]>`(
     select coalesce(json_agg(json_build_object(
       'id', ${garment.id}, 'name', ${garment.name}
     ) order by ${outfitSlot.position}), '[]')
-    from ${outfitSlot}
-    inner join ${garment} on ${eq(garment.id, outfitSlot.garmentId)}
-    where ${and(eq(outfitSlot.outfitId, outfitId), onWishlist())}
+    ${piecesToBuyFrom(outfitId)}
   )`;
 }
 
-/** Whether the outfit holds only owned garments (piecesToBuySql's caveat on `outfitId`). */
+/** Whether the outfit holds only owned garments (piecesToBuyFrom's caveat on `outfitId`). */
 export function outfitIsComplete(outfitId: SQL | AnyPgColumn): SQL<boolean> {
-  return sql<boolean>`not exists (
-    select 1 from ${outfitSlot}
-    inner join ${garment} on ${eq(garment.id, outfitSlot.garmentId)}
-    where ${and(eq(outfitSlot.outfitId, outfitId), onWishlist())}
-  )`;
+  return sql<boolean>`not exists (select 1 ${piecesToBuyFrom(outfitId)})`;
 }
 
 /**

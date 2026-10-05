@@ -510,11 +510,13 @@ async function insertSlots(
       : [],
   );
   if (gone.length === 0) return;
+  const heldOutfit = await outfitHeld(tx, outfitId);
   const named = await goneGarments(
     tx,
     ownerId,
     gone,
-    slotHoldable(await outfitHeld(tx, outfitId)),
+    slotHoldable(heldOutfit),
+    { outfitHeld: heldOutfit },
   );
   // Holdable again by the lookup (bought meanwhile): still refused as seen.
   throw new OutfitGarmentsGone(

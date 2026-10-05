@@ -8,6 +8,7 @@ import {
   tripOutfit,
 } from '../../src/db/schema';
 import { addDays } from '../../src/web/calendar/calendar-date';
+import { insertEntry, wearOutfitOn } from '../../src/web/calendar/queries';
 import { updateOutfit } from '../../src/web/outfits/queries';
 import { addTripOutfit } from '../../src/web/trips/queries';
 import { decide, markSuggestion } from '../../src/web/wishlist/decisions';
@@ -27,7 +28,9 @@ import { callTool, createAccessToken, tool } from './mcp';
  * completes it. The wishlist spec's pattern, one row per surface.
  */
 
-const BLAZER_REFUSAL = 'Not planned: buy Wool blazer first.';
+const refusalOf = (pieces: string) =>
+  `Buy ${pieces} first: an outfit with pieces not bought yet can’t be planned or packed.`;
+const BLAZER_REFUSAL = refusalOf('Wool blazer');
 
 describe('incomplete outfits', () => {
   let t: TestApp;
@@ -177,7 +180,8 @@ describe('incomplete outfits', () => {
       expect(await slotsOf(unheld)).toEqual([shoes, blazer]);
     });
 
-    it('create_outfit (MCP) saves one and lists its pieces to buy; planned, it is refused', async () => {
+    it('create_outfit (MCP) saves one and lists its pieces to buy; planned, it is refused, nothing saved', async () => {
+      const before = await t.db.$count(outfit);
       const refused = await callTool(t, mcpToken, 'create_outfit', {
         garmentIds: [shoes, jeans, blazer],
         scheduleDate: day,
@@ -186,6 +190,7 @@ describe('incomplete outfits', () => {
         isError: true,
         value: { error: BLAZER_REFUSAL },
       });
+      expect(await t.db.$count(outfit)).toBe(before);
       const created = await tool<{ id: number }>(t, mcpToken, 'create_outfit', {
         garmentIds: [shoes, jeans, blazer],
       });
@@ -215,16 +220,51 @@ describe('incomplete outfits', () => {
     });
 
     it('a replace (Change)', async () => {
-      const [entry] = await entriesOf(complete);
+      const replaced = await savedId('Replaced', [tee, jeans, shoes]);
+      const date = addDays(day, 5);
+      expect(
+        (await post('/calendar', { outfitId: replaced, date })).statusCode,
+      ).toBe(302);
+      const [entry] = await entriesOf(replaced);
       const res = await post('/calendar', {
         outfitId: incomplete,
-        date: entry.day,
+        date,
         replace: entry.id,
       });
       expect(res.statusCode).toBe(409);
       expect(hasText(res.body, BLAZER_REFUSAL)).toBe(true);
-      expect(await entriesOf(complete)).toEqual([entry]);
+      expect(await entriesOf(replaced)).toEqual([entry]);
       expect(await entriesOf(incomplete)).toEqual([]);
+      const twin = await post('/calendar', {
+        outfitId: complete,
+        date,
+        replace: entry.id,
+      });
+      expect(twin.statusCode).toBe(302);
+      expect(
+        await t.db
+          .select({ outfitId: outfitCalendar.outfitId })
+          .from(outfitCalendar)
+          .where(eq(outfitCalendar.id, entry.id)),
+      ).toEqual([{ outfitId: complete }]);
+    });
+
+    it('wearing it (planToWear: defence only, as Wear this picks closet garments and a trip holds complete outfits)', async () => {
+      const wear = (outfitId: number) =>
+        wearOutfitOn(t.db, {
+          ownerId: t.owner.id,
+          outfitId,
+          day: t.today(),
+          occasion: 'all-day',
+          at: new Date(),
+          today: t.today(),
+        });
+      await expect(wear(incomplete)).rejects.toMatchObject({
+        statusCode: 409,
+        message: BLAZER_REFUSAL,
+      });
+      expect(await entriesOf(incomplete)).toEqual([]);
+      expect(await wear(complete)).toMatchObject({ scheduled: 'scheduled' });
     });
 
     it('a trip’s add', async () => {
@@ -266,6 +306,60 @@ describe('incomplete outfits', () => {
       });
       expect(await entriesOf(incomplete)).toEqual([]);
       expect(await onTrip(tripId)).toEqual([]);
+      // The complete twin goes through both.
+      await tool(t, mcpToken, 'schedule_outfit', {
+        outfitId: complete,
+        date: addDays(day, 6),
+      });
+      await tool(t, mcpToken, 'plan_trip_outfit', {
+        tripId,
+        outfitId: complete,
+      });
+      expect(await onTrip(tripId)).toEqual([{ outfitId: complete }]);
+    });
+  });
+
+  describe('Styling edits it in place, keeping the piece to buy', () => {
+    it('opens with the piece as its row, and a save that renames it or swaps a piece keeps it', async () => {
+      const id = await savedId('Styled with the blazer', [
+        jeans,
+        shoes,
+        blazer,
+      ]);
+      const opened = unescapeHtml((await get(`/styling?outfit=${id}`)).body);
+      expect(opened).toContain('Wool blazer');
+      const renamed = await post('/styling', {
+        outfit: String(id),
+        garmentId: [jeans, shoes, blazer].map(String),
+        name: 'Renamed, blazer kept',
+      });
+      expect(renamed.statusCode, renamed.body).toBe(303);
+      expect(await slotsOf(id)).toEqual([blazer, jeans, shoes]);
+      const swapped = await post('/styling', {
+        outfit: String(id),
+        garmentId: [tee, shoes, blazer].map(String),
+        name: 'A tee for the jeans',
+      });
+      expect(swapped.statusCode, swapped.body).toBe(303);
+      expect(await slotsOf(id)).toEqual([blazer, tee, shoes]);
+    });
+
+    it('a save adding one to a planned outfit names the plan, not a wishlist item', async () => {
+      const id = await savedId('Styled, planned', [tee, shoes]);
+      expect(
+        (await post('/calendar', { outfitId: id, date: addDays(day, 4) }))
+          .statusCode,
+      ).toBe(302);
+      const res = await post('/styling', {
+        outfit: String(id),
+        garmentId: [tee, shoes, blazer].map(String),
+        name: 'Styled, planned',
+      });
+      expect(res.statusCode).toBe(409);
+      expect(unescapeHtml(res.body)).toContain(
+        'Not saved: Wool blazer is not bought yet, and this outfit is planned or on a trip.',
+      );
+      expect(await slotsOf(id)).toEqual([tee, shoes]);
     });
   });
 
@@ -342,9 +436,7 @@ describe('incomplete outfits', () => {
       expect(await slotsOf(withKnit)).toEqual([knit, jeans]);
       const res = await post('/calendar', { outfitId: withKnit, date: day });
       expect(res.statusCode).toBe(409);
-      expect(hasText(res.body, 'Not planned: buy Cable knit first.')).toBe(
-        true,
-      );
+      expect(hasText(res.body, refusalOf('Cable knit'))).toBe(true);
     });
 
     it('Bought it completes it: nothing in the outfit changes, and it plans', async () => {
@@ -412,6 +504,25 @@ describe('incomplete outfits', () => {
       expect(packed.statusCode).toBe(409);
       expect(await entriesOf(id)).toEqual([]);
       expect(await onTrip(tripId)).toEqual([]);
+    });
+
+    it('a plan first: the edit after it finds the outfit held and refuses', async () => {
+      // Its own garment set: a save of a set already saved reuses that outfit.
+      const id = await savedId('Raced plan first', [tee]);
+      const [planned, edit] = await interleave(
+        t.db,
+        (tx) =>
+          insertEntry(tx, {
+            ownerId: t.owner.id,
+            outfitId: id,
+            day,
+            occasion: 'all-day',
+          }),
+        () => addScarf(t.db, id).catch((error: unknown) => error),
+      );
+      expect(planned).toMatchObject({ outcome: 'scheduled' });
+      expect(edit).toMatchObject({ statusCode: 409 });
+      expect(await slotsOf(id)).toEqual([tee]);
     });
 
     it('a pack first: the edit after it finds the outfit held and refuses', async () => {

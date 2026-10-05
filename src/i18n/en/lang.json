@@ -1181,7 +1181,7 @@
     "GONE_ONE": "a garment you chose is no longer in your wardrobe",
     "GONE_MANY": "{count} garments you chose are no longer in your wardrobe",
     "UNNAMED_GARMENT": "An unnamed garment",
-    "INCOMPLETE": "Not planned: buy {pieces} first.",
+    "INCOMPLETE": "Buy {pieces} first: an outfit with pieces not bought yet can’t be planned or packed.",
     "TO_BUY": "{count} pieces to buy",
     "TO_BUY_ONE": "1 piece to buy",
     "BUY_FIRST": "Buy {count} pieces first",

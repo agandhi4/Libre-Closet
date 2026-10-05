@@ -231,11 +231,14 @@ export async function roleGarmentsBefore(
 /**
  * The wardrobe's owned garments (in the closet or archived) among `ids`:
  * what a posted row may hold. Fewer than asked when any is someone else's,
- * a wishlist item or gone. A scalar subquery; read with readGarments.
+ * a wishlist item or gone. With `anyStatus`, the wardrobe's garments
+ * whatever their status (an edit's Save: ownGarments). A scalar subquery;
+ * read with readGarments.
  */
 export function ownGarmentsSql(
   ownerId: number,
   ids: readonly number[],
+  { anyStatus = false }: { anyStatus?: boolean } = {},
 ): SQL<RowGarmentJson[]> {
   return sql<RowGarmentJson[]>`(
     select coalesce(json_agg(${rowGarmentJson}), '[]')
@@ -244,7 +247,7 @@ export function ownGarmentsSql(
     where ${and(
       eq(garment.ownerId, ownerId),
       inArray(garment.id, [...ids]),
-      ownedGarment(),
+      anyStatus ? undefined : ownedGarment(),
     )}
   )`;
 }
@@ -254,7 +257,13 @@ export function readGarments(rows: readonly RowGarmentJson[]): RoledGarment[] {
   return rows.map((row) => roled(readRowGarment(row)));
 }
 
-/** ownGarmentsSql alone, in one statement: an edit's Save. */
+/**
+ * An edit's Save: the wardrobe's garments among `ids`, whatever their
+ * status, in one statement. What the outfit may hold is updateOutfit's to
+ * judge (insertSlots: the outfit's own Holdable, #335), so an incomplete
+ * outfit's piece to buy is kept, and refused only where the outfit is
+ * planned or packed; fewer than asked only when one is not the owner's.
+ */
 export async function ownGarments(
   db: Db,
   ownerId: number,
@@ -262,7 +271,7 @@ export async function ownGarments(
 ): Promise<RoledGarment[]> {
   if (ids.length === 0) return [];
   const { owned } = await selectScalars(db, {
-    owned: ownGarmentsSql(ownerId, ids),
+    owned: ownGarmentsSql(ownerId, ids, { anyStatus: true }),
   });
   return readGarments(owned);
 }

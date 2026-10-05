@@ -111,26 +111,34 @@ export async function goneGarments(
   ownerId: number,
   garmentIds: readonly number[],
   holdable: Holdable,
+  { outfitHeld = false }: { outfitHeld?: boolean } = {},
 ): Promise<GoneGarment[]> {
   return goneOf(
     await namedGarments(db, ownerId, garmentIds),
     garmentIds,
     holdable,
+    outfitHeld,
   );
 }
 
-/** goneGarments over garments already read (namedGarments). */
+/**
+ * goneGarments over garments already read (namedGarments). `outfitHeld`:
+ * the writer read that something holds the outfit (insertSlots, the only
+ * one that does), so a wishlist garment is named as refused for that; never
+ * inferred from the mode.
+ */
 export function goneOf(
   found: ReadonlyMap<number, NamedGarment>,
   garmentIds: readonly number[],
   holdable: Holdable,
+  heldOutfit = false,
 ): GoneGarment[] {
   const wanted = [...new Set(garmentIds)];
   return wanted.flatMap((id): GoneGarment[] => {
     const row = found.get(id);
     if (!row) return [{ id }];
     if (holds(holdable, row.status)) return [];
-    const outfitHeld = holdable === 'owned' && row.status === 'wishlist';
+    const outfitHeld = heldOutfit && row.status === 'wishlist';
     return [
       {
         id,

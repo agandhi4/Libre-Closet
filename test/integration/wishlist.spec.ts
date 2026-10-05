@@ -231,7 +231,7 @@ describe('the wishlist', () => {
       });
       expect(res.statusCode).toBe(409);
       expect(unescapeHtml(res.body)).toContain(
-        'Not planned: buy Charcoal merino first.',
+        'Buy Charcoal merino first: an outfit with pieces not bought yet can’t be planned or packed.',
       );
       expect(await t.db.$count(outfitSlot)).toBe(before);
     });

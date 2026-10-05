@@ -236,12 +236,7 @@ function CollagePiece(props: {
     <span class="relative flex justify-center max-w-full">
       {face}
       {words ? (
-        <span
-          class="badge badge-accent badge-xs absolute bottom-0 left-1/2 -translate-x-1/2 whitespace-nowrap"
-          data-to-buy=""
-        >
-          {t('plans.looks.TO_BUY')}
-        </span>
+        <ToBuyBadge />
       ) : (
         <span
           class="absolute bottom-0 right-0 size-2 rounded-full bg-accent"
@@ -250,6 +245,21 @@ function CollagePiece(props: {
           <span class="sr-only">{t('plans.looks.TO_BUY')}</span>
         </span>
       )}
+    </span>
+  );
+}
+
+/**
+ * Styling's To buy badge over a piece's foot (its parent is `relative`):
+ * the collage's pieces and the public share page's thumbs.
+ */
+export function ToBuyBadge() {
+  return (
+    <span
+      class="badge badge-accent badge-xs absolute bottom-0 left-1/2 -translate-x-1/2 whitespace-nowrap"
+      data-to-buy=""
+    >
+      {t('plans.looks.TO_BUY')}
     </span>
   );
 }

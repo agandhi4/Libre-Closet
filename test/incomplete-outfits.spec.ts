@@ -16,7 +16,8 @@ import { userIdOf, withServerDb } from './support/server-db';
  * Muse's picks, the navy blazer, saved into an outfit with the persona's
  * own trousers, shirt and shoes. Its collage badges the blazer To buy, the
  * Saved grid says "1 piece to buy", the outfit page offers the blazer in
- * place of Plan, and the calendar's picker shows it disabled: at 390 and
+ * place of Plan (Edit in Styling kept), and the calendar's picker shows it
+ * disabled, its text at full strength: at 390 and
  * 1440 px, with the screenshots the owner reviews attached to each test
  * (`incomplete-<screen>-<width>.png`). What each surface refuses is
  * test/integration/incomplete-outfits.spec.ts's.
@@ -126,6 +127,7 @@ for (const [label, device] of [
       await page.goto(`/outfits/${outfitId}`);
       await expect(page.getByText('To wear this, buy')).toBeVisible();
       await expect(page.locator('[data-outfit-plan]')).toHaveCount(0);
+      await expect(page.locator('[data-outfit-edit]')).toBeVisible();
       const piece = page.locator('[data-piece-to-buy]');
       await expect(piece).toContainText('Navy unstructured wool blazer');
       const box = await piece.boundingBox();
@@ -152,6 +154,10 @@ for (const [label, device] of [
       );
       await expect(button).toBeDisabled();
       await expect(button).toContainText('Buy 1 piece first');
+      // Disabled reads through the card and its thumbs; text is never dimmed.
+      expect(await button.evaluate((b) => getComputedStyle(b).opacity)).toBe(
+        '1',
+      );
       await button.scrollIntoViewIfNeeded();
       await noSideScroll(page, width);
       await shoot(page, testInfo, `picker-${label}`);
