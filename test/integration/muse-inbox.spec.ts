@@ -1,0 +1,659 @@
+import { eq } from 'drizzle-orm';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { garment, optionGroup, user } from '../../src/db/schema';
+import { decide, markSuggestion } from '../../src/web/wishlist/decisions';
+import { createGarment, createWishlistItem, garmentRow } from './garments';
+import {
+  createTestApp,
+  hxLocationPath,
+  recordQueries,
+  type TestApp,
+  unescapeHtml,
+  userIdOf,
+} from './harness';
+
+/**
+ * Muse phase 1B (#333; docs/plans/2026-10-05-muse-suggestions.md, section
+ * 4 C, D, F): the Wishlist tab as Muse's inbox, a need's decision screen,
+ * a suggestion's page, and every decision over HTTP, each through decide()
+ * with its rows asserted. Also "New from Muse" (never in the bare page,
+ * doc section 9), the statements each page sends, the plans' entry points
+ * gone, Today's card, the offline warm list and the export.
+ */
+
+describe('the Muse inbox', () => {
+  let t: TestApp;
+  let ownerId: number;
+
+  const get = (url: string, cookie?: string) =>
+    t.inject({ method: 'GET', url, headers: cookie ? { cookie } : {} });
+  const post = (url: string, payload: Record<string, unknown> = {}) =>
+    t.inject({ method: 'POST', url, payload });
+
+  async function need(name: string, budget: string | null = '100') {
+    const [row] = await t.db
+      .insert(optionGroup)
+      .values({ ownerId, name, budget })
+      .returning({ id: optionGroup.id });
+    return row.id;
+  }
+
+  async function pick(
+    name: string,
+    groupId: number,
+    {
+      category = 'tops',
+      price = '90',
+      brand,
+    }: { category?: string; price?: string; brand?: string } = {},
+  ) {
+    const id = await createWishlistItem(t, {
+      name,
+      category,
+      price,
+      brand,
+      sourceUrl: `https://shop.example/${encodeURIComponent(name)}`,
+    });
+    const marked = await markSuggestion(t.db, ownerId, id, {
+      tokenId: null,
+      groupId,
+      note: `Muse: ${name} goes with your jeans`,
+      rank: null,
+    });
+    expect(marked).toBe('marked');
+    return id;
+  }
+
+  const groupRow = async (id: number) =>
+    (await t.db.select().from(optionGroup).where(eq(optionGroup.id, id)))[0];
+
+  /** The order the inbox's sections come in, by their markers. */
+  function sectionOrder(html: string): string[] {
+    return [...html.matchAll(/data-inbox-section="([a-z-]+)"/g)].map(
+      (m) => m[1],
+    );
+  }
+
+  beforeAll(async () => {
+    t = await createTestApp();
+    ownerId = t.owner.id;
+    await createGarment(t, { name: 'Raw jeans', category: 'bottoms' });
+    await createGarment(t, { name: 'Chinos', category: 'bottoms' });
+    await createGarment(t, { name: 'White sneakers', category: 'footwear' });
+    await createGarment(t, { name: 'Loafers', category: 'footwear' });
+    await createGarment(t, { name: 'White tee', category: 'tops' });
+  });
+
+  afterAll(() => t?.cleanup());
+
+  describe('the inbox (D)', () => {
+    let blazers: number;
+    let navy: number;
+    let chosenNeed: number;
+    let chosen: number;
+    let looking: number;
+    let asideNeed: number;
+    let asidePick: number;
+    let own: number;
+
+    beforeAll(async () => {
+      blazers = await need('A navy blazer', '300');
+      navy = await pick('Navy blazer', blazers, { category: 'tops' });
+      await pick('Navy cap', blazers, { category: 'accessories' });
+      asidePick = await pick('Grey blazer', blazers);
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-pick',
+        garmentId: asidePick,
+        reason: 'colour',
+        note: 'Too grey',
+      });
+      chosenNeed = await need('Boots');
+      chosen = await pick('Chelsea boots', chosenNeed, {
+        category: 'footwear',
+        brand: 'Blundstone',
+      });
+      await pick('Desert boots', chosenNeed, { category: 'footwear' });
+      await decide(t.db, ownerId, { kind: 'choose', garmentId: chosen });
+      looking = await need('A rain jacket');
+      asideNeed = await need('A tie');
+      await pick('Silk tie', asideNeed, { category: 'accessories' });
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-group',
+        groupId: asideNeed,
+        reason: 'not_now',
+        note: null,
+      });
+      own = await createWishlistItem(t, { name: 'My own scarf' });
+    });
+
+    it('shows Ready to buy, Muse’s picks, your wishlist, still looking and set aside, in that order', async () => {
+      const res = await get('/wardrobe/wishlist');
+      expect(res.statusCode).toBe(200);
+      const html = unescapeHtml(res.body);
+      expect(sectionOrder(html)).toEqual([
+        'ready',
+        'groups',
+        'own',
+        'still-looking',
+        'set-aside',
+      ]);
+      // Ready to buy: the chosen pick, its need, and Bought it.
+      expect(html).toMatch(
+        new RegExp(
+          `data-ready="${chosen}"[\\s\\S]*Chelsea boots[\\s\\S]*/wardrobe/${chosen}/bought`,
+        ),
+      );
+      // The open need, its open options, never the one set aside.
+      expect(html).toContain(`data-need="${blazers}"`);
+      expect(html).toContain(`data-option="${navy}"`);
+      expect(html).not.toContain(`data-option="${asidePick}"`);
+      expect(html).toContain(
+        `/wardrobe/wishlist/needs/${blazers}?option=${navy}`,
+      );
+      // The own item, and the need with no option yet.
+      expect(html).toContain(`data-own="${own}"`);
+      expect(html).toContain(`data-looking="${looking}"`);
+      // Set aside: the need and the pick, each with Undo.
+      expect(html).toContain('2 set aside');
+      expect(html).toContain(`data-set-aside="need:${asideNeed}"`);
+      expect(html).toContain(`data-set-aside="pick:${asidePick}"`);
+      expect(html).toContain(`action="/wardrobe/${asidePick}/undo"`);
+      expect(html).toContain(
+        `action="/wardrobe/wishlist/needs/${asideNeed}/undo"`,
+      );
+      // A chosen need is no option card, a need set aside neither.
+      expect(html).not.toContain(`data-need="${chosenNeed}"`);
+      expect(html).not.toContain(`data-need="${asideNeed}"`);
+    });
+
+    it('counts what each option unlocks, and sorts the options by it', async () => {
+      const html = (await get('/wardrobe/wishlist')).body;
+      const card = html.slice(html.indexOf(`data-need="${blazers}"`));
+      const counts = [...card.matchAll(/data-unlocks="(\d+)\+?"/g)]
+        .slice(0, 2)
+        .map((m) => Number(m[1]));
+      expect(counts).toHaveLength(2);
+      expect(counts[0]).toBeGreaterThanOrEqual(counts[1]);
+      expect(counts[0]).toBeGreaterThan(0);
+    });
+
+    it('is two statements: the session, and one for every section and the unlocks', async () => {
+      const record = await recordQueries(() => get('/wardrobe/wishlist'));
+      expect(record.statements).toBe(2);
+    });
+
+    it('drops the plans’ links: no candidacies, no shopping list', async () => {
+      const html = (await get('/wardrobe/wishlist')).body;
+      expect(html).not.toContain('/wardrobe/shopping');
+      expect(html).not.toContain('/wardrobe/plans');
+    });
+
+    it('pages the needs with the Ideas sentinel past ten', async () => {
+      const extra: number[] = [];
+      for (let index = 0; index < 10; index += 1) {
+        const id = await need(`Extra need ${index}`);
+        extra.push(id);
+        await pick(`Extra pick ${index}`, id);
+      }
+      const html = (await get('/wardrobe/wishlist')).body;
+      expect(html.match(/data-need="/g)).toHaveLength(10);
+      expect(html).toContain('hx-get="/wardrobe/wishlist/more?page=2"');
+      expect(html).toContain('hx-trigger="intersect once"');
+      const more = await get('/wardrobe/wishlist/more?page=2');
+      expect(more.statusCode).toBe(200);
+      expect(more.body).not.toContain('<html');
+      expect(more.body.match(/data-need="/g)).toHaveLength(1);
+      expect(more.body).not.toContain('data-inbox-more');
+      for (const id of extra) {
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-group',
+          groupId: id,
+          reason: 'not_now',
+          note: null,
+        });
+      }
+    });
+
+    it('shows a grantee Muse’s needs, without unlocks or decisions', async () => {
+      await t.register('viewer-inbox@example.com');
+      const viewerId = await userIdOf(t, 'viewer-inbox@example.com');
+      const cookie = await t.login('viewer-inbox@example.com');
+      const { wardrobeShare } = await import('../../src/db/schema');
+      await t.db.insert(wardrobeShare).values({
+        grantorId: ownerId,
+        granteeId: viewerId,
+        permission: 'VIEW',
+        acceptedAt: new Date(),
+        createdAt: new Date(),
+      });
+      const html = (await get(`/wardrobe/wishlist?ownerId=${ownerId}`, cookie))
+        .body;
+      expect(html).toContain(`data-need="${blazers}"`);
+      expect(html).not.toContain('data-unlocks');
+      expect(html).not.toContain('/undo"');
+      expect(html).not.toContain('/wardrobe/wishlist/seen');
+      const page = (
+        await get(
+          `/wardrobe/wishlist/needs/${blazers}?ownerId=${ownerId}`,
+          cookie,
+        )
+      ).body;
+      expect(page).toContain('Navy blazer');
+      expect(page).not.toContain('/choose"');
+      expect(page).not.toContain('data-unlocks');
+    });
+  });
+
+  describe('New from Muse (doc section 9)', () => {
+    it('is never in the bare page: only the seen POST’s answer names what is new', async () => {
+      await t.db
+        .update(user)
+        .set({ suggestionsSeenAt: null })
+        .where(eq(user.id, ownerId));
+      const first = await post('/wardrobe/wishlist/seen');
+      expect(first.statusCode).toBe(200);
+      expect(first.body).toContain('id="muse-new"');
+      expect(first.body).toContain('hx-swap-oob="true"');
+      expect(first.body).toContain('data-new-from-muse');
+
+      const before = (await get('/wardrobe/wishlist')).body;
+      expect(before).toContain(
+        'hx-post="/wardrobe/wishlist/seen" hx-trigger="load" hx-swap="none"',
+      );
+      expect(before).not.toContain('data-new-from-muse');
+      // Nothing new since: an empty slot, and the page unchanged by the visit.
+      const none = await post('/wardrobe/wishlist/seen');
+      expect(none.body).not.toContain('data-new-from-muse');
+      expect((await get('/wardrobe/wishlist')).body).toBe(before);
+
+      // A new pick arrives: the page shows its need, never as "new".
+      const jackets = await need('A field jacket');
+      const jacket = await pick('Waxed field jacket', jackets);
+      const arrived = (await get('/wardrobe/wishlist')).body;
+      expect(arrived).toContain(`data-need="${jackets}"`);
+      expect(arrived).not.toContain('data-new-from-muse');
+      const fresh = unescapeHtml((await post('/wardrobe/wishlist/seen')).body);
+      expect(fresh).toContain(`/wardrobe/wishlist/needs/${jackets}`);
+      expect(fresh).toContain('A field jacket');
+      // The visit moved the marker to the newest pick, and the page is the same.
+      const [row] = await t.db
+        .select({ seen: user.suggestionsSeenAt })
+        .from(user)
+        .where(eq(user.id, ownerId));
+      expect(row.seen?.getTime()).toBe(
+        (await garmentRow(t, jacket))?.suggestedAt?.getTime(),
+      );
+      expect((await get('/wardrobe/wishlist')).body).toBe(arrived);
+    });
+
+    it('is two statements: the session, and the marker’s read and move', async () => {
+      const record = await recordQueries(() => post('/wardrobe/wishlist/seen'));
+      expect(record.statements).toBe(2);
+    });
+  });
+
+  describe('decisions over HTTP', () => {
+    it('This one resolves the need and sets its other options aside, then Undo restores them', async () => {
+      const id = await need('A belt');
+      const brown = await pick('Brown belt', id, { category: 'accessories' });
+      const black = await pick('Black belt', id, { category: 'accessories' });
+      const back = `/wardrobe/wishlist/needs/${id}?option=${brown}`;
+      const res = await post(`/wardrobe/${brown}/choose`, { returnTo: back });
+      expect(res.statusCode).toBe(303);
+      expect(res.headers.location).toBe(`${back}&decided=choose`);
+      const resolved = await groupRow(id);
+      expect(resolved.status).toBe('resolved');
+      expect(resolved.resolvedGarmentId).toBe(brown);
+      expect((await garmentRow(t, black))?.dismissedReason).toBe(
+        'chose_another',
+      );
+      expect((await garmentRow(t, brown))?.dismissedAt).toBeNull();
+
+      // A second tap is a stale page: 409, nothing written.
+      expect((await post(`/wardrobe/${black}/choose`)).statusCode).toBe(409);
+
+      const undo = await post(`/wardrobe/wishlist/needs/${id}/undo`, {
+        returnTo: `/wardrobe/wishlist/needs/${id}`,
+      });
+      expect(undo.statusCode).toBe(303);
+      expect(undo.headers.location).toBe(
+        `/wardrobe/wishlist/needs/${id}?decided=undo`,
+      );
+      expect((await groupRow(id)).status).toBe('open');
+      expect((await garmentRow(t, black))?.dismissedAt).toBeNull();
+    });
+
+    it('Not for me records the reason and the note, and Undo clears them', async () => {
+      const id = await need('A cardigan');
+      const cardigan = await pick('Shawl cardigan', id);
+      const res = await post(`/wardrobe/${cardigan}/dismiss`, {
+        reason: 'too_pricey',
+        note: '  Wait for a sale  ',
+        returnTo: '/wardrobe/wishlist',
+      });
+      expect(res.statusCode).toBe(303);
+      expect(res.headers.location).toBe('/wardrobe/wishlist?decided=dismiss');
+      const row = await garmentRow(t, cardigan);
+      expect(row?.status).toBe('wishlist');
+      expect(row?.dismissedReason).toBe('too_pricey');
+      expect(row?.dismissedNote).toBe('Wait for a sale');
+      expect(row?.dismissedAt).not.toBeNull();
+
+      expect((await post(`/wardrobe/${cardigan}/undo`)).statusCode).toBe(303);
+      const undone = await garmentRow(t, cardigan);
+      expect(undone?.dismissedAt).toBeNull();
+      expect(undone?.dismissedReason).toBeNull();
+      expect(undone?.dismissedNote).toBeNull();
+    });
+
+    it('refuses a dismissal without one of the owner’s reasons (400)', async () => {
+      const id = await need('A hat');
+      const hat = await pick('Felt hat', id, { category: 'accessories' });
+      expect((await post(`/wardrobe/${hat}/dismiss`)).statusCode).toBe(400);
+      expect(
+        (await post(`/wardrobe/${hat}/dismiss`, { reason: 'chose_another' }))
+          .statusCode,
+      ).toBe(400);
+      expect((await garmentRow(t, hat))?.dismissedAt).toBeNull();
+    });
+
+    it('Not this need right now sets the need aside with its note, and Undo reopens it', async () => {
+      const id = await need('A suit');
+      await pick('Grey suit', id);
+      const res = await post(`/wardrobe/wishlist/needs/${id}/dismiss`, {
+        reason: 'not_now',
+        note: 'After the move',
+      });
+      expect(res.statusCode).toBe(303);
+      expect(res.headers.location).toBe(
+        `/wardrobe/wishlist/needs/${id}?decided=dismiss`,
+      );
+      const row = await groupRow(id);
+      expect(row.status).toBe('dismissed');
+      expect(row.dismissedReason).toBe('not_now');
+      expect(row.ownerNote).toBe('After the move');
+      await post(`/wardrobe/wishlist/needs/${id}/undo`);
+      expect((await groupRow(id)).status).toBe('open');
+    });
+
+    it('comes back only to a page of this site', async () => {
+      const id = await need('Gloves');
+      const gloves = await pick('Leather gloves', id, {
+        category: 'accessories',
+      });
+      const res = await post(`/wardrobe/${gloves}/choose`, {
+        returnTo: '//evil.example/x',
+      });
+      expect(res.headers.location).toBe(`/wardrobe/${gloves}?decided=choose`);
+    });
+
+    it('is a 404 for another owner’s pick or need, writing nothing', async () => {
+      const id = await need('A watch');
+      const watch = await pick('Field watch', id, { category: 'accessories' });
+      await t.register('other-muse@example.com');
+      const cookie = await t.login('other-muse@example.com');
+      const as = (url: string, payload: Record<string, string> = {}) =>
+        t.inject({ method: 'POST', url, payload, headers: { cookie } });
+      expect((await as(`/wardrobe/${watch}/choose`)).statusCode).toBe(404);
+      expect(
+        (
+          await as(`/wardrobe/wishlist/needs/${id}/dismiss`, {
+            reason: 'style',
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect((await groupRow(id)).status).toBe('open');
+    });
+
+    it('Bought it on the chosen pick settles the need, with no plans’ follow-ups', async () => {
+      const id = await need('A coat');
+      const coat = await pick('Camel coat', id, { category: 'outerwear' });
+      const other = await pick('Navy coat', id, { category: 'outerwear' });
+      await post(`/wardrobe/${coat}/choose`);
+      const form = await get(`/wardrobe/${coat}/bought`);
+      expect(form.body).not.toContain('name="adjustItems"');
+      expect(form.body).not.toContain('name="removeCandidates"');
+      const res = await post(`/wardrobe/${coat}/bought`, {
+        acquiredOn: t.today(),
+        price: '250',
+      });
+      expect(res.statusCode).toBe(303);
+      expect((await garmentRow(t, coat))?.status).toBe('closet');
+      expect((await groupRow(id)).resolvedGarmentId).toBe(coat);
+      expect((await garmentRow(t, other))?.dismissedReason).toBe(
+        'chose_another',
+      );
+
+      // Returned it: archived, set aside `returned`, the need open again.
+      const returned = await post(`/wardrobe/${coat}/returned`);
+      expect(returned.statusCode).toBe(200);
+      expect(hxLocationPath(returned)).toBe(
+        `/wardrobe/${coat}?decided=returned`,
+      );
+      const row = await garmentRow(t, coat);
+      expect(row?.status).toBe('archived');
+      expect(row?.dismissedReason).toBe('returned');
+      expect((await groupRow(id)).status).toBe('open');
+      // A second Returned is a stale page.
+      expect((await post(`/wardrobe/${coat}/returned`)).statusCode).toBe(409);
+    });
+
+    it('Bought a different one prefills the closet form from the best pick and settles the need with the new garment', async () => {
+      const id = await need('White sneakers');
+      const sneaker = await pick('Court sneaker', id, {
+        category: 'footwear',
+        brand: 'Veja',
+      });
+      const form = await get(`/wardrobe/new?forNeed=${id}`);
+      expect(form.statusCode).toBe(200);
+      const html = unescapeHtml(form.body);
+      expect(html).toContain('id="garment-bought-for"');
+      expect(html).toContain('name="forNeed" value="' + id + '"');
+      expect(html).toContain('value="Veja"');
+
+      const res = await post('/wardrobe', {
+        name: 'Common Projects',
+        category: 'footwear',
+        forNeed: String(id),
+      });
+      expect(res.statusCode).toBe(302);
+      expect(res.headers.location).toMatch(/\?decided=boughtFor$/);
+      const newId = Number(
+        /\/wardrobe\/(\d+)/.exec(String(res.headers.location))![1],
+      );
+      expect((await garmentRow(t, newId))?.status).toBe('closet');
+      const row = await groupRow(id);
+      expect(row.status).toBe('resolved');
+      expect(row.resolvedGarmentId).toBe(newId);
+      expect((await garmentRow(t, sneaker))?.dismissedReason).toBe(
+        'chose_another',
+      );
+
+      // The need is settled: its form and its post are a 404, nothing stored.
+      expect((await get(`/wardrobe/new?forNeed=${id}`)).statusCode).toBe(404);
+      const count = await t.db.$count(garment);
+      expect(
+        (
+          await post('/wardrobe', {
+            name: 'Again',
+            category: 'footwear',
+            forNeed: String(id),
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(await t.db.$count(garment)).toBe(count);
+    });
+  });
+
+  describe('the decision screen (C)', () => {
+    let id: number;
+    let first: number;
+    let second: number;
+
+    beforeAll(async () => {
+      id = await need('A navy jumper', '120');
+      first = await pick('Merino jumper', id, {
+        price: '110',
+        brand: 'Uniqlo',
+      });
+      second = await pick('Cashmere jumper', id, { price: '180' });
+    });
+
+    it('shows each option with its price against the budget, unlocks, This one and Not for me in place', async () => {
+      const res = await get(`/wardrobe/wishlist/needs/${id}?option=${second}`);
+      expect(res.statusCode).toBe(200);
+      const html = unescapeHtml(res.body);
+      expect(html).toContain('data-need-options');
+      expect(html).toContain(`data-option="${first}"`);
+      expect(html).toContain(`data-option="${second}"`);
+      expect(html).toContain('data-budget="within"');
+      expect(html).toContain('data-budget="over"');
+      expect(html).toContain('data-unlocks=');
+      expect(html).toContain(`action="/wardrobe/${first}/choose"`);
+      expect(html).toContain(`action="/wardrobe/${second}/dismiss"`);
+      expect(html).toContain('value="too_pricey"');
+      // The tapped option is the one centred.
+      expect(html).toMatch(
+        new RegExp(`data-snap-value="${second}"[^>]*data-selected=""`),
+      );
+      expect(html).toContain(`action="/wardrobe/wishlist/needs/${id}/dismiss"`);
+      expect(html).toContain(`/wardrobe/new?forNeed=${id}`);
+    });
+
+    it('is two statements: the session, and the need with its options judged', async () => {
+      const record = await recordQueries(() =>
+        get(`/wardrobe/wishlist/needs/${id}`),
+      );
+      expect(record.statements).toBe(2);
+    });
+
+    it('a chosen need shows its pick with Bought it and Undo choice', async () => {
+      await post(`/wardrobe/${first}/choose`);
+      const html = (await get(`/wardrobe/wishlist/needs/${id}`)).body;
+      expect(html).toContain('data-need-state="chosen"');
+      expect(html).toContain(`/wardrobe/${first}/bought`);
+      expect(html).toContain(`action="/wardrobe/wishlist/needs/${id}/undo"`);
+      expect(html).not.toContain(`action="/wardrobe/${second}/choose"`);
+      await post(`/wardrobe/wishlist/needs/${id}/undo`);
+    });
+
+    it('is a 404 for an unknown need', async () => {
+      expect((await get('/wardrobe/wishlist/needs/999999')).statusCode).toBe(
+        404,
+      );
+    });
+  });
+
+  describe('a suggestion’s page (F)', () => {
+    let id: number;
+    let first: number;
+    let second: number;
+
+    beforeAll(async () => {
+      id = await need('A rain coat', '200');
+      first = await pick('Mac coat', id, {
+        category: 'outerwear',
+        price: '180',
+      });
+      second = await pick('Parka', id, { category: 'outerwear', price: '220' });
+    });
+
+    it('says it is Muse’s, links its need, and offers This one as the primary, never Remove', async () => {
+      const html = unescapeHtml((await get(`/wardrobe/${first}`)).body);
+      expect(html).toContain('data-suggestion-state="open"');
+      expect(html).toContain('From Muse');
+      expect(html).toContain(`href="/wardrobe/wishlist/needs/${id}"`);
+      expect(html).toContain('Muse: Mac coat goes with your jeans');
+      expect(html).toContain(`action="/wardrobe/${first}/choose"`);
+      expect(html).toContain('data-other-options');
+      expect(html).toContain(`href="/wardrobe/${second}"`);
+      expect(html).not.toContain('hx-delete=');
+      // Back goes to the need's screen.
+      expect(html).toContain(
+        `href="/wardrobe/wishlist/needs/${id}" class="btn btn-ghost btn-sm btn-circle"`,
+      );
+    });
+
+    it('is still three statements: the suggestion joins the context', async () => {
+      const record = await recordQueries(() => get(`/wardrobe/${first}`));
+      expect(record.statements).toBe(3);
+    });
+
+    it('set aside, its primary is Undo; once bought, ⋯ offers Returned it', async () => {
+      await post(`/wardrobe/${second}/dismiss`, { reason: 'style' });
+      const aside = (await get(`/wardrobe/${second}?decided=dismiss`)).body;
+      expect(aside).toContain('data-suggestion-state="set-aside"');
+      expect(aside).toContain(`action="/wardrobe/${second}/undo"`);
+      expect(aside).toContain('id="decision-toast"');
+
+      await post(`/wardrobe/${first}/bought`, {
+        acquiredOn: t.today(),
+        price: '',
+      });
+      const bought = (await get(`/wardrobe/${first}`)).body;
+      expect(bought).toContain('data-suggestion-state="bought"');
+      expect(bought).toContain(`hx-post="/wardrobe/${first}/returned"`);
+    });
+  });
+
+  describe('plans unlinked (owner decision, #333)', () => {
+    it('drops the Plans tab and ⋯’s Plans and Shopping list', async () => {
+      const html = (await get('/wardrobe')).body;
+      expect(html).not.toContain('href="/wardrobe/plans"');
+      expect(html).not.toContain('href="/wardrobe/shopping"');
+      // The routes keep working until they go (#337).
+      expect((await get('/wardrobe/plans')).statusCode).toBe(200);
+    });
+
+    it('Today’s card counts the needs to decide and leads to the inbox', async () => {
+      const html = unescapeHtml((await get('/')).body);
+      const [, count] = /data-muse-needs="(\d+)"/.exec(html) ?? [];
+      expect(Number(count)).toBeGreaterThan(0);
+      expect(html).toContain(`Muse has ${count} needs for you to decide on`);
+      expect(html).toMatch(
+        /href="\/wardrobe\/wishlist" class="btn btn-primary/,
+      );
+    });
+  });
+
+  describe('offline and export', () => {
+    it('warms the inbox, its needs’ screens and what is still wanted', async () => {
+      const res = await t.inject({ method: 'GET', url: '/offline/warm' });
+      const list = res.json<{ pages: string[]; keep: string[] }>();
+      expect(list.pages).toContain('/wardrobe/wishlist');
+      const needs = list.pages.filter((p) =>
+        p.startsWith('/wardrobe/wishlist/needs/'),
+      );
+      expect(needs.length).toBeGreaterThan(0);
+      const [aside] = await t.db
+        .select({ id: garment.id })
+        .from(garment)
+        .where(eq(garment.dismissedReason, 'colour'));
+      expect(list.pages).not.toContain(`/wardrobe/${aside.id}`);
+      expect(list.keep).toContain(`/wardrobe/${aside.id}`);
+    });
+
+    it('exports the needs: their names in the CSV, the groups in the JSON', async () => {
+      const csv = await t.inject({
+        method: 'GET',
+        url: '/wardrobe/export.csv',
+      });
+      expect(csv.statusCode).toBe(200);
+      const header = csv.body.split('\r\n')[0];
+      expect(header).toContain('suggestion_group_id');
+      expect(header).toContain('option_group');
+      expect(csv.body).toContain('A navy blazer');
+      const json = await t.inject({
+        method: 'GET',
+        url: '/wardrobe/export.json',
+      });
+      const bundle = json.json<{ optionGroups: Record<string, unknown>[] }>();
+      const blazer = bundle.optionGroups.find(
+        (g) => g.name === 'A navy blazer',
+      );
+      expect(blazer).toMatchObject({ status: 'open', budget: '300.00' });
+      expect(blazer).not.toHaveProperty('owner_id');
+      expect(blazer).not.toHaveProperty('plan_item_id');
+    });
+  });
+});
