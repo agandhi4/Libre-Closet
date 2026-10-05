@@ -25,6 +25,15 @@ import { HangerIcon } from '../layout/parts';
  */
 export type CollageMark = 'to-buy' | 'missing';
 
+/**
+ * Whether a piece opens the photo viewer, and so is in its set (#313): the
+ * set's builder and the piece's trigger must agree, or a tap opens the
+ * wrong slide.
+ */
+export function inViewerSet(piece: CollagePieceView): boolean {
+  return piece.photo !== null && piece.mark !== 'missing';
+}
+
 /** What the collage draws of a piece; a look's emptied slot has no garment id. */
 export interface CollagePieceView {
   name: string | null;
@@ -240,9 +249,9 @@ function CollageFace(props: {
 }) {
   const { garment } = props;
   const viewer =
-    props.viewerSet && garment.photo
+    props.viewerSet && inViewerSet(garment)
       ? {
-          ...viewerTrigger(props.viewerSet, garment.photo),
+          ...viewerTrigger(props.viewerSet, garment.photo!),
           role: 'button',
           tabindex: '0',
         }

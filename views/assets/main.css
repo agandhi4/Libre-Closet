@@ -604,7 +604,9 @@ body {
 /* The shared photo viewer (src/web/files/photo-viewer.tsx, public/js/
    photo-viewer.js, #313): a full-screen scroll-snap row of slides. A zoomed
    slide scrolls inside itself, so the row stops scrolling until it is
-   zoomed out; pinch is the browser's own (pan-x pan-y pinch-zoom). */
+   zoomed out. Pinch is the script's (--photo-zoom, 1 to 4 on the image):
+   pan-x pan-y without pinch-zoom keeps native panning and stops the page
+   zooming under the photo. */
 @layer components {
   .photo-viewer-track {
     display: flex;
@@ -612,7 +614,7 @@ body {
     overscroll-behavior: contain;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;
-    touch-action: pan-x pan-y pinch-zoom;
+    touch-action: pan-x pan-y;
   }
   .photo-viewer-track[data-zoomed] {
     overflow-x: hidden;
@@ -626,7 +628,7 @@ body {
     overflow: auto;
     scroll-snap-align: center;
     scroll-snap-stop: always;
-    touch-action: pan-x pan-y pinch-zoom;
+    touch-action: pan-x pan-y;
   }
   /* Auto margins centre an image that fits and leave one that overflows
      scrollable from its edge. */
@@ -638,8 +640,8 @@ body {
     cursor: zoom-in;
   }
   .photo-viewer-slide[data-zoomed] img {
-    width: 200%;
-    height: 200%;
+    width: calc(var(--photo-zoom) * 100%);
+    height: calc(var(--photo-zoom) * 100%);
     max-width: none;
     max-height: none;
     cursor: zoom-out;

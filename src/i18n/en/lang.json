@@ -8,8 +8,8 @@
     "ENLARGE_NAMED": "Enlarge photo of {name}",
     "PREVIOUS": "Previous photo",
     "NEXT": "Next photo",
-    "ZOOM_IN": "Zoom in",
-    "ZOOM_OUT": "Zoom out",
+    "ZOOM": "Zoom",
+    "SMALLER_COPY": "Showing a smaller copy",
     "POSITION": "{current} of {total}"
   },
   "strip": {

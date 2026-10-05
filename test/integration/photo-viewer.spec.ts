@@ -104,5 +104,15 @@ describe('the photo viewer markup', () => {
     // The card's enlarge button, and the sheet's photo.
     expect(large).toHaveLength(2);
     for (const src of large) expect(set).toContain(src);
+
+    // Every trigger on the page opens a photo of its own set, whichever card.
+    const ids = new Set(
+      [...html.matchAll(/data-photo-open="([^"]+)"/g)].map((m) => m[1]),
+    );
+    expect(ids.size).toBeGreaterThan(0);
+    for (const id of ids) {
+      const own = setOf(html, id);
+      for (const src of triggers(html, id)) expect(own).toContain(src);
+    }
   });
 });

@@ -9,7 +9,7 @@
  * What the platform does not do alone, and so lives here: stepping and
  * keyboard arrows between slides (the row itself is native scroll-snap, so a
  * swipe needs no code), the zoom toggle (click on a mouse, double tap on
- * touch; pinch is the browser's own), swipe down to close, and loading each
+ * touch; pinch on the slide, below), swipe down to close, and loading each
  * slide's large image over the thumb the page already holds. Focus moving in
  * and Esc are showModal's; focus going back is restored here, as WebKit does
  * not focus a tapped button for the dialog to return to.
@@ -21,6 +21,8 @@
 
 const DOUBLE_TAP_MS = 350;
 const SWIPE_DOWN_PX = 90;
+const MAX_ZOOM = 4;
+const PAN_STEP_PX = 60;
 
 const viewer = () => document.getElementById('photo-viewer');
 const track = (dialog) => dialog.querySelector('[data-photo-track]');
@@ -30,6 +32,9 @@ let slides = [];
 let index = 0;
 let lastTap = 0;
 let frame = 0;
+let zoom = 1;
+const pointers = new Map();
+let pinch = null;
 
 function setSet(id) {
   const template = document.querySelector(
@@ -50,65 +55,113 @@ function buildSlide(source) {
   return slide;
 }
 
-/** Swap a slide's thumb for the large image once that loads; keep the thumb when it can't. */
-function loadLarge(slide) {
-  if (!slide || slide.dataset.requested) return;
+/**
+ * Swap a slide's thumb for the large image once that loads; keep the thumb
+ * when it can't (offline), and say so rather than offer to zoom into it.
+ */
+function loadLarge(slide, dialog) {
+  if (!slide || 'requested' in slide.dataset) return;
   slide.dataset.requested = '';
   const probe = new Image();
   probe.onload = () => {
     slide.querySelector('img').src = slide.dataset.large;
   };
+  probe.onerror = () => {
+    slide.dataset.thumbOnly = '';
+    if (dialog.open && slides[index] === slide) {
+      if (isZoomed()) setZoom(dialog, 1);
+      showNotice(dialog);
+    }
+  };
   probe.src = slide.dataset.large;
 }
 
-function setZoom(dialog, on, point) {
+/**
+ * Zoom the current slide to `level` (1 = fitted), keeping `point` (client
+ * coordinates; the centre when absent) under the finger.
+ */
+function setZoom(dialog, level, point) {
   const slide = slides[index];
   const row = track(dialog);
   const img = slide.querySelector('img');
-  const button = dialog.querySelector('[data-photo-zoom]');
   const rect = img.getBoundingClientRect();
-  if (on) {
+  const frame = slide.getBoundingClientRect();
+  const fx = point ? (point.x - rect.left) / rect.width : 0.5;
+  const fy = point ? (point.y - rect.top) / rect.height : 0.5;
+  const at = point
+    ? { x: point.x - frame.left, y: point.y - frame.top }
+    : { x: frame.width / 2, y: frame.height / 2 };
+  zoom = Math.min(Math.max(level, 1), MAX_ZOOM);
+  if (zoom < 1.02) zoom = 1;
+  if (zoom > 1) {
+    slide.style.setProperty('--photo-zoom', String(zoom));
     slide.dataset.zoomed = '';
     row.dataset.zoomed = '';
-    // Keep the tapped spot under the finger: the centre when keyboard or button.
-    const fx = point ? (point.x - rect.left) / rect.width : 0.5;
-    const fy = point ? (point.y - rect.top) / rect.height : 0.5;
-    slide.scrollLeft = fx * img.offsetWidth - slide.clientWidth / 2;
-    slide.scrollTop = fy * img.offsetHeight - slide.clientHeight / 2;
+    slide.scrollLeft = fx * img.offsetWidth - at.x;
+    slide.scrollTop = fy * img.offsetHeight - at.y;
   } else {
+    slide.style.removeProperty('--photo-zoom');
     delete slide.dataset.zoomed;
     delete row.dataset.zoomed;
   }
-  button.setAttribute(
-    'aria-label',
-    dialog.dataset[on ? 'textZoomOut' : 'textZoomIn'],
-  );
-  button.setAttribute('aria-pressed', String(on));
+  dialog
+    .querySelector('[data-photo-zoom]')
+    .setAttribute('aria-pressed', String(zoom > 1));
 }
 
-function isZoomed(dialog) {
-  return 'zoomed' in track(dialog).dataset;
+function isZoomed() {
+  return zoom > 1;
+}
+
+/** The button/double-tap toggle: fitted to 2x and back. */
+function toggleZoom(dialog, point) {
+  if ('thumbOnly' in slides[index].dataset) return;
+  setZoom(dialog, isZoomed() ? 1 : 2, point);
+}
+
+function showNotice(dialog) {
+  const thumbOnly = 'thumbOnly' in slides[index].dataset;
+  dialog.querySelector('[data-photo-notice]').textContent = thumbOnly
+    ? dialog.dataset.textSmallerCopy
+    : '';
+  dialog.querySelector('[data-photo-zoom]').disabled = thumbOnly;
+}
+
+/** Disabling a focused button drops focus to the body: hand it on first. */
+function keepFocus(dialog, disabling) {
+  const focused = document.activeElement;
+  if (!disabling.includes(focused)) return;
+  const other = [...dialog.querySelectorAll('[data-photo-step]')].find(
+    (button) => !disabling.includes(button),
+  );
+  (other ?? dialog.querySelector('[data-photo-close]')).focus();
 }
 
 function sync(dialog, next) {
-  if (isZoomed(dialog)) setZoom(dialog, false);
+  if (isZoomed()) setZoom(dialog, 1);
   index = next;
-  for (const i of [next - 1, next, next + 1]) loadLarge(slides[i]);
+  for (const i of [next - 1, next, next + 1]) loadLarge(slides[i], dialog);
   const img = slides[next].querySelector('img');
   dialog.querySelector('[data-photo-caption]').textContent = img.alt;
+  showNotice(dialog);
   dialog.querySelector('[data-photo-position]').textContent =
     dialog.dataset.textPosition
       .replace('{current}', String(next + 1))
       .replace('{total}', String(slides.length));
-  for (const button of dialog.querySelectorAll('[data-photo-step]')) {
-    const target = next + Number(button.dataset.photoStep);
+  const buttons = [...dialog.querySelectorAll('[data-photo-step]')];
+  const off = (button) =>
+    slides.length < 2 ||
+    next + Number(button.dataset.photoStep) < 0 ||
+    next + Number(button.dataset.photoStep) >= slides.length;
+  keepFocus(dialog, buttons.filter(off));
+  for (const button of buttons) {
     button.hidden = slides.length < 2;
-    button.disabled = target < 0 || target >= slides.length;
+    button.disabled = off(button);
   }
 }
 
 function step(dialog, by) {
-  if (isZoomed(dialog)) setZoom(dialog, false);
+  if (isZoomed()) setZoom(dialog, 1);
   const target = Math.min(Math.max(index + by, 0), slides.length - 1);
   if (target === index) return;
   const row = track(dialog);
@@ -125,16 +178,14 @@ function open(trigger) {
   if (!dialog || dialog.open) return;
   const sources = setSet(trigger.dataset.photoOpen);
   if (sources.length === 0) return;
+  const start = sources.findIndex(
+    (source) => source.getAttribute('src') === trigger.dataset.photoLarge,
+  );
+  if (start < 0) return;
   opener = trigger;
   const row = track(dialog);
   slides = sources.map(buildSlide);
   row.replaceChildren(...slides);
-  const start = Math.max(
-    sources.findIndex(
-      (source) => source.getAttribute('src') === trigger.dataset.photoLarge,
-    ),
-    0,
-  );
   dialog.showModal();
   row.scrollTo({ left: start * row.clientWidth, behavior: 'instant' });
   sync(dialog, start);
@@ -152,7 +203,7 @@ document.addEventListener('click', (event) => {
   if (event.target.closest('[data-photo-close]')) {
     dialog.close();
   } else if (event.target.closest('[data-photo-zoom]')) {
-    setZoom(dialog, !isZoomed(dialog));
+    toggleZoom(dialog);
   } else if (event.target.closest('[data-photo-step]')) {
     step(
       dialog,
@@ -167,7 +218,7 @@ document.addEventListener('click', (event) => {
       lastTap = double ? 0 : event.timeStamp;
       if (!double) return;
     }
-    setZoom(dialog, !isZoomed(dialog), point);
+    toggleZoom(dialog, point);
   }
 });
 
@@ -176,9 +227,11 @@ document.addEventListener('keydown', (event) => {
   const dialog = viewer();
   if (dialog?.open && dialog.contains(event.target)) {
     if (event.altKey || event.ctrlKey || event.metaKey) return;
-    if (event.key === 'ArrowLeft') step(dialog, -1);
-    else if (event.key === 'ArrowRight') step(dialog, 1);
-    else return;
+    const by = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
+    if (!by) return;
+    // Zoomed, the arrows pan the photo; stepping needs it fitted again.
+    if (isZoomed()) slides[index].scrollBy({ left: by * PAN_STEP_PX });
+    else step(dialog, by);
     event.preventDefault();
     return;
   }
@@ -217,6 +270,9 @@ document.addEventListener(
     track(dialog).replaceChildren();
     delete track(dialog).dataset.zoomed;
     slides = [];
+    zoom = 1;
+    pointers.clear();
+    pinch = null;
     if (opener?.isConnected) opener.focus();
     opener = null;
   },
@@ -242,7 +298,7 @@ document.addEventListener(
   'touchend',
   (event) => {
     const dialog = viewer();
-    if (!touchStart || !dialog?.open || isZoomed(dialog)) return;
+    if (!touchStart || !dialog?.open || isZoomed()) return;
     if ((window.visualViewport?.scale ?? 1) > 1.01) return;
     const touch = event.changedTouches[0];
     const dy = touch.clientY - touchStart.y;
@@ -251,4 +307,63 @@ document.addEventListener(
     if (dy > SWIPE_DOWN_PX && dx < dy * 0.5) dialog.close();
   },
   { passive: true },
+);
+
+// A phone's rotation changes the slide width: stay on the current photo.
+function realign() {
+  const dialog = viewer();
+  if (!dialog?.open) return;
+  const row = track(dialog);
+  row.scrollTo({ left: index * row.clientWidth, behavior: 'instant' });
+}
+window.addEventListener('resize', realign);
+window.addEventListener('orientationchange', realign);
+
+// Pinch on the slide (Pointer Events): the browser's own pinch would zoom
+// the page, which stays zoomable elsewhere, so the slides opt out of it in
+// CSS and the zoom is driven here. A second finger starts it; the first
+// alone is a swipe or pan, the browser's.
+const distance = () => {
+  const [a, b] = [...pointers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+const midpoint = () => {
+  const [a, b] = [...pointers.values()];
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+};
+const onSlide = (event) =>
+  viewer()?.open && event.target.closest?.('.photo-viewer-slide');
+
+document.addEventListener('pointerdown', (event) => {
+  if (event.pointerType !== 'touch' || !onSlide(event)) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size === 2 && !('thumbOnly' in slides[index].dataset)) {
+    pinch = { start: distance(), zoom };
+  }
+});
+
+document.addEventListener('pointermove', (event) => {
+  if (!pointers.has(event.pointerId)) return;
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pinch && pointers.size === 2) {
+    setZoom(viewer(), (pinch.zoom * distance()) / pinch.start, midpoint());
+  }
+});
+
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, (event) => {
+    pointers.delete(event.pointerId);
+    if (pointers.size < 2) pinch = null;
+  });
+}
+
+// Two fingers on a slide are a pinch, never a scroll of the row beneath.
+document.addEventListener(
+  'touchmove',
+  (event) => {
+    if (event.touches.length === 2 && onSlide(event) && event.cancelable) {
+      event.preventDefault();
+    }
+  },
+  { passive: false },
 );

@@ -143,15 +143,15 @@ test.describe('on a desktop', () => {
     const fitted = (await image.boundingBox())!;
     await image.click();
     await expect(
-      viewer(page).getByRole('button', { name: 'Zoom out' }),
+      viewer(page).getByRole('button', { name: 'Zoom' }),
     ).toHaveAttribute('aria-pressed', 'true');
     expect((await image.boundingBox())!.width).toBeGreaterThan(
       fitted.width * 1.5,
     );
-    await viewer(page).getByRole('button', { name: 'Zoom out' }).click();
+    await viewer(page).getByRole('button', { name: 'Zoom' }).click();
     await expect(
-      viewer(page).getByRole('button', { name: 'Zoom in' }),
-    ).toBeVisible();
+      viewer(page).getByRole('button', { name: 'Zoom' }),
+    ).toHaveAttribute('aria-pressed', 'false');
 
     await page.keyboard.press('Escape');
     await expect(viewer(page)).toBeHidden();
@@ -220,12 +220,12 @@ test.describe('on a phone', () => {
     await page.touchscreen.tap(at.x, at.y);
     await page.touchscreen.tap(at.x, at.y);
     await expect(
-      viewer(page).getByRole('button', { name: 'Zoom out' }),
-    ).toBeVisible();
+      viewer(page).getByRole('button', { name: 'Zoom' }),
+    ).toHaveAttribute('aria-pressed', 'true');
     expect((await image.boundingBox())!.width).toBeGreaterThan(
       fitted.width * 1.5,
     );
-    await viewer(page).getByRole('button', { name: 'Zoom out' }).tap();
+    await viewer(page).getByRole('button', { name: 'Zoom' }).tap();
 
     await swipe(page, 0, 300);
     await expect(viewer(page)).toBeHidden();
@@ -233,6 +233,55 @@ test.describe('on a phone', () => {
       page.getByRole('button', { name: 'Enlarge photo of Grey tee' }),
     ).toBeFocused();
     expect(errors).toEqual([]);
+  });
+
+  test('a two-finger pinch zooms the photo, not the page, and the controls stay', async ({
+    page,
+  }) => {
+    const { tee } = await seed(page);
+    await openGarment(page, tee);
+    await page.getByRole('button', { name: 'Enlarge photo of Grey tee' }).tap();
+    const image = viewer(page).locator('.photo-viewer-slide img').first();
+    await expect(image).toHaveJSProperty('complete', true);
+    const fitted = (await image.boundingBox())!;
+    const caption = viewer(page).locator('[data-photo-caption]');
+    const captionBefore = (await caption.boundingBox())!;
+
+    const cdp = await page.context().newCDPSession(page);
+    const points = (gap: number) => [
+      { x: 195 - gap, y: 420, id: 1 },
+      { x: 195 + gap, y: 420, id: 2 },
+    ];
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: points(20),
+    });
+    for (let gap = 20; gap <= 120; gap += 10) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: points(gap),
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await cdp.detach();
+
+    await expect
+      .poll(async () => (await image.boundingBox())!.width)
+      .toBeGreaterThan(fitted.width * 2);
+    await expect(
+      viewer(page).getByRole('button', { name: 'Zoom' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+    expect(await page.evaluate(() => window.visualViewport!.scale)).toBe(1);
+    expect((await caption.boundingBox())!.height).toBe(captionBefore.height);
+
+    await viewer(page).getByRole('button', { name: 'Zoom' }).tap();
+    await expect
+      .poll(async () => (await image.boundingBox())!.width)
+      .toBeLessThan(fitted.width * 1.05);
   });
 
   test('the Looks strip tile opens its pieces', async ({ page }) => {

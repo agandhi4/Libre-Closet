@@ -4,7 +4,11 @@ import { PostForm } from '../auth/form';
 import { occasionLabel } from '../calendar/labels';
 import { PhotoSet } from '../files/photo-viewer';
 import { t } from '../i18n';
-import { type CollagePieceView, OutfitCollage } from '../outfits/collage';
+import {
+  type CollagePieceView,
+  inViewerSet,
+  OutfitCollage,
+} from '../outfits/collage';
 import { outfitUrl } from '../outfits/urls';
 import { SnapStrip, snapItem } from '../strip/snap-strip';
 import { TILE } from './candidate-tile';
@@ -160,9 +164,7 @@ export function LookFace(props: {
   const { look } = props;
   const viewerSet = props.viewer ? `look-${look.id}-photos` : undefined;
   const garments = lookGarments(look);
-  const pieces = garments.filter(
-    (piece) => piece.photo !== null && piece.mark !== 'missing',
-  );
+  const pieces = garments.filter(inViewerSet);
   return (
     <>
       <figure class="relative">

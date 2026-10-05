@@ -98,8 +98,7 @@ export function PhotoViewer() {
         current: '{current}',
         total: '{total}',
       })}
-      data-text-zoom-in={t('photoViewer.ZOOM_IN')}
-      data-text-zoom-out={t('photoViewer.ZOOM_OUT')}
+      data-text-smaller-copy={t('photoViewer.SMALLER_COPY')}
     >
       <div class="relative size-full">
         <div data-photo-track class="photo-viewer-track absolute inset-0"></div>
@@ -117,7 +116,8 @@ export function PhotoViewer() {
             type="button"
             class="btn btn-circle btn-ghost"
             data-photo-zoom
-            aria-label={t('photoViewer.ZOOM_IN')}
+            aria-label={t('photoViewer.ZOOM')}
+            aria-pressed="false"
           >
             <Icon path="m21 21-5.2-5.2M10.5 7.5v6M7.5 10.5h6M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0Z" />
           </button>
@@ -144,6 +144,7 @@ export function PhotoViewer() {
           aria-live="polite"
         >
           <span data-photo-caption class="font-medium"></span>
+          <span data-photo-notice class="text-xs"></span>
           <span data-photo-position class="text-xs"></span>
         </div>
       </div>
