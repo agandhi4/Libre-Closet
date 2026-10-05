@@ -2,6 +2,7 @@ import { and, eq, type SQL, sql } from 'drizzle-orm';
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   garment,
+  outfit,
   outfitCalendar,
   outfitSlot,
   tripOutfit,
@@ -106,4 +107,16 @@ export function piecesToBuy<T extends { status: GarmentStatus }>(
 /** One garment of an outfit by piecesToBuy's rule: not owned yet. */
 export function isPieceToBuy(garment: { status: GarmentStatus }): boolean {
   return garment.status === 'wishlist';
+}
+
+/**
+ * The owner's own outfits, as the Saved grid, the pickers (a day's, a
+ * trip's) and the garment page's strip list them: never proposed, or one
+ * of Muse's proposals loved while complete ("Save" is Love on a complete
+ * outfit, #335; src/web/outfits/proposals.ts). Muse's others are the
+ * Outfits tab's own section. Over `outfit`, rendered qualified (a raw
+ * `sql` template's).
+ */
+export function ownersOutfit(): SQL {
+  return sql`(${outfit.proposedAt} is null or (${outfit.reaction} = 'loved' and ${outfitIsComplete(outfit.id)}))`;
 }
