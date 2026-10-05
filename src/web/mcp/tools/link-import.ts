@@ -108,11 +108,21 @@ export async function addGarmentFromLink(
     );
     throw new HttpError(400, messages.join('; '));
   }
-  const id = await saveImported(deps, ownerId, ctx.userId, read.fields, {
-    photo,
-    destination: overrides.destination,
-    withGarment,
-  });
+  let id: number | undefined;
+  try {
+    id = await saveImported(deps, ownerId, ctx.userId, read.fields, {
+      photo,
+      destination: overrides.destination,
+      withGarment,
+    });
+  } catch (error) {
+    // A refusal from `withGarment` (suggest_garment's mark) rolled the
+    // garment back: its photo is nobody's, like a refused form's.
+    if (photo) {
+      await discardPendingPhoto(deps, photo, { userId: ctx.userId, ownerId });
+    }
+    throw error;
+  }
   if (id === undefined) {
     // Claimed or evicted between the import and the save (the same user's
     // tenth import meanwhile): nothing was written.

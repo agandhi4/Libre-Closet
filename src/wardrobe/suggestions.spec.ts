@@ -390,20 +390,49 @@ describe('decideSuggestion', () => {
 });
 
 describe('productUrlKey', () => {
-  it('drops what does not name the product', () => {
-    expect(
-      productUrlKey(
-        'https://Shop.Example/products/blazer/?utm_source=muse&gclid=x&fbclid=y&ref=home#reviews',
-      ),
-    ).toBe('https://shop.example/products/blazer');
+  const key = (url: string) => productUrlKey(url);
+
+  it.each([
+    [
+      'the fragment and a trailing slash',
+      'https://shop.example/p/blazer/#reviews',
+    ],
+    ['http for https', 'http://shop.example/p/blazer'],
+    ['www.', 'https://www.shop.example/p/blazer'],
+    ['m.', 'https://m.shop.example/p/blazer'],
+    ['the host’s case', 'https://Shop.Example/p/blazer'],
+    ['utm_*', 'https://shop.example/p/blazer?utm_source=muse&utm_medium=x'],
+    [
+      'gclid, fbclid, msclkid',
+      'https://shop.example/p/blazer?gclid=a&fbclid=b&msclkid=c',
+    ],
+    ['srsltid, igshid', 'https://shop.example/p/blazer?srsltid=a&igshid=b'],
+    ['mc_cid, mc_eid', 'https://shop.example/p/blazer?mc_cid=a&mc_eid=b'],
+    ['_ga, spm, ref', 'https://shop.example/p/blazer?_ga=1.2&spm=a.b&ref=home'],
+  ])('ignores %s', (_what, url) => {
+    expect(key(url)).toBe('shop.example/p/blazer');
   });
 
-  it('keeps what may name the variant', () => {
+  it('sorts the parameters it keeps, which may name the variant', () => {
     expect(
-      productUrlKey('https://shop.example/p/blazer?color=navy&utm_medium=x'),
-    ).toBe('https://shop.example/p/blazer?color=navy');
-    expect(productUrlKey('https://shop.example/p/blazer?color=navy')).not.toBe(
-      productUrlKey('https://shop.example/p/blazer?color=black'),
+      key('https://shop.example/p/blazer?size=40&color=navy&utm_x=1'),
+    ).toBe('shop.example/p/blazer?color=navy&size=40');
+    expect(key('https://shop.example/p/blazer?color=navy&size=40')).toBe(
+      key('https://shop.example/p/blazer?size=40&color=navy'),
+    );
+    expect(key('https://shop.example/p/blazer?color=navy')).not.toBe(
+      key('https://shop.example/p/blazer?color=black'),
+    );
+  });
+
+  it('drops Amazon’s /ref= segment after the product', () => {
+    expect(
+      key(
+        'https://www.amazon.com/Wool-Blazer/dp/B0ABC12345/ref=sr_1_3?keywords=blazer&qid=1',
+      ),
+    ).toBe('amazon.com/Wool-Blazer/dp/B0ABC12345?keywords=blazer&qid=1');
+    expect(key('https://www.amazon.com/dp/B0ABC12345/ref=cm_sw')).toBe(
+      key('https://amazon.com/dp/B0ABC12345'),
     );
   });
 

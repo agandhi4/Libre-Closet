@@ -210,6 +210,41 @@ describe('MCP: Muse’s tools', () => {
     });
   });
 
+  describe('create_option_group, a need chosen', () => {
+    it('refuses the name of a need the owner chose an option for until it is bought', async () => {
+      const groupId = await need('A cashmere scarf');
+      const scarf = await createWishlistItem(t, {
+        name: 'Cashmere scarf',
+        category: 'accessories',
+      });
+      await markSuggestion(t.db, t.owner.id, scarf, {
+        tokenId,
+        groupId,
+        note: null,
+        rank: null,
+      });
+      expect((await post(`/wardrobe/${scarf}/choose`)).statusCode).toBe(303);
+      const chosen = await callTool(t, token, 'create_option_group', {
+        name: 'a cashmere scarf ',
+      });
+      expect(chosen.isError).toBe(true);
+      expect(chosen.value.error).toContain(
+        `chose an option for that need (id ${groupId})`,
+      );
+
+      expect(
+        (
+          await post(`/wardrobe/${scarf}/bought`, {
+            acquiredOn: t.today(),
+            price: '90',
+          })
+        ).statusCode,
+      ).toBe(303);
+      // Settled by a purchase: history, and the need may come round again.
+      expect(await need('A cashmere scarf')).toBeGreaterThan(groupId);
+    });
+  });
+
   describe('suggest_garment', () => {
     it('imports the product onto the wishlist as an option of the need, with its note, rank, price and size', async () => {
       const groupId = await need('A wool overcoat', { budget: 400 });
@@ -433,7 +468,7 @@ describe('MCP: Muse’s tools', () => {
   });
 
   describe('get_suggestion_feedback', () => {
-    it('round-trips a dismissal: the feedback tells it once, and its link is never suggested again', async () => {
+    it('round-trips a dismissal: the feedback tells it, writing nothing, and its link is never suggested again', async () => {
       const groupId = await need('A field jacket');
       const url = await product('Olive Field Jacket', '210.00');
       const jacket = await suggest(groupId, url);
@@ -454,15 +489,32 @@ describe('MCP: Muse’s tools', () => {
           sourceUrl: url,
         }),
       ]);
+      // A pure read: told again until the round ends, the cursor untouched.
+      const cursor = async () =>
+        (
+          await t.db
+            .select({ at: personalAccessToken.feedbackReadAt })
+            .from(personalAccessToken)
+            .where(eq(personalAccessToken.id, tokenId))
+        )[0].at;
+      const kept = await cursor();
+      const again = await feedback();
+      expect(again.picksSetAside.map((p) => p.garmentId)).toEqual([jacket.id]);
+      expect(Date.parse(again.until)).toBeGreaterThanOrEqual(
+        Date.parse(told.until),
+      );
+      expect(await cursor()).toEqual(kept);
+      await feedback({ all: true });
+      expect(await cursor()).toEqual(kept);
 
       const before = await garmentCount();
-      const again = await callTool(t, token, 'suggest_garment', {
+      const refused = await callTool(t, token, 'suggest_garment', {
         url,
         groupId,
       });
-      expect(again.isError).toBe(true);
-      expect(again.value.error).toContain('set this product aside');
-      expect(again.value.error).toContain('too_pricey');
+      expect(refused.isError).toBe(true);
+      expect(refused.value.error).toContain('set this product aside');
+      expect(refused.value.error).toContain('too_pricey');
       expect(await garmentCount()).toBe(before);
     });
 
@@ -527,7 +579,7 @@ describe('MCP: Muse’s tools', () => {
       expect(everything.picksSetAside.length).toBeGreaterThan(0);
     });
 
-    it('tells a migrated reaction (no reacted_at) on a first call only', async () => {
+    it('tells a migrated reaction (no reacted_at) before the first round only', async () => {
       const [migrated] = await t.db
         .insert(outfit)
         .values({
@@ -546,8 +598,13 @@ describe('MCP: Muse’s tools', () => {
           expect.objectContaining({ outfitId: migrated.id, at: null }),
         ]),
       );
-      const second = await tool<Feedback>(t, fresh, 'get_suggestion_feedback');
-      expect(second.outfits.map((o) => o.outfitId)).not.toContain(migrated.id);
+      // Past a round's end (part A2's finish_round moves the cursor).
+      await t.db
+        .update(personalAccessToken)
+        .set({ feedbackReadAt: sql`now()` })
+        .where(eq(personalAccessToken.name, 'Muse again'));
+      const later = await tool<Feedback>(t, fresh, 'get_suggestion_feedback');
+      expect(later.outfits.map((o) => o.outfitId)).not.toContain(migrated.id);
     });
 
     it('is the caller’s own: another user hears nothing of the owner’s decisions', async () => {
@@ -638,9 +695,9 @@ describe('MCP: Muse’s tools', () => {
     });
   });
 
-  it('never marks anything owned: every suggestion is on the wishlist', async () => {
+  it('never marks anything owned: a suggestion leaves the wishlist only through Bought it', async () => {
     const owned = await t.db
-      .select({ id: garment.id })
+      .select({ id: garment.id, boughtAt: garment.boughtAt })
       .from(garment)
       .where(
         and(
@@ -649,7 +706,8 @@ describe('MCP: Muse’s tools', () => {
           eq(garment.ownerId, t.owner.id),
         ),
       );
-    // Only the belt bag, which the owner bought in the app.
-    expect(owned).toHaveLength(1);
+    // The belt bag and the scarf, which the owner bought in the app.
+    expect(owned).toHaveLength(2);
+    for (const row of owned) expect(row.boughtAt).not.toBeNull();
   });
 });

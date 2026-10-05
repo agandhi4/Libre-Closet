@@ -97,15 +97,23 @@ export const NEED_NOTE_MAX = 1000;
 export const PICK_NOTE_MAX = 240;
 
 /** Query parameters that say where a visitor came from, never which product. */
-const TRACKING_PARAM = /^(utm_.*|gclid|fbclid|ref)$/i;
+const TRACKING_PARAM =
+  /^(utm_.*|gclid|fbclid|msclkid|srsltid|igshid|mc_cid|mc_eid|_ga|spm|ref)$/i;
+
+/** A mobile or www host is the shop's own: the same product either way. */
+const HOST_PREFIX = /^(www|m)\./;
+
+/** Amazon's path after the product (`/dp/B0…/ref=sr_1_3`): where the link was clicked. */
+const AMAZON_REF = /(\/dp\/[^/]+)\/ref=[^/]*/i;
 
 /**
  * What makes two product links the same product, for the agent's "never
  * propose again what was set aside" (#337: suggest_garment, matched by
- * URL): the host in lower case (a URL's host already is), no fragment, no
- * tracking parameters, no trailing slash on the path. The other
- * parameters stay: a shop may name the colour or size in them. Undefined
- * for a link that is not a URL (a stored link the garment form took).
+ * URL): the scheme ignored (http is https), the host without `www.` or
+ * `m.`, the path without Amazon's `/ref=` segment or a trailing slash, no
+ * fragment, no tracking parameters, the others sorted. They stay: a shop
+ * may name the colour or size in them. Undefined for a link that is not a
+ * URL (a stored link the garment form took).
  */
 export function productUrlKey(url: string): string | undefined {
   let parsed: URL;
@@ -114,12 +122,13 @@ export function productUrlKey(url: string): string | undefined {
   } catch {
     return undefined;
   }
-  const kept = [...parsed.searchParams].filter(
-    ([name]) => !TRACKING_PARAM.test(name),
-  );
+  const kept = [...parsed.searchParams]
+    .filter(([name]) => !TRACKING_PARAM.test(name))
+    .sort(([a, x], [b, y]) => a.localeCompare(b) || x.localeCompare(y));
   const query = new URLSearchParams(kept).toString();
-  const path = parsed.pathname.replace(/\/+$/, '');
-  return `${parsed.protocol}//${parsed.host}${path}${query ? `?${query}` : ''}`;
+  const host = parsed.host.replace(HOST_PREFIX, '');
+  const path = parsed.pathname.replace(AMAZON_REF, '$1').replace(/\/+$/, '');
+  return `${host}${path}${query ? `?${query}` : ''}`;
 }
 
 /** A group as the writer read it. */

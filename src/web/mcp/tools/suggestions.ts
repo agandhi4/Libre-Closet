@@ -6,7 +6,6 @@ import {
   NEED_NAME_MAX,
   NEED_NOTE_MAX,
   PICK_NOTE_MAX,
-  productUrlKey,
 } from '../../../wardrobe/suggestions';
 import { HttpError } from '../../errors';
 import {
@@ -24,7 +23,7 @@ import { CATEGORY_MAX, NAME_MAX } from '../../wardrobe/validation';
 import { findGarment } from '../../wardrobe/queries';
 import {
   createOptionGroup,
-  markSuggestion,
+  markSuggestedProduct,
   type SuggestedProduct,
   suggestionRoom,
 } from '../../wishlist/decisions';
@@ -44,7 +43,7 @@ import { addGarmentFromLink } from './link-import';
  * 5): the agent writes its suggestions as the app's own rows, through the
  * app's own writers, and reads back what the owner decided. The caller's
  * own wardrobe, no ownerId. A need is createOptionGroup's, a pick the
- * link import's garment marked by markSuggestion in its transaction, an
+ * link import's garment marked by markSuggestedProduct in its transaction, an
  * outfit proposeOutfit's; list_suggestions reads the inbox and the
  * Outfits tab as their pages do, get_suggestion_feedback the decisions
  * since the agent's last call (src/web/wishlist/feedback.ts).
@@ -119,45 +118,28 @@ function setAsideOut(rows: readonly SetAsideRow[]) {
   };
 }
 
-/** The product a new link would repeat: one set aside first, else one still suggested. */
-function sameProduct(
-  products: readonly SuggestedProduct[],
-  url: string,
-): SuggestedProduct | undefined {
-  const key = productUrlKey(url);
-  const same = products.filter((p) => productUrlKey(p.sourceUrl) === key);
-  return same.find((p) => p.dismissed) ?? same[0];
+/** The refusal of a link the owner set aside, or one suggested already. */
+function sameProductRefusal(same: SuggestedProduct): HttpError {
+  return new HttpError(
+    409,
+    same.dismissed
+      ? `The owner set this product aside (garment ${same.id}, ${same.dismissedReason ?? 'with a note'}): never propose it again`
+      : `This product is suggested already (garment ${same.id})`,
+  );
 }
 
-/** suggest_garment's refusals before the fetch: the group's room, and the link never proposed before. */
+/** A need full of open options: suggest_garment's refusal before and in the write. */
+const FULL = `That need has ${MAX_OPTIONS_PER_GROUP} open options already`;
+const DECIDED =
+  'That need is decided (chosen, bought or set aside): list_suggestions shows the open ones';
+
+/** suggest_garment's refusals before the fetch: the need's room, and a link never proposed before. */
 async function checkSuggestion(ctx: ToolContext, groupId: number, url: string) {
-  const room = await suggestionRoom(ctx.db, ctx.userId, groupId);
+  const room = await suggestionRoom(ctx.db, ctx.userId, groupId, url);
   if (room.group === 'missing') throw new HttpError(404, 'Need not found');
-  if (room.group === 'closed') {
-    throw new HttpError(
-      409,
-      'That need is decided (chosen, bought or set aside): list_suggestions shows the open ones',
-    );
-  }
-  if (room.group === 'full') {
-    throw new HttpError(
-      409,
-      `That need has ${MAX_OPTIONS_PER_GROUP} open options already`,
-    );
-  }
-  const same = sameProduct(room.products, url);
-  if (same?.dismissed) {
-    throw new HttpError(
-      409,
-      `The owner set this product aside (garment ${same.id}, ${same.dismissedReason ?? 'with a note'}): never propose it again`,
-    );
-  }
-  if (same) {
-    throw new HttpError(
-      409,
-      `This product is suggested already (garment ${same.id})`,
-    );
-  }
+  if (room.group === 'closed') throw new HttpError(409, DECIDED);
+  if (room.group === 'full') throw new HttpError(409, FULL);
+  if (room.same) throw sameProductRefusal(room.same);
 }
 
 export const suggestionTools = [
@@ -210,17 +192,16 @@ export const suggestionTools = [
     name: 'get_suggestion_feedback',
     title: 'Get the owner’s feedback on your suggestions',
     description:
-      'What the owner decided about your suggestions since your last call (your first call: everything): `needs` decided (chosen an option, bought, or set aside with a reason and their note), `picksSetAside` (options turned down: the reason, too_pricey, colour, style, already_have, fit_size or not_now, and their note; chose_another when they chose a sibling; returned after buying), `purchases` (with the price paid; `different: true` when they bought something else for the need), `outfits` (your outfits they loved, declined with a reason, or undid), and `wears`: every bought suggestion with how often it has been worn, on every call. Read it first in every conversation and act on every reason. `all: true` answers everything again. An item may be told twice across calls; its id says which.',
+      'What the owner decided about your suggestions since your last round ended (before your first: everything): `needs` decided (chosen an option, bought, or set aside with a reason and their note), `picksSetAside` (options turned down: the reason, too_pricey, colour, style, already_have, fit_size or not_now, and their note; chose_another when they chose a sibling; returned after buying), `purchases` (with the price paid; `different: true` when they bought something else for the need), `outfits` (your outfits they loved, declined with a reason, or undid), and `wears`: every bought suggestion with how often it has been worn, on every call. Read it first in every conversation and act on every reason. It changes nothing: what it tells stays new until you end your round with this answer’s `until`, so an answer lost on the way is told again. An item may be told twice; its id says which. `all: true` answers everything.',
     input: z.object({
       all: z
         .boolean()
         .optional()
-        .describe('Everything, not only what is new since your last call.'),
+        .describe('Everything, not only what is new since your last round.'),
     }),
-    // Read-only to the wardrobe: the cursor it moves is the agent's own
-    // bookkeeping. Not idempotent for the same reason.
+    // A pure read: the cursor moves only when the round ends (#337 part
+    // A2's finish_round takes `until`), so a lost answer is told again.
     writes: false,
-    idempotent: false,
     async run({ all }, ctx) {
       const feedback = await readSuggestionFeedback(ctx.db, {
         ownerId: ctx.userId,
@@ -237,7 +218,7 @@ export const suggestionTools = [
   defineTool({
     name: 'create_option_group',
     title: 'Create a need',
-    description: `WRITES: one need the owner's wardrobe has ("A navy blazer"), to hold 2 to ${MAX_OPTIONS_PER_GROUP} options you then add with suggest_garment. It shows on the owner's Wishlist inbox, open until they choose, buy, or set it aside. A need of the same name already open is refused with its id (add options to it); one the owner set aside is refused with their reason: never propose it again. Answers the need's id.`,
+    description: `WRITES: one need the owner's wardrobe has ("A navy blazer"), to hold 2 to ${MAX_OPTIONS_PER_GROUP} options you then add with suggest_garment. It shows on the owner's Wishlist inbox, open until they choose, buy, or set it aside. A need of the same name already open is refused with its id (add options to it), as is one the owner chose an option for (decided); one they set aside is refused with their reason: never propose it again. Answers the need's id.`,
     input: z.object({
       name: z
         .string()
@@ -270,6 +251,12 @@ export const suggestionTools = [
         note: note ?? null,
         tokenId: ctx.tokenId,
       });
+      if (!created.ok && created.reason === 'chosen') {
+        throw new HttpError(
+          409,
+          `The owner chose an option for that need (id ${created.id}): it is decided`,
+        );
+      }
       if (!created.ok && created.reason === 'open') {
         throw new HttpError(
           409,
@@ -357,23 +344,26 @@ export const suggestionTools = [
           price: args.price?.toFixed(2),
         },
         {
-          // In the garment's transaction: a need decided or filled since
-          // the check above rolls the garment back.
+          // In the garment's transaction, judged again under the owner
+          // lock: a need decided or filled during the fetch, or the same
+          // link marked by a call alongside, rolls the garment back.
           withGarment: async (tx, garmentId) => {
-            const marked = await markSuggestion(tx, ctx.userId, garmentId, {
-              tokenId: ctx.tokenId,
-              groupId: args.groupId,
-              note: args.note ?? null,
-              rank: args.rank ?? null,
-            });
-            if (marked !== 'marked') {
-              throw new HttpError(
-                409,
-                marked === 'full'
-                  ? `That need has ${MAX_OPTIONS_PER_GROUP} open options already`
-                  : 'That need is decided: list_suggestions shows the open ones',
-              );
-            }
+            const marked = await markSuggestedProduct(
+              tx,
+              ctx.userId,
+              garmentId,
+              {
+                tokenId: ctx.tokenId,
+                groupId: args.groupId,
+                note: args.note ?? null,
+                rank: args.rank ?? null,
+              },
+              args.url,
+            );
+            if (typeof marked === 'object')
+              throw sameProductRefusal(marked.same);
+            if (marked === 'full') throw new HttpError(409, FULL);
+            if (marked === 'refused') throw new HttpError(409, DECIDED);
           },
         },
       );

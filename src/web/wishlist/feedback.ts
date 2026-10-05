@@ -14,7 +14,6 @@ import type {
   DismissReason,
   OutfitDismissReason,
 } from '../../wardrobe/suggestions';
-import { OWNER_LOCK_TIMEOUT_MS } from '../auth/queries';
 
 /**
  * What the owner decided about the agent's work since the agent last
@@ -35,14 +34,19 @@ import { OWNER_LOCK_TIMEOUT_MS } from '../auth/queries';
  * its first call, so a new token (Muse's rotated one) hears everything.
  * A row whose time is null (the plan looks' reactions 0041 migrated, a
  * purchase before 0042) is older than any cursor: it is told on a first
- * call only, or with `all`. The call moves the cursor to its statement's
- * `now()` less OWNER_LOCK_TIMEOUT_MS: a decision stamps its transaction's
- * start, which may come before this read while it waits on the owner
- * lock and commits after it, and that wait is bounded by the lock's
- * timeout. So a decision is never skipped, and one may be told twice
- * (ids say which). State, not events: an Undo since leaves the row as it
- * was before the decision, so the agent sees it in list_suggestions.
- * One statement, the cursor's move a data-modifying CTE of it.
+ * call only, or with `all`.
+ *
+ * **A pure read: the call never moves the cursor.** It answers `until`,
+ * its statement's own time, and the agent hands that back when it ends
+ * its round (finish_round, #337 part A2), which moves the cursor to
+ * `greatest(cursor, least(until, now() - 2 × OWNER_LOCK_TIMEOUT_MS))`. So
+ * an answer lost on the way is told again, never lost, and a decision is
+ * never skipped: one stamps its transaction's start (`now()`), which may
+ * come before a read while it waits on the owner lock and does its work,
+ * and commit after it; twice the lock's timeout covers the wait and the
+ * work. One may be told twice (ids say which). State, not events: an Undo
+ * since leaves the row as it was before the decision, so the agent sees
+ * it in list_suggestions. One statement.
  */
 
 export interface NeedDecision {
@@ -105,7 +109,7 @@ export interface BoughtWears {
 export type SuggestionFeedback = {
   /** The cursor this call read: null for everything. */
   since: string | null;
-  /** Where the next call starts. */
+  /** This read's time: what finish_round takes to move the cursor (part A2). */
   until: string;
   needs: NeedDecision[];
   picksSetAside: PickSetAside[];
@@ -114,7 +118,7 @@ export type SuggestionFeedback = {
   wears: BoughtWears[];
 };
 
-/** The calling token's cursor, as read before this call moves it. */
+/** The calling token's cursor. */
 const cursor = sql.identifier('cursor');
 
 /** `time` after the cursor; with no cursor (a first call, `all`) any row, a null time included. */
@@ -246,9 +250,9 @@ function wearsSql(ownerId: number): SQL<BoughtWears[]> {
 }
 
 /**
- * The owner's decisions since token `tokenId` last asked (or all of them),
- * and the cursor moved past them. The token is the caller's own (the MCP
- * endpoint authenticated it), so it names its user's rows only.
+ * The owner's decisions since token `tokenId`'s cursor (or all of them),
+ * writing nothing. The token is the caller's own (the MCP endpoint
+ * authenticated it), so it names its user's rows only.
  */
 export async function readSuggestionFeedback(
   db: Queryable,
@@ -261,17 +265,11 @@ export async function readSuggestionFeedback(
     with ${cursor} as (
       select ${personalAccessToken.feedbackReadAt} as since
       from ${personalAccessToken} where ${eq(personalAccessToken.id, tokenId)}
-    ),
-    moved as (
-      update ${personalAccessToken}
-      set feedback_read_at = now() - ${`${OWNER_LOCK_TIMEOUT_MS} milliseconds`}::interval
-      where ${eq(personalAccessToken.id, tokenId)}
-      returning feedback_read_at as until
     )
     select
       -- As JSON, as the lists' times: an ISO string, not the driver's Date.
       to_json(${since}) #>> '{}' as since,
-      (select to_json(until) #>> '{}' from moved) as until,
+      to_json(now()) #>> '{}' as until,
       ${needsSql(ownerId, since)} as needs,
       ${picksSetAsideSql(ownerId, since)} as "picksSetAside",
       ${purchasesSql(ownerId, since)} as purchases,

@@ -10,6 +10,7 @@ import {
   type OptionGroupStatus,
   type PickState,
   MAX_OPTIONS_PER_GROUP,
+  productUrlKey,
   type SuggestionDecision,
 } from '../../wardrobe/suggestions';
 import type { GarmentStatus } from '../../wardrobe/status';
@@ -310,7 +311,11 @@ function openOptionsSql(groupId: number): SQL<number> {
   )})`;
 }
 
-/** A product the agent suggested before, by its link: what a new suggestion is checked against. */
+/**
+ * A product with a link the agent may not suggest again: one it suggested
+ * (in any state), or any wishlist garment the owner set aside, whoever
+ * added it.
+ */
 export interface SuggestedProduct {
   id: number;
   sourceUrl: string;
@@ -319,25 +324,53 @@ export interface SuggestedProduct {
   dismissedReason: DismissReason | null;
 }
 
-/** Where markSuggestion would put a new pick of group `groupId`, judged before its product is fetched. */
+/** The owner's products a new suggestion's link is matched against (SuggestedProduct). */
+function suggestedProductsSql(ownerId: number): SQL<SuggestedProduct[]> {
+  return sql<SuggestedProduct[]>`(
+    select coalesce(json_agg(json_build_object(
+      'id', ${garment.id},
+      'sourceUrl', ${garment.sourceUrl},
+      'dismissed', ${garment.dismissedAt} is not null,
+      'dismissedReason', ${garment.dismissedReason}
+    ) order by ${garment.id}), '[]')
+    from ${garment}
+    where ${and(
+      eq(garment.ownerId, ownerId),
+      sql`${garment.sourceUrl} is not null`,
+      sql`(${garment.suggestedAt} is not null or ${garment.dismissedAt} is not null)`,
+    )}
+  )`;
+}
+
+/** The product `url` would repeat (productUrlKey): one set aside first, else one suggested. */
+function sameProduct(
+  products: readonly SuggestedProduct[],
+  url: string,
+): SuggestedProduct | undefined {
+  const key = productUrlKey(url);
+  const same = products.filter((p) => productUrlKey(p.sourceUrl) === key);
+  return same.find((p) => p.dismissed) ?? same[0];
+}
+
+/** Where a new pick of group `groupId` would go, judged before its product is fetched. */
 export interface SuggestionRoom {
   /** missing: not the owner's; closed: resolved or set aside; full: MAX_OPTIONS_PER_GROUP open options. */
   group: 'missing' | 'closed' | 'full' | 'room';
-  /** Every suggestion of the owner's with a link, in any state. */
-  products: SuggestedProduct[];
+  /** The product the link would repeat, if any. */
+  same: SuggestedProduct | undefined;
 }
 
 /**
- * markSuggestion's rule read ahead, for suggest_garment (#337) to refuse
- * before it spends a link import: the group's state and room, and the
- * owner's suggested products to match the new link against
- * (productUrlKey). One statement, no lock: markSuggestion judges again
- * under the owner lock as it writes.
+ * markSuggestedProduct's rules read ahead, for suggest_garment (#337) to
+ * refuse before it spends a link import: the group's state and room, and
+ * the product `url` would repeat. One statement, no lock: the writer
+ * judges again under the owner lock as it marks.
  */
 export async function suggestionRoom(
   db: Queryable,
   ownerId: number,
   groupId: number,
+  url: string,
 ): Promise<SuggestionRoom> {
   const read = await selectScalars(db, {
     status: sql<OptionGroupStatus | null>`(select ${optionGroup.status} from ${optionGroup} where ${and(
@@ -345,20 +378,7 @@ export async function suggestionRoom(
       eq(optionGroup.ownerId, ownerId),
     )})`,
     openOptions: openOptionsSql(groupId),
-    products: sql<SuggestedProduct[]>`(
-      select coalesce(json_agg(json_build_object(
-        'id', ${garment.id},
-        'sourceUrl', ${garment.sourceUrl},
-        'dismissed', ${garment.dismissedAt} is not null,
-        'dismissedReason', ${garment.dismissedReason}
-      ) order by ${garment.id}), '[]')
-      from ${garment}
-      where ${and(
-        eq(garment.ownerId, ownerId),
-        sql`${garment.suggestedAt} is not null`,
-        sql`${garment.sourceUrl} is not null`,
-      )}
-    )`,
+    products: suggestedProductsSql(ownerId),
   });
   const group =
     read.status === null
@@ -368,7 +388,32 @@ export async function suggestionRoom(
         : read.openOptions >= MAX_OPTIONS_PER_GROUP
           ? 'full'
           : 'room';
-  return { group, products: read.products };
+  return { group, same: sameProduct(read.products, url) };
+}
+
+/**
+ * The agent's product marked as its suggestion (suggest_garment, #337):
+ * under the owner lock, the never-again rule judged on the products as
+ * they are now (another call's mark of the same link committed before this
+ * one took the lock), then markSuggestion, which joins the lock. The new
+ * garment is neither suggested nor set aside yet, so it never matches
+ * itself.
+ */
+export function markSuggestedProduct(
+  db: Queryable,
+  ownerId: number,
+  garmentId: number,
+  provenance: Provenance,
+  url: string,
+): Promise<'marked' | 'refused' | 'full' | { same: SuggestedProduct }> {
+  return ownerTransaction(db, ownerId, 'markSuggestedProduct', async (tx) => {
+    const { products } = await selectScalars(tx, {
+      products: suggestedProductsSql(ownerId),
+    });
+    const same = sameProduct(products, url);
+    if (same) return { same };
+    return markSuggestion(tx, ownerId, garmentId, provenance);
+  });
 }
 
 /** What makes a wishlist garment a suggestion: who proposed it, where, why, and its rank. */
@@ -455,6 +500,8 @@ export type CreateGroupOutcome =
   | { ok: true; id: number }
   /** A need of that name is open already: add options to it instead. */
   | { ok: false; reason: 'open'; id: number }
+  /** The owner chose an option for a need of that name and has not bought it yet: decided. */
+  | { ok: false; reason: 'chosen'; id: number }
   /**
    * The owner set a need of that name aside: never proposed again (the
    * agent's feedback), whatever the reason; the owner's Undo reopens it.
@@ -468,12 +515,14 @@ export type CreateGroupOutcome =
 
 /**
  * The one writer of a new option group: the owner's open need, its
- * provenance the agent's token. A name is the need's identity for the
- * agent's "never again" (doc section 5): the same name, trimmed and in
- * any case, as an open need or one set aside is refused with that need;
- * a resolved one is history (a need settled may come round again). Under
- * the owner lock, so two calls with one name make one need; the lookup
- * and the insert are one statement.
+ * provenance the agent's token. The agent's "never again" (doc section 5)
+ * for needs is a guard on its name, not an identity: the same name,
+ * trimmed and in any case, as a need open, chosen and not bought yet, or
+ * set aside is refused with that need (a reworded need passes, and the
+ * owner's reasons are the agent's to heed); a need settled by a purchase
+ * is history and may come round again. Under the owner lock, so two
+ * calls with one name make one need; the lookup and the insert are one
+ * statement.
  */
 export function createOptionGroup(
   db: Queryable,
@@ -493,7 +542,11 @@ export function createOptionGroup(
         where ${and(
           eq(optionGroup.ownerId, ownerId),
           sql`lower(trim(${optionGroup.name})) = lower(${need.name})`,
-          sql`${optionGroup.status} <> 'resolved'`,
+          sql`(${optionGroup.status} <> 'resolved' or exists (
+            select 1 from ${garment}
+            where ${garment.id} = ${optionGroup.resolvedGarmentId}
+              and ${onWishlist()}
+          ))`,
         )}
         order by ${optionGroup.status} = 'open' desc, ${optionGroup.id} desc
         limit 1
@@ -511,6 +564,9 @@ export function createOptionGroup(
     const [row] = rows;
     if (row.status === 'created') return { ok: true, id: row.id };
     if (row.status === 'open') return { ok: false, reason: 'open', id: row.id };
+    if (row.status === 'resolved') {
+      return { ok: false, reason: 'chosen', id: row.id };
+    }
     return {
       ok: false,
       reason: 'dismissed',

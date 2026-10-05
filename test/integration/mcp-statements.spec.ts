@@ -339,12 +339,12 @@ describe('MCP statements per tool (#172)', () => {
     ['create_option_group', () => ({ name: `Statements need ${++needs}` }), 5],
     // The room and the links read before the fetch (one), the link
     // import's own (add_garment_from_link's, its garment's transaction
-    // holding markSuggestion's savepoint, lock and mark), the garment read
-    // back.
+    // holding markSuggestedProduct's savepoint, lock, links read again and
+    // mark), the garment read back.
     [
       'suggest_garment',
       () => ({ url: product(), groupId: ids.need, note: 'Statements' }),
-      17,
+      18,
     ],
     // create_outfit's: the garments, begin, owner lock, the outfit, its
     // slots, commit.
