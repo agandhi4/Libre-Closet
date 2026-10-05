@@ -507,7 +507,7 @@ describe('goes with my closet', () => {
       )![0];
       expect(row).not.toContain('Goes with');
       expect(row).toContain(`hx-get="/wardrobe/${sweater}/outfit-count"`);
-      expect(row).toContain('hx-trigger="intersect once"');
+      expect(row).toContain('hx-trigger="revealed"');
       const chip = await t.inject({
         method: 'GET',
         url: `/wardrobe/${sweater}/outfit-count`,

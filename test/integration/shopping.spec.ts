@@ -579,7 +579,12 @@ describe('the shopping loop', () => {
     });
 
     it("lists the active plan's gaps, the highest priority first, each with its candidates against the budget", async () => {
-      const res = await get('/wardrobe/shopping', shopper);
+      let res!: Awaited<ReturnType<typeof get>>;
+      const { statements } = await recordQueries(async () => {
+        res = await get('/wardrobe/shopping', shopper);
+      });
+      // Pinned: the page reads in a fixed set of statements, however many candidates.
+      expect(statements).toBe(5);
       expect(res.statusCode).toBe(200);
       expectFullPage(res);
       const html = unescapeHtml(res.body);
@@ -609,32 +614,24 @@ describe('the shopping loop', () => {
           `id="candidate-${wish.navyBoots}" data-budget="within" data-matches="false"`,
         ),
       );
-      // Each item with candidates is a strip (#272) of them in that order,
-      // the first centred; the item without any has "Add a product" and no
-      // strip. Nothing is posted: no form on the page.
+      // Each item with candidates is a grid of cards (#316) in that order;
+      // the item without any has "Add a product" and no grid. Nothing is
+      // posted: no form on the page.
       const strip = (itemId: number) =>
         new RegExp(
-          `id="shopping-item-${itemId}"[^]*?(?=id="shopping-item-|</ul>)`,
+          `id="shopping-item-${itemId}"[^]*?(?=id="shopping-item-|$)`,
         ).exec(html)![0];
       const tiles = (itemId: number) =>
-        [...strip(itemId).matchAll(/data-snap-value="(\d+)"/g)].map(([, id]) =>
+        [...strip(itemId).matchAll(/id="candidate-(\d+)"/g)].map(([, id]) =>
           Number(id),
         );
       expect(tiles(items.merino)).toEqual([wish.merino, wish.merino2]);
       expect(tiles(items.boots)).toEqual([wish.blackBoots, wish.navyBoots]);
       expect(tiles(items.oxford)).toEqual([]);
-      expect(html.match(/data-snap-strip/g)).toHaveLength(2);
+      expect(html).not.toContain('data-snap-strip');
+      expect(html).toContain('grid-cols-2');
+      expect(html).toContain('lg:grid-cols-4');
       expect(html).toContain('Candidates for Grey merino crewneck');
-      expect(strip(items.boots)).toMatch(
-        new RegExp(`data-snap-value="${wish.blackBoots}" data-selected`),
-      );
-      expect(strip(items.boots)).not.toMatch(
-        new RegExp(`data-snap-value="${wish.navyBoots}" data-selected`),
-      );
-      // Not a choice: a group of tiles holding links, and nothing hidden to post.
-      expect(strip(items.boots)).toContain('role="group"');
-      expect(strip(items.boots)).not.toContain('role="option"');
-      expect(strip(items.boots)).not.toContain('type="hidden"');
       expect(strip(items.oxford)).toContain('+ Add a product');
       expect(strip(items.merino)).toContain('+ Add a candidate');
       expect(html).not.toContain('<form');

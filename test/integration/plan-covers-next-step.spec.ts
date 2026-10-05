@@ -328,9 +328,8 @@ describe('plan covers and the next step (#302)', () => {
       expectFullPage(await get('/', f.cookie));
       expect(html).toContain('Suede loafers completes your loved look');
       expect(html).toContain(`data-next-purchase="${f.first}"`);
-      expect(html).toMatch(
-        /data-next-purchase="\d+"[\s\S]*href="\/wardrobe\/shopping"/,
-      );
+      // The anchor is the product's own card on the shopping page.
+      expect(html).toContain(`href="/wardrobe/shopping#candidate-${f.first}"`);
     });
 
     it('picks the product in the most loved looks, then the most looks, then the lowest id', async () => {

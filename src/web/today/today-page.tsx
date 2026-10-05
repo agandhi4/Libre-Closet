@@ -152,7 +152,10 @@ function NextPurchaseCard({ purchase }: { purchase: NextPurchase }) {
             ? t('today.NEXT_STEP_ONE', params)
             : t('today.NEXT_STEP', params)}
         </p>
-        <a href={SHOPPING_PATH} class="btn btn-primary btn-sm shrink-0">
+        <a
+          href={`${SHOPPING_PATH}#candidate-${purchase.garmentId}`}
+          class="btn btn-primary btn-sm shrink-0"
+        >
           {t('today.NEXT_STEP_VIEW')}
         </a>
       </div>
