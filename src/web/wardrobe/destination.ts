@@ -1,5 +1,6 @@
 import type { Db } from '../../db/client';
 import { HttpError } from '../errors';
+import { t } from '../i18n';
 import { itemTitle } from '../plans/labels';
 import { findOwnedItem, findPlan } from '../plans/queries';
 import { itemNotFound } from '../plans/validation';
@@ -110,8 +111,7 @@ export async function postedDestination(
         });
         // Settled meanwhile (chosen or set aside on another phone): the
         // garment rolls back with this, and the form says why.
-        if (!settled.ok)
-          throw new HttpError(409, 'The need was decided meanwhile');
+        if (!settled.ok) throw new HttpError(409, t('muse.STALE'));
       },
     };
   }

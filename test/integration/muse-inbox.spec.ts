@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { garment, optionGroup, user } from '../../src/db/schema';
+import { garment, optionGroup, user, wardrobeShare } from '../../src/db/schema';
 import { decide, markSuggestion } from '../../src/web/wishlist/decisions';
 import { createGarment, createWishlistItem, garmentRow } from './garments';
 import {
@@ -45,7 +45,13 @@ describe('the Muse inbox', () => {
       category = 'tops',
       price = '90',
       brand,
-    }: { category?: string; price?: string; brand?: string } = {},
+      rank = null,
+    }: {
+      category?: string;
+      price?: string;
+      brand?: string;
+      rank?: number | null;
+    } = {},
   ) {
     const id = await createWishlistItem(t, {
       name,
@@ -58,7 +64,7 @@ describe('the Muse inbox', () => {
       tokenId: null,
       groupId,
       note: `Muse: ${name} goes with your jeans`,
-      rank: null,
+      rank,
     });
     expect(marked).toBe('marked');
     return id;
@@ -213,6 +219,55 @@ describe('the Muse inbox', () => {
       }
     });
 
+    it('orders options by what they unlock over Muse’s rank, and needs by their best option', async () => {
+      // The closet's two bottoms and two pairs of shoes go with a top; a
+      // pair of shoes has one top and two bottoms to go with.
+      const unlocksOf = (html: string, id: number) =>
+        Number(
+          new RegExp(
+            `data-option="${id}"[\\s\\S]*?data-unlocks="(\\d+)\\+?"`,
+          ).exec(html)?.[1],
+        );
+      const mixed = await need('Something for Fridays');
+      const shoes = await pick('Desert boots', mixed, {
+        category: 'footwear',
+        rank: 1,
+      });
+      const top = await pick('Linen shirt', mixed, { rank: 2 });
+      // Two needs of one option each, the one with fewer made first.
+      const fewer = await need('Weekend shoes');
+      await pick('Canvas sneakers', fewer, { category: 'footwear' });
+      const more = await need('A summer top');
+      await pick('Striped tee', more);
+
+      const html = (await get('/wardrobe/wishlist')).body;
+      const card = html.slice(html.indexOf(`data-need="${mixed}"`));
+      expect(unlocksOf(card, top)).toBeGreaterThan(unlocksOf(card, shoes));
+      // The top first, though Muse ranks the shoes first.
+      expect(card.indexOf(`data-option="${top}"`)).toBeLessThan(
+        card.indexOf(`data-option="${shoes}"`),
+      );
+      const each = (id: number) =>
+        Number(
+          new RegExp(
+            `data-need="${id}"[\\s\\S]*?data-unlocks-each="(\\d+)\\+?"`,
+          ).exec(html)?.[1],
+        );
+      expect(each(more)).toBeGreaterThan(each(fewer));
+      // The need whose option unlocks more first, though made after.
+      expect(html.indexOf(`data-need="${more}"`)).toBeLessThan(
+        html.indexOf(`data-need="${fewer}"`),
+      );
+      for (const id of [mixed, fewer, more]) {
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-group',
+          groupId: id,
+          reason: 'not_now',
+          note: null,
+        });
+      }
+    });
+
     it('is two statements: the session, and one for every section and the unlocks', async () => {
       const record = await recordQueries(() => get('/wardrobe/wishlist'));
       expect(record.statements).toBe(2);
@@ -254,7 +309,6 @@ describe('the Muse inbox', () => {
       await t.register('viewer-inbox@example.com');
       const viewerId = await userIdOf(t, 'viewer-inbox@example.com');
       const cookie = await t.login('viewer-inbox@example.com');
-      const { wardrobeShare } = await import('../../src/db/schema');
       await t.db.insert(wardrobeShare).values({
         grantorId: ownerId,
         granteeId: viewerId,
@@ -551,6 +605,66 @@ describe('the Muse inbox', () => {
         ).statusCode,
       ).toBe(404);
       expect(await t.db.$count(garment)).toBe(count);
+    });
+  });
+
+  // Production pays a round trip a statement (#156). A decision is the
+  // session, then decide's transaction: begin, the owner lock, its one
+  // read, its one write, commit. Returned adds the archive's status change
+  // (setGarmentStatus: a savepoint, the row locked, the update, released);
+  // Bought a different one adds the need's check before anything is
+  // stored, the garment's insert, and decide in a savepoint inside it.
+  describe('statements per decision', () => {
+    const counted = async (work: () => Promise<{ statusCode: number }>) => {
+      const record = await recordQueries(async () => {
+        const res = await work();
+        expect(res.statusCode).toBeLessThan(400);
+      });
+      return record.statements;
+    };
+
+    it('pins This one, Not for me, Undo, a need’s Not for me and Undo, Returned and Bought a different one', async () => {
+      const id = await need('A cap');
+      const first = await pick('Wool cap', id, { category: 'accessories' });
+      const second = await pick('Cotton cap', id, { category: 'accessories' });
+      const statements: Record<string, number> = {
+        dismiss: await counted(() =>
+          post(`/wardrobe/${second}/dismiss`, { reason: 'colour' }),
+        ),
+        undo: await counted(() => post(`/wardrobe/${second}/undo`)),
+        choose: await counted(() => post(`/wardrobe/${first}/choose`)),
+        undoNeed: await counted(() =>
+          post(`/wardrobe/wishlist/needs/${id}/undo`),
+        ),
+        dismissNeed: await counted(() =>
+          post(`/wardrobe/wishlist/needs/${id}/dismiss`, { reason: 'not_now' }),
+        ),
+      };
+      await post(`/wardrobe/wishlist/needs/${id}/undo`);
+      statements.boughtDifferent = await counted(() =>
+        post('/wardrobe', {
+          name: 'Tweed cap',
+          category: 'accessories',
+          forNeed: String(id),
+        }),
+      );
+      const returnable = await need('A beanie');
+      const beanie = await pick('Ribbed beanie', returnable, {
+        category: 'accessories',
+      });
+      await post(`/wardrobe/${beanie}/bought`, { acquiredOn: t.today() });
+      statements.returned = await counted(() =>
+        post(`/wardrobe/${beanie}/returned`),
+      );
+      expect(statements).toEqual({
+        dismiss: 6,
+        undo: 6,
+        choose: 6,
+        undoNeed: 6,
+        dismissNeed: 6,
+        boughtDifferent: 10,
+        returned: 10,
+      });
     });
   });
 

@@ -104,7 +104,11 @@ export interface OwnItem {
   replaces: GarmentRef | null;
 }
 
-/** A pick still open: on the wishlist and not set aside (wanted()'s rule, as read). */
+/**
+ * A pick still open. Every pick read here is on the wishlist already
+ * (needPicksSql filters by onWishlist), so wanted()'s other half, not set
+ * aside, is all that is left to ask of the row.
+ */
 export function isOpenPick(pick: MusePick): boolean {
   return pick.dismissedAt === null;
 }

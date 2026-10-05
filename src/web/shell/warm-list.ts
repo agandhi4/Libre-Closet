@@ -11,7 +11,7 @@ import { photoRefJson } from '../files/queries';
 import { savedOutfitsSql } from '../outfits/queries';
 import { outfitUrl } from '../outfits/urls';
 import { GRID_PAGE_SIZE } from '../wardrobe/grid-page-size';
-import { inCloset, onWishlist } from '../wardrobe/status';
+import { inCloset, onWishlist, wanted } from '../wardrobe/status';
 import { garmentUrl, needUrl, WISHLIST_PATH } from '../wardrobe/urls';
 import { inboxNeedIdsSql } from '../wishlist/inbox';
 import { EMPTY_SEARCH, tilesUrl } from '../wardrobe/wardrobe-page';
@@ -53,10 +53,10 @@ export async function warmList(
     WISHLIST_PATH,
     ...needs.map((id) => needUrl(id, undefined)),
   ].slice(0, WARM_WISHLIST_CAP);
-  const wanted = garments
-    .filter((row) => row.status === 'wishlist' && !row.setAside)
+  const stillWanted = garments
+    .filter((row) => row.wanted)
     .slice(0, WARM_WISHLIST_CAP - inboxPages.length);
-  const warmedIds = new Set([...warmed, ...wanted].map((row) => row.id));
+  const warmedIds = new Set([...warmed, ...stillWanted].map((row) => row.id));
   const warmedOutfits = outfits.slice(0, WARM_OUTFIT_CAP);
 
   const thumbs = new Set<string>();
@@ -68,7 +68,7 @@ export async function warmList(
     row.garments.forEach((g) => addThumb(g.photo)),
   );
   const closetThumbs = [...thumbs].slice(0, WARM_IMAGE_CAP - WARM_WISHLIST_CAP);
-  const wantedThumbs = wanted.flatMap((row) =>
+  const wantedThumbs = stillWanted.flatMap((row) =>
     row.photo ? [imageUrl(row.photo, 'thumb')] : [],
   );
 
@@ -78,7 +78,7 @@ export async function warmList(
       ...warmed.map((row) => garmentUrl(row.id, undefined)),
       ...warmedOutfits.map((row) => outfitUrl(row.id)),
       ...inboxPages,
-      ...wanted.map((row) => garmentUrl(row.id, undefined)),
+      ...stillWanted.map((row) => garmentUrl(row.id, undefined)),
     ],
     fragments: gridPageCursors(
       closet.map((row) => row.id),
@@ -100,8 +100,8 @@ export async function warmList(
 interface OwnGarment {
   id: number;
   status: GarmentStatus;
-  /** A wishlist garment set aside (a dismissed suggestion): kept, never warmed. */
-  setAside: boolean;
+  /** Still wanted (wanted(): on the wishlist, not set aside): warmed; a set-aside one is only kept. */
+  wanted: boolean;
   photo: SignablePhotoRef | null;
 }
 
@@ -116,7 +116,7 @@ function ownGarmentsSql(ownerId: number): SQL<OwnGarment[]> {
         json_build_object(
           'id', ${garment.id},
           'status', ${garment.status},
-          'setAside', ${garment.dismissedAt} is not null,
+          'wanted', ${wanted()},
           'photo', ${photoRefJson}
         )
         order by ${garment.id} desc
