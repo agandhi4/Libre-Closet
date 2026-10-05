@@ -135,6 +135,25 @@ describe('Styling: Include picks (#335)', () => {
   const carries = (html: string, garmentId: number) =>
     html.includes(`name="garmentId" value="${garmentId}"`);
 
+  /** The Include picks switch as it answers: its state, the value it posts, the address it pushes. */
+  const switchOf = (body: string) => {
+    // The raw markup: an attribute's quotes are escaped inside its value.
+    const tag = /<button[^>]*data-styling-picks="[^"]*"[^>]*>/.exec(body)?.[0];
+    if (!tag) return undefined;
+    const attr = (name: string) => {
+      const value = new RegExp(`${name}="([^"]*)"`).exec(tag)?.[1];
+      return value === undefined ? undefined : unescapeHtml(value);
+    };
+    return {
+      checked: attr('aria-checked'),
+      vals: JSON.parse(attr('hx-vals') ?? '{}') as Record<string, string>,
+      push: attr('hx-push-url'),
+    };
+  };
+
+  /** A wishlist-free closet accessory, for the posted-order row. */
+  const accessory = (name: string) => closetGarment(name, 'accessories');
+
   const slotsOf = async (outfitId: number) =>
     (
       await t.db
@@ -217,17 +236,21 @@ describe('Styling: Include picks (#335)', () => {
       expect(first.body).toBe(second.body);
       expect(first.body).not.toContain('data-to-buy');
       expect(first.body).not.toContain('name="picks"');
-      const html = unescapeHtml(first.body);
-      expect(html).toMatch(
-        /<a href="\/styling\?picks=1"[^>]*role="switch"[^>]*aria-checked="false"[^>]*data-styling-picks="off"/,
-      );
+      expect(switchOf(first.body)).toEqual({
+        checked: 'false',
+        vals: { picks: '1' },
+        push: '/styling?picks=1',
+      });
     });
 
-    it('on, it links back off and carries itself in the form', async () => {
-      const html = unescapeHtml((await get('/styling?picks=1')).body);
-      expect(html).toMatch(
-        /<a href="\/styling"[^>]*aria-checked="true"[^>]*data-styling-picks="on"/,
-      );
+    it('on, it switches back off and carries itself in the rows', async () => {
+      const page = (await get('/styling?picks=1')).body;
+      const html = unescapeHtml(page);
+      expect(switchOf(page)).toEqual({
+        checked: 'true',
+        vals: { picks: '' },
+        push: '/styling',
+      });
       expect(html).toContain('<input type="hidden" name="picks" value="1"');
       // Anything but 1 is off.
       expect((await get('/styling?picks=yes')).body).toBe(
@@ -279,6 +302,63 @@ describe('Styling: Include picks (#335)', () => {
       const bare = await recordQueries(() => get('/styling'));
       const picks = await recordQueries(() => get('/styling?picks=1'));
       expect(picks.statements).toBe(bare.statements);
+    });
+  });
+
+  describe('the switch keeps the composition', () => {
+    it('answers the rows posted, locks and all, with the picks on, and pushes the page’s address', async () => {
+      const posted: [string, number | null, boolean][] = [
+        ['top', tee, true],
+        ['bottom', jeans, false],
+      ];
+      const on = await get(
+        `/styling/row?${rowsQuery(posted, { picks: '1', with: String(tee) })}`,
+      );
+      expect(on.statusCode).toBe(200);
+      const html = unescapeHtml(on.body);
+      expect(carries(html, tee)).toBe(true);
+      expect(carries(html, jeans)).toBe(true);
+      const top = html.slice(
+        html.indexOf('data-styling-row="top"'),
+        html.indexOf('data-styling-row="bottom"'),
+      );
+      expect(top).toContain('name="lock" value="1"');
+      expect(stripOf(html, 'layer')).toEqual([knit, blazerOne, blazerTwo]);
+      expect(switchOf(on.body)).toEqual({
+        checked: 'true',
+        vals: { picks: '' },
+        // Where it goes next: off again, "Style this"'s garment kept.
+        push: `/styling?with=${tee}`,
+      });
+    });
+
+    it('off again, a pick chosen leaves its row; the closet’s stay', async () => {
+      const off = await get(
+        `/styling/row?${rowsQuery(
+          [
+            ['layer', blazerOne, false],
+            ['top', tee, false],
+          ],
+          { picks: '' },
+        )}`,
+      );
+      const html = unescapeHtml(off.body);
+      expect(carries(html, blazerOne)).toBe(false);
+      expect(carries(html, tee)).toBe(true);
+      expect(html).not.toContain('data-to-buy');
+      expect(switchOf(off.body)?.checked).toBe('false');
+    });
+
+    it('is not in the rows over a shared wardrobe nor with a destination', async () => {
+      const shared = await get(
+        `/styling/row?${rowsQuery([['top', null, false]], { ownerId: String(ownerId), picks: '1' })}`,
+        grantee,
+      );
+      expect(switchOf(shared.body)).toBeUndefined();
+      const day = await get(
+        `/styling/row?${rowsQuery([['top', tee, false]], { for: `day:${t.today()}`, occasion: 'all-day', picks: '1' })}`,
+      );
+      expect(switchOf(day.body)).toBeUndefined();
     });
   });
 
@@ -399,16 +479,69 @@ describe('Styling: Include picks (#335)', () => {
       expect(await outfits()).toBe(before);
     });
 
-    it('a pick not offered (set aside) is refused, nothing saved', async () => {
+    it('the writer judges what it may hold: a pick set aside, an archived garment and one set aside after the page loaded are refused, nothing saved', async () => {
       const before = await outfits();
-      const res = await save({
+      const aside = await save({
         picks: '1',
         role: ['layer', 'top'],
         garmentId: [setAside, tee].map(String),
         lock: ['', ''],
       });
-      expect(res.statusCode).toBe(404);
+      expect(aside.statusCode).toBe(409);
+      expect(unescapeHtml(aside.body)).toContain(
+        'Navy cardigan was set aside, so it is not on offer to style',
+      );
+      const old = await closetGarment('Old shorts', 'bottoms');
+      expect(
+        (await t.inject({ method: 'POST', url: `/wardrobe/${old}/archive` }))
+          .statusCode,
+      ).toBeLessThan(400);
+      const archived = await save({
+        picks: '1',
+        role: ['top', 'bottom'],
+        garmentId: [tee, old].map(String),
+        lock: ['', ''],
+      });
+      expect(archived.statusCode).toBe(409);
+      expect(unescapeHtml(archived.body)).toContain('Old shorts is archived');
+      // Offered when the page loaded, set aside before the Save reached it.
+      const late = await pick('Late knit', 'outerwear', null, null);
+      const page = (await get('/styling?picks=1')).body;
+      expect(page).toContain(`data-snap-value="${late}"`);
+      expect(
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-pick',
+          garmentId: late,
+          reason: 'style',
+          note: null,
+        }),
+      ).toMatchObject({ ok: true });
+      const raced = await save({
+        picks: '1',
+        role: ['layer', 'top'],
+        garmentId: [late, tee].map(String),
+        lock: ['', ''],
+      });
+      expect(raced.statusCode).toBe(409);
+      expect(unescapeHtml(raced.body)).toContain('Late knit was set aside');
       expect(await outfits()).toBe(before);
+    });
+
+    it('keeps the posted order of two rows of one role', async () => {
+      const watch = await accessory('Steel watch');
+      const belt = await accessory('Brown belt');
+      // Posted newest first: the database's own order would be the other.
+      const res = await save({
+        picks: '1',
+        role: ['top', 'accessory', 'accessory'],
+        garmentId: [tee, belt, watch].map(String),
+        lock: ['', '', ''],
+      });
+      expect(res.statusCode, res.body).toBe(303);
+      const id = Number(
+        /^\/outfits\/(\d+)/.exec(String(res.headers.location))![1],
+      );
+      expect(await slotsOf(id)).toEqual([tee, belt, watch]);
     });
 
     it('a saved outfit swaps one pick for another of its need', async () => {

@@ -79,9 +79,15 @@ for (const [label, device] of [
       const toggle = page.locator('[data-styling-picks]');
       await expect(toggle).toHaveAttribute('aria-checked', 'false');
       await expect(page.locator('[data-to-buy]')).toHaveCount(0);
+      // The rows as they stand, which the switch keeps (it posts them).
+      const topChoice = page.locator(
+        '[data-styling-row="top"] input[name="garmentId"]',
+      );
+      const top = await topChoice.inputValue();
       await toggle.click();
       await expect(page).toHaveURL('/styling?picks=1');
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
+      await expect(topChoice).toHaveValue(top);
       // The blazer need's open options, in Muse's rank, side by side.
       const [one, two] = seed.options[0];
       const layer = await stripOf(page, 'layer');

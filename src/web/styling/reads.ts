@@ -73,16 +73,18 @@ export interface StylingScope {
    */
   picks?: boolean;
   /**
-   * The rows edit one of the requester's saved outfits (the page's
-   * `outfit`, never over a shared wardrobe): what they may carry is
-   * rowGarmentsSql's, the owner's garments of any status.
+   * The saved outfit the rows edit (the page's `outfit`, never over a
+   * shared wardrobe): they may carry its garments (rowGarmentsSql).
    */
-  editing?: boolean;
+  editingOutfitId?: number;
 }
 
 /** What the scope's posted rows may carry (rowGarmentsSql). */
 export function carryOf(scope: StylingScope): RowCarry {
-  return { editing: scope.editing === true, picks: scope.picks === true };
+  return {
+    editingOutfitId: scope.editingOutfitId,
+    picks: scope.picks === true,
+  };
 }
 
 /** Checks every request may ask of either statement. */

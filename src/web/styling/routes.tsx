@@ -53,11 +53,11 @@ import {
   withEveryRole,
 } from './rows';
 import {
-  carriedGarments,
   type Chosen,
   type RoledGarment,
   roleGarmentsBefore,
   type SavedOutfit,
+  savedGarments,
 } from './queries';
 import {
   ideaReads,
@@ -295,6 +295,7 @@ function pageModel(input: {
       destination: aim.destination,
       capsuleId: wardrobe.capsule?.id,
       picks: wardrobe.picks,
+      withId: opened.with?.id,
       outfitId: opened.saved?.id,
       ownerId: wardrobe.viewOwner,
       returnTo: input.returnTo,
@@ -314,6 +315,7 @@ function pageModel(input: {
         : { ownerId: wardrobe.ownerId, name: input.owner },
     refusal: refused && {
       message: refused.error.message,
+      incomplete: refused.error instanceof OutfitIncomplete,
       draft: refused.draft,
       toBuy:
         refused.error instanceof OutfitIncomplete
@@ -505,7 +507,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         query.picks === '1' &&
         parseDestination(query).kind === 'none',
       // Neither are outfits: over a shared wardrobe there is no edit.
-      editing: viewOwner === undefined && query.outfit !== undefined,
+      editingOutfitId: viewOwner === undefined ? query.outfit : undefined,
     };
   }
 
@@ -674,13 +676,20 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     );
   }
 
-  /** The state a fragment's links carry on (the sentinel's), from a posted query. */
+  /**
+   * The state a fragment's links carry on (the sentinel's, the Include
+   * picks switch's pushed address), from a posted query.
+   */
   function postedState(query: RowsInput, wardrobe: Wardrobe): StylingState {
+    const own = wardrobe.viewOwner === undefined;
     return {
       destination: parseDestination(query),
       capsuleId: wardrobe.capsule?.id,
       picks: wardrobe.picks,
+      withId: query.with,
+      outfitId: own ? query.outfit : undefined,
       ownerId: wardrobe.viewOwner,
+      returnTo: returnToOf(query.returnTo),
     };
   }
 
@@ -916,7 +925,7 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       viewOwner: undefined,
       capsuleId: body.capsule,
       picks: body.picks === '1' && postedDestination(body).kind === 'none',
-      editing: body.outfit !== undefined,
+      editingOutfitId: body.outfit,
     };
     const [aimed, read] = await Promise.allSettled([
       aimIdeas(db, userId, postedDestination(body), today),
@@ -967,8 +976,8 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
    * the packed marks of garments it no longer holds). The garments must
    * all be the requester's own (else OutfitGarmentsGone, a 404, and nothing
    * is written); what the outfit may hold of them is updateOutfit's to
-   * judge (insertSlots, the outfit's Holdable: an archived one stays, a
-   * piece to buy stays while nothing holds the outfit, #335), and it
+   * judge (insertSlots, slotMayNameSql: an archived one it holds stays, a
+   * piece to buy while nothing holds the outfit, #335), and it
    * refuses whole, named, as the page answers. It changes in place, so a
    * trip or an entry to replace is a 400.
    */
@@ -999,13 +1008,10 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         ? { day: destination.day, occasion: destination.occasion }
         : input.schedule;
     const garments = topToToe(
-      await carriedGarments(db, userId, input.garmentIds, {
-        editing: true,
-        picks: false,
-      }),
+      await savedGarments(db, userId, input.garmentIds),
     );
     if (garments.length !== input.garmentIds.length) {
-      throw await garmentsGoneError(db, userId, input.garmentIds, 'considered');
+      throw await garmentsGoneError(db, userId, input.garmentIds, 'wardrobe');
     }
     const result = await updateOutfit(db, outfitId, userId, {
       name: input.name ?? ideaName(garments),
@@ -1033,8 +1039,10 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
    * the outfit writer (createOutfit), not a pick, so a pick in the rows is
    * held and the outfit is incomplete (src/web/outfits/references.ts);
    * once however often it is posted (createOutfit reuses an outfit of the
-   * same garments). The rows' garments are read by the one rule of what
-   * they may carry (rowGarmentsSql); one it may not is refused, nothing
+   * same garments). Its garments are read for their categories alone
+   * (savedGarments, in posted order); what the outfit may hold is judged
+   * by the writer under the owner lock (insertSlots: slotMayNameSql), so an
+   * archived garment or a pick set aside meanwhile refuses it, nothing
    * written. Planned on the sheet's day only when complete: an incomplete
    * one is refused whole (OutfitIncomplete), the page again with its pieces.
    */
@@ -1048,13 +1056,10 @@ export const stylingRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     },
   ) {
     const garments = topToToe(
-      await carriedGarments(db, userId, input.garmentIds, {
-        editing: false,
-        picks: true,
-      }),
+      await savedGarments(db, userId, input.garmentIds),
     );
     if (garments.length !== input.garmentIds.length) {
-      throw await garmentsGoneError(db, userId, input.garmentIds, 'considered');
+      throw await garmentsGoneError(db, userId, input.garmentIds, 'wardrobe');
     }
     const saved = await createOutfit(db, userId, {
       name: input.name ?? ideaName(garments),

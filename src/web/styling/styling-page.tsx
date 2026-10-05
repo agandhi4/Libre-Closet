@@ -71,6 +71,12 @@ export interface StylingModel {
    */
   refusal?: {
     message: string;
+    /**
+     * Refused for planning an incomplete outfit (OutfitIncomplete, #335):
+     * the rows are kept, so the hint is to buy or save without a day, not
+     * to choose again.
+     */
+    incomplete: boolean;
     draft: SaveDraft;
     /** The wishlist pieces it named: each is saved once bought ("Bought it"). */
     toBuy: { id: number; name: string | null }[];
@@ -147,6 +153,7 @@ export function StylingRows(props: {
   const { model, context } = props;
   return (
     <div id="styling-rows" class="flex flex-col gap-4">
+      <PicksToggle context={context} />
       {model.notice === 'no-idea' && (
         <p class="alert alert-info alert-soft mx-4 py-2 text-sm" role="status">
           {t('styling.NO_IDEA')}
@@ -158,6 +165,7 @@ export function StylingRows(props: {
       {model.seed !== undefined && (
         <input type="hidden" name="seed" value={String(model.seed)} />
       )}
+      {context.state.picks && <input type="hidden" name="picks" value="1" />}
     </div>
   );
 }
@@ -187,12 +195,14 @@ function StateFields({ model }: { model: StylingModel }) {
       {state.capsuleId !== undefined && (
         <input type="hidden" name="capsule" value={String(state.capsuleId)} />
       )}
-      {state.picks && <input type="hidden" name="picks" value="1" />}
       {state.ownerId !== undefined && (
         <input type="hidden" name="ownerId" value={String(state.ownerId)} />
       )}
       {state.outfitId !== undefined && (
         <input type="hidden" name="outfit" value={String(state.outfitId)} />
+      )}
+      {state.withId !== undefined && (
+        <input type="hidden" name="with" value={String(state.withId)} />
       )}
       {state.returnTo !== undefined && (
         <input type="hidden" name="returnTo" value={state.returnTo} />
@@ -215,7 +225,13 @@ function Header({ model }: { model: StylingModel }) {
           data-styling-refused=""
         >
           <p>{model.refusal.message}</p>
-          <p>{t('styling.REFUSED_HINT')}</p>
+          <p>
+            {t(
+              model.refusal.incomplete
+                ? 'styling.INCOMPLETE_HINT'
+                : 'styling.REFUSED_HINT',
+            )}
+          </p>
           {model.refusal.toBuy.length > 0 && (
             <ul class="flex flex-col gap-1" data-styling-refused-buy="">
               {model.refusal.toBuy.map((piece) => (
@@ -234,7 +250,6 @@ function Header({ model }: { model: StylingModel }) {
           )}
         </div>
       )}
-      <PicksToggle model={model} />
       {model.outfit && (
         <p class="text-sm" data-styling-outfit={model.outfit.id}>
           {t('styling.EDITING', {
@@ -264,28 +279,44 @@ function Header({ model }: { model: StylingModel }) {
 }
 
 /**
- * Include picks (#335): a boosted link that turns `?picks=1` on or off, so
- * the toggle is URL state and the bare page (off) stays byte-stable. On,
- * every strip leads with the garments not bought yet that are offered to
- * style with (picksSql), badged "To buy", and Save keeps them: the outfit
- * is incomplete until they are bought. Never over a shared wardrobe, and
- * never while the page picks for a day or a trip, where Save plans or
- * packs the outfit and a piece to buy would refuse it.
+ * Include picks (#335): a switch over the rows that answers them again
+ * with the picks on or off, as "Add row" does (the rows posted through
+ * `hx-include`, `picks` set by `hx-vals`, which htmx lets override the
+ * form's own), so the composition and its locks stay. It pushes the
+ * page's own address with `picks` flipped (and "Style this"'s garment),
+ * so a reload or a shared link opens the same way. The bare page (off)
+ * stays byte-stable. On, every strip leads with the garments not bought
+ * yet that are offered to style with (picksSql), badged "To buy", and
+ * Save keeps them: the outfit is incomplete until they are bought. Never
+ * over a shared wardrobe, and never while the page picks for a day or a
+ * trip, where Save plans or packs the outfit and a piece to buy would
+ * refuse it.
  */
-function PicksToggle({ model }: { model: StylingModel }) {
-  if (model.shared || model.destination.kind !== 'none') return null;
-  const on = model.state.picks === true;
+function PicksToggle({ context }: { context: RowContext }) {
+  const { state } = context;
+  const destination = state.destination?.kind ?? 'none';
+  if (context.viewOwner !== undefined || destination !== 'none') return null;
+  const on = state.picks === true;
   return (
-    <a
-      href={stylingUrl({ ...model.state, picks: !on })}
-      class={`btn btn-sm rounded-full self-start ${on ? 'btn-primary' : 'btn-outline'}`}
-      role="switch"
-      aria-checked={on ? 'true' : 'false'}
-      data-styling-picks={on ? 'on' : 'off'}
-    >
-      {on && <span aria-hidden="true">✓</span>}
-      {t('styling.INCLUDE_PICKS')}
-    </a>
+    <div class="px-4">
+      <button
+        type="button"
+        class={`btn btn-sm rounded-full ${on ? 'btn-primary' : 'btn-outline'}`}
+        role="switch"
+        aria-checked={on ? 'true' : 'false'}
+        hx-get={STYLING_ROW_PATH}
+        hx-include="#styling-form"
+        hx-vals={JSON.stringify({ picks: on ? '' : '1' })}
+        hx-target="#styling-rows"
+        hx-swap="outerHTML"
+        hx-push-url={stylingUrl({ ...state, picks: !on })}
+        data-needs-network=""
+        data-styling-picks={on ? 'on' : 'off'}
+      >
+        {on && <span aria-hidden="true">✓</span>}
+        {t('styling.INCLUDE_PICKS')}
+      </button>
+    </div>
   );
 }
 
