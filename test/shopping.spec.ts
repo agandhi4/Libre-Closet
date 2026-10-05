@@ -84,13 +84,17 @@ test('shop for a plan’s gap on the phone, buy the candidate', async ({
   await expect(page.getByText('Saved')).toBeVisible();
   // Its options (#295): a thumb each, named, and how many, in its sheet (#312).
   await merinoCard.getByRole('button').first().click();
-  await expect(
-    merinoCard.getByRole('link', {
-      name: 'Uniqlo merino crew with a long name',
-    }),
-  ).toBeVisible();
+  const merinoTile = page
+    .locator('[data-candidate]')
+    .filter({ hasText: 'Uniqlo merino crew with a long name' });
+  await expect(merinoTile).toBeVisible();
+  await expect(merinoTile).toContainText('49.90');
+  await expect(merinoTile.locator('[data-shop]')).toHaveAttribute(
+    'href',
+    'https://shop.example/merino',
+  );
+  await expect(page.locator('[data-candidate]')).toHaveCount(2);
   await page.keyboard.press('Escape');
-  await expect(merinoCard).toContainText('2 options');
 
   // The shopping list from the Wardrobe's ⋯ menu; still the Wardrobe section.
   await page.goto('/wardrobe');

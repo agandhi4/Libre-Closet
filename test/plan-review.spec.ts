@@ -132,11 +132,12 @@ test('review an agent’s proposals as strips, swipe to a candidate, accept', as
   await expect(bootsCard).toHaveAttribute('data-status', 'missing');
   // Its options are thumbs, each named (#295), in its sheet (#312).
   await bootsCard.getByRole('button').first().click();
+  const bootsSheet = page.locator(`#plan-sheet-${boots}`);
   await expect(
-    bootsCard.getByRole('link', { name: 'Navy boots' }),
+    bootsSheet.locator('[data-candidate]', { hasText: 'Navy boots' }),
   ).toBeVisible();
   await expect(
-    bootsCard.getByRole('link', { name: 'Cheap black boots' }),
+    bootsSheet.locator('[data-candidate]', { hasText: 'Cheap black boots' }),
   ).toHaveCount(0);
   await expect(page.locator(`#plan-item-${coat}`)).toHaveAttribute(
     'data-status',
@@ -260,7 +261,9 @@ test('Change this with a note, and Not this one on a candidate, in one post', as
   await expect(bootsCard).toHaveAttribute('data-status', 'missing');
   await bootsCard.getByRole('button').first().click();
   await expect(
-    bootsCard.getByRole('link', { name: 'Matte black boots' }),
+    page
+      .locator(`#plan-sheet-${boots}`)
+      .locator('[data-candidate]', { hasText: 'Matte black boots' }),
   ).toBeVisible();
   // The rejected pair stood for nothing else: off the wishlist, its reason kept.
   expect((await page.request.get(`/wardrobe/${shiny}`)).status()).toBe(404);
