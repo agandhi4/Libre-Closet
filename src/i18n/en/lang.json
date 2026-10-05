@@ -899,7 +899,7 @@
     "looks": {
       "TITLE": "Looks",
       "REVIEW_HINT": "Outfits your agent put together from this plan and your closet. Pick a look and say what you think: Accept these saves it with the rest.",
-      "NONE": "No outfits yet. Your agent proposes them from this plan and your closet.",
+      "NONE": "No outfits yet. Ask your agent to put some together from this plan and your closet.",
       "PLAN_HINT": "Outfits your agent put together from this plan and your closet.",
       "STRIP_LABEL": "Looks your agent designed",
       "TO_BUY": "To buy",

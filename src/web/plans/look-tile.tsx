@@ -36,7 +36,7 @@ export function lookGarments(
   }));
 }
 
-const CHIPS: Record<LookReaction, string> = {
+export const CHIPS: Record<LookReaction, string> = {
   proposed: 'badge-primary',
   loved: 'badge-success',
   revise: 'badge-info',
@@ -44,7 +44,7 @@ const CHIPS: Record<LookReaction, string> = {
 };
 
 /** "Work · 2 to buy · 1 piece missing". */
-function lookMeta(look: PlanLookView): string {
+export function lookMeta(look: PlanLookView): string {
   const toBuy = look.slots.filter((slot) => slot.state === 'to-buy').length;
   const missing = look.missingPieces.length;
   return [
@@ -243,12 +243,17 @@ export function LooksApart(props: {
  */
 export function LookSaveAction({
   look,
+  plain = false,
 }: {
   look: Pick<
     PlanLookView,
     'id' | 'planId' | 'outfitId' | 'complete' | 'reaction'
   >;
+  /** Not in a snap strip: no `data-strip-action` (that hides it off-centre). */
+  plain?: boolean;
 }) {
+  const stripAction = (action: string) =>
+    plain ? {} : { 'data-strip-action': action };
   switch (lookSaveState(look)) {
     case 'saved':
       return (
@@ -256,7 +261,7 @@ export function LookSaveAction({
           href={outfitUrl(look.outfitId!)}
           class="link link-hover text-xs font-medium"
           data-look-saved=""
-          data-strip-action="saved"
+          {...stripAction('saved')}
         >
           {t('plans.looks.SAVED_AS_OUTFIT')}
         </a>
@@ -268,7 +273,7 @@ export function LookSaveAction({
             type="submit"
             class="btn btn-xs btn-primary"
             data-save-look={String(look.id)}
-            data-strip-action="save"
+            {...stripAction('save')}
           >
             {t('plans.looks.SAVE_AS_OUTFIT')}
           </button>
