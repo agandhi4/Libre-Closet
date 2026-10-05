@@ -7,7 +7,7 @@ import { type BudgetFit, rankCandidates } from '../../wardrobe/shopping';
 import { ownerTransaction } from '../auth/queries';
 import type { StoredPhoto } from '../files/image-variant';
 import type { Photos } from '../files/photos';
-import { deleteGarment } from '../wardrobe/queries';
+import { deleteGarment, garmentsInUse } from '../wardrobe/queries';
 import type { WardrobeDeps } from '../wardrobe/writes';
 import {
   type CandidateGarment,
@@ -68,8 +68,9 @@ import {
  *   was drawn is never judged by a choice made without it) that are still
  *   the item's. One is deleted from the wishlist (deleteGarment,
  *   'wishlist') only when every plan item it stands for (any plan, any
- *   review: candidaciesOf) is one of this post that lets it go, and no item
- *   here picked it; one bought meanwhile is kept (the delete judges the
+ *   review: candidaciesOf) is one of this post that lets it go, no item
+ *   here picked it, and no look, outfit or capsule holds it
+ *   (garmentsInUse: a look's to-buy piece stays in its slot); one bought meanwhile is kept (the delete judges the
  *   status under the row lock), and logged. One kept because it stands for
  *   something else is unlinked from each item here that let it go
  *   (changeCandidates), so a rejected product leaves the item and frees its
@@ -110,12 +111,12 @@ export interface ReviewChoice {
 
 /**
  * What the release rule reads of a decision (releasedCandidates): the pick,
- * the candidates ticked "Not this one", and the candidates the choice saw
- * (undefined: every current one, as a per-item decision from the sheet
- * judges by what the item holds now).
+ * the candidates ticked "Not this one", and the candidates the choice saw,
+ * the only ones it can let go (the review's strip and the item's sheet
+ * each post what they drew).
  */
 export type ReleaseChoice = Pick<ReviewChoice, 'pick' | 'rejected'> & {
-  offered?: readonly number[];
+  offered: readonly number[];
 };
 
 /** Why a post the page could have sent is still refused, per item or look: the page again, 400. */
@@ -628,8 +629,10 @@ export async function dropPhotos(
  * does a pick that is no current candidate (one bought or unlinked since
  * the page was drawn): which to remove was not shown against it. A garment
  * is deletable when every plan item it is a candidate of is one of these
- * that lets it go and no item here picked it. Reads nothing when nothing
- * can be let go.
+ * that lets it go, no item here picked it, and nothing else holds it (a
+ * plan look's slot, an outfit, a capsule: garmentsInUse; the look writers
+ * take the same owner lock, so none adds it meanwhile). One held is only
+ * unlinked. Reads nothing when nothing can be let go.
  */
 export async function releasedCandidates(
   tx: Queryable,
@@ -655,9 +658,7 @@ export async function releasedCandidates(
   for (const itemId of judged) {
     const choice = choices.get(itemId)!;
     const held: CandidateGarment[] = (candidates.get(itemId) ?? []).filter(
-      (candidate) =>
-        choice.offered === undefined ||
-        choice.offered.includes(candidate.garmentId),
+      (candidate) => choice.offered.includes(candidate.garmentId),
     );
     const { pick } = choice;
     const pickHeld =
@@ -680,10 +681,12 @@ export async function releasedCandidates(
   }
   const released = [...releasedBy.keys()];
   const links = await candidaciesOf(tx, ownerId, released);
+  const inUse = await garmentsInUse(tx, released);
   const deletable = released
     .filter(
       (garmentId) =>
         !picked.has(garmentId) &&
+        !inUse.has(garmentId) &&
         links
           .filter((link) => link.garmentId === garmentId)
           .every((link) => releasedBy.get(garmentId)!.has(link.itemId)),

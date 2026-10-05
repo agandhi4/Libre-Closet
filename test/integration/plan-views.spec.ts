@@ -54,7 +54,8 @@ describe('the plan page views', () => {
   /** An item's card and its sheet, as the page draws them. */
   const cardOf = (html: string, itemId: number) => {
     const start = html.indexOf(`id="plan-item-${itemId}"`);
-    const end = html.indexOf('</li>', start);
+    // Past the card's sheet, whose option tiles are list items of their own.
+    const end = html.indexOf('</li>', html.indexOf('</dialog>', start));
     return html.slice(start, end);
   };
 

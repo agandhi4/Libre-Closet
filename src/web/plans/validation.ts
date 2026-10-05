@@ -239,6 +239,17 @@ const SheetFields = {
   show: Type.Optional(Type.Literal('proposed')),
 };
 
+/**
+ * The candidates an item's sheet drew, posted with Use this, Keep and Don't
+ * buy: the only ones `removeUnpicked` can let go, so a candidate the agent
+ * linked after the page was drawn is never removed by a choice made
+ * without it (the review page's `offered`). Absent: nothing to let go.
+ * Ten, as a review strip's share of OFFERED_MAX.
+ */
+const SheetOffered = {
+  offered: Type.Optional(Type.Array(RowId, { maxItems: 10 })),
+};
+
 /** An `asOf` as `reviewItems` takes it: undefined (not posted), null (never written by the agent) or epoch milliseconds. */
 export function asOfOf(raw: string | undefined): number | null | undefined {
   if (raw === undefined) return undefined;
@@ -260,6 +271,7 @@ export const DeclineBody = Type.Union([
   Type.Object({
     note: Type.Optional(Type.String({ maxLength: ITEM_NOTE_MAX })),
     removeUnpicked: Type.Optional(Type.Literal('1')),
+    ...SheetOffered,
     ...SheetFields,
   }),
   Type.Null(),
@@ -274,6 +286,7 @@ export const AcceptBody = Type.Union([
   Type.Object({
     pick: Type.Optional(Type.String({ pattern: '^[0-9]{1,10}$' })),
     removeUnpicked: Type.Optional(Type.Literal('1')),
+    ...SheetOffered,
     ...SheetFields,
   }),
   Type.Null(),

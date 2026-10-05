@@ -1,6 +1,6 @@
 import { type RoleGroup, topToToe } from '../../wardrobe/generator';
 import type { ItemMatch, ItemStatus } from '../../wardrobe/plans';
-import { rankCandidates } from '../../wardrobe/shopping';
+import { budgetFit, rankCandidates } from '../../wardrobe/shopping';
 import { PostForm } from '../auth/form';
 import { imageUrl, type SignablePhotoRef } from '../files/image-url';
 import { t } from '../i18n';
@@ -19,6 +19,7 @@ import {
   CandidateNote,
   DETAILS,
   isAgentsPick,
+  PriceLine,
 } from './candidate-tile';
 import type { CandidatesByItem } from './candidates';
 import { awaitingReview, byPriority, type PlanGaps } from './gaps';
@@ -768,7 +769,7 @@ function ItemSheet(props: {
             {t('plans.STALE')}
           </p>
         )}
-        <SheetBody card={card} gaps={gaps} lead={lead} show={show} />
+        <SheetBody card={card} gaps={gaps} show={show} />
         <div class="modal-action mt-2 items-center">
           <a
             href={itemUrl(item.planId, item.id, '/edit')}
@@ -835,19 +836,14 @@ function SheetHeader(props: {
 }
 
 /** The sheet's middle: options, what fulfils the item, why, the owner's note, the review moves. */
-function SheetBody(props: {
-  card: PlanCard;
-  gaps: PlanGaps;
-  lead: Lead | null;
-  show: PlanShow;
-}) {
-  const { card, gaps, lead, show } = props;
+function SheetBody(props: { card: PlanCard; gaps: PlanGaps; show: PlanShow }) {
+  const { card, gaps, show } = props;
   const { item, match } = card;
   const deciding = card.status === 'proposed';
   return (
     <>
-      {card.status !== 'owned' && !deciding && (
-        <Options card={card} onPhoto={lead?.candidateId} />
+      {!deciding && (card.status !== 'owned' || card.candidates.length > 0) && (
+        <Options card={card} />
       )}
       {match && match.fulfilledBy.length > 0 && (
         <FulfilledBy match={match} closet={gaps.closet} />
@@ -871,68 +867,45 @@ function SheetBody(props: {
   );
 }
 
-/** Thumbs of the products a card does not lead with: a few, then the count says the rest. */
-const OPTION_THUMBS = 3;
-
 /**
- * An item's options (its candidate products, 34b): the products but the
- * one its photo shows (`onPhoto`) as small thumbs, each a link to its
- * wishlist page, and "3 options", a link to the candidates page; while it
- * has none, "No options yet" and Add a product.
+ * An item's options (its candidate products, 34b) in its sheet, drawn one
+ * way whatever the item's status (#315): each a large tile with what the
+ * agent found (photo, name, brand, price against the budget, its pick and
+ * note) and Shop, the product's page. A proposal adds its decision under
+ * each tile (`decision`). No tile links to the product's wishlist page:
+ * the sheet is where the owner looks at what the agent chose. While it has
+ * none, "No options yet" and Add a product.
  */
-function Options(props: { card: PlanCard; onPhoto: number | undefined }) {
+function Options(props: {
+  card: PlanCard;
+  decision?: { formId: string; show: PlanShow };
+}) {
   const { item, candidates } = props.card;
-  const href = candidatesUrl(item.planId, item.id);
   if (candidates.length === 0) {
     return (
       <p
-        class="relative z-10 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
         data-candidates=""
       >
         <span class="badge badge-ghost badge-sm" data-no-options="">
           {t('plans.NO_OPTIONS')}
         </span>
-        <a href={href} class="link link-primary">
+        <a href={candidatesUrl(item.planId, item.id)} class="link link-primary">
           + {t('shopping.ADD_PRODUCT')}
         </a>
       </p>
     );
   }
-  const others = candidates
-    .filter((candidate) => candidate.garmentId !== props.onPhoto)
-    .slice(0, OPTION_THUMBS);
   return (
-    <div
-      class="relative z-10 flex items-center gap-1.5 text-xs"
-      data-candidates=""
-    >
-      {others.map((candidate) => (
-        <a
-          href={garmentUrl(candidate.garmentId, undefined)}
-          class="size-8 shrink-0 overflow-hidden rounded-field bg-base-200 flex items-center justify-center"
-          aria-label={candidateName(candidate)}
-        >
-          {candidate.photo ? (
-            <img
-              src={imageUrl(candidate.photo, 'thumb')}
-              alt=""
-              class="size-full object-contain p-0.5"
-              width="64"
-              height="64"
-              loading="lazy"
-              decoding="async"
-            />
-          ) : (
-            <HangerIcon class="size-4 text-faint" strokeWidth="1.5" />
-          )}
-        </a>
+    <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3" data-candidates="">
+      {candidates.map((candidate) => (
+        <OptionTile
+          item={item}
+          candidate={candidate}
+          decision={props.decision}
+        />
       ))}
-      <a href={href} class="link link-primary whitespace-nowrap">
-        {candidates.length === 1
-          ? t('plans.OPTIONS_ONE')
-          : t('plans.OPTIONS', { count: candidates.length })}
-      </a>
-    </div>
+    </ul>
   );
 }
 
@@ -1030,13 +1003,14 @@ function ReviewMoves(props: {
 }
 
 /**
- * A proposal's decision, in its sheet (#315): its candidates as large
- * photos (each "Use this", or "Not this one" with an optional reason), Keep
- * with no product, Don't buy, and Change this… with its note. Every choice
- * posts as it is made, through the item's own routes (`/accept`,
- * `/decline`, `/change`, `/candidates/:garmentId/reject`). The buttons that
- * decide sit outside the one form that holds the removal box and the guard,
- * joined to it by `form`, because forms do not nest.
+ * A proposal's decision, in its sheet (#315): its options (each "Use
+ * this", or "Not this one" with an optional reason), Keep with no product,
+ * Don't buy, and Change this… with its note. Every choice posts as it is
+ * made, through the item's own routes (`/accept`, `/decline`, `/change`,
+ * `/candidates/:garmentId/reject`). The buttons that decide sit outside
+ * the one form that holds the removal box, the guard and the candidates
+ * drawn (`offered`: the only ones the box can remove), joined to it by
+ * `form`, because forms do not nest.
  */
 function Decision(props: { card: PlanCard; show: PlanShow }) {
   const { card, show } = props;
@@ -1045,20 +1019,7 @@ function Decision(props: { card: PlanCard; show: PlanShow }) {
   const action = (suffix: string) => itemUrl(item.planId, item.id, suffix);
   return (
     <div class="flex flex-col gap-3" data-decision="">
-      {candidates.length === 0 ? (
-        <Options card={card} onPhoto={undefined} />
-      ) : (
-        <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {candidates.map((candidate) => (
-            <DecisionTile
-              item={item}
-              candidate={candidate}
-              formId={formId}
-              show={show}
-            />
-          ))}
-        </ul>
-      )}
+      <Options card={card} decision={{ formId, show }} />
       <PostForm
         id={formId}
         action={action('/accept')}
@@ -1066,6 +1027,9 @@ function Decision(props: { card: PlanCard; show: PlanShow }) {
         needsNetwork
       >
         <SheetFields item={item} show={show} />
+        {candidates.map((candidate) => (
+          <input type="hidden" name="offered" value={candidate.garmentId} />
+        ))}
         {candidates.length > 0 && (
           <label class="flex items-start gap-2 text-xs">
             <input
@@ -1127,34 +1091,29 @@ function Decision(props: { card: PlanCard; show: PlanShow }) {
 }
 
 /**
- * A candidate as a large tile in a proposal's sheet: the photo (a link to
- * its wishlist page), its name, the agent's pick, price and note, "Use
- * this" (accepts the item with this product, through the item's decision
- * form) and "Not this one" with an optional reason (its own form: a
- * rejection records the product and lets it go; the item stays proposed).
+ * A candidate as a large tile in an item's sheet. With `decision` (a
+ * proposal): "Use this" (accepts the item with this product, through the
+ * item's decision form) and "Not this one" with an optional reason (its own
+ * form: a rejection records the product and lets it go; the item stays
+ * proposed).
  */
-function DecisionTile(props: {
+function OptionTile(props: {
   item: PlanItemRow;
   candidate: ListedCandidate;
-  formId: string;
-  show: PlanShow;
+  decision: { formId: string; show: PlanShow } | undefined;
 }) {
-  const { item, candidate, formId, show } = props;
+  const { item, candidate, decision } = props;
   const name = candidateName(candidate);
   return (
     <li
       class="flex min-w-0 flex-col gap-1"
       data-candidate={candidate.garmentId}
     >
-      <a
-        href={garmentUrl(candidate.garmentId, undefined)}
-        class="flex aspect-square w-full items-center justify-center overflow-hidden rounded-box bg-base-200 p-2"
-        aria-label={name}
-      >
+      <div class="flex aspect-square w-full items-center justify-center overflow-hidden rounded-box bg-base-200 p-2">
         {candidate.photo ? (
           <img
             src={imageUrl(candidate.photo, 'thumb')}
-            alt=""
+            alt={name}
             class="max-h-full max-w-full object-contain"
             width="400"
             height="400"
@@ -1164,15 +1123,55 @@ function DecisionTile(props: {
         ) : (
           <HangerIcon class="size-1/3 text-faint" strokeWidth="1" />
         )}
-      </a>
+      </div>
       <span class="text-sm font-medium break-words">{name}</span>
-      {isAgentsPick(candidate) && <AgentsPick />}
-      {candidate.price && (
-        <span class="text-xs">{priceLabel(candidate.price)}</span>
+      {candidate.brand && (
+        <span class="text-xs text-muted break-words">{candidate.brand}</span>
       )}
-      <span class="flex flex-col text-xs text-muted">
+      {isAgentsPick(candidate) && <AgentsPick />}
+      <span class="flex flex-col gap-0.5 text-xs">
+        <PriceLine
+          candidate={candidate}
+          budget={budgetFit(candidate.price, item.budget)}
+        />
         <CandidateNote candidate={candidate} />
       </span>
+      {candidate.sourceUrl && (
+        // http(s) only (readSourceUrl and the column's check); a new tab, as
+        // on the garment page, so the sheet stays where it was.
+        <a
+          href={candidate.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="btn btn-outline btn-sm"
+          data-shop=""
+        >
+          {t('plans.SHOP')}
+        </a>
+      )}
+      {decision && (
+        <DecisionControls
+          item={item}
+          candidate={candidate}
+          name={name}
+          {...decision}
+        />
+      )}
+    </li>
+  );
+}
+
+/** A proposal's moves on one of its options: Use this, and Not this one with its reason. */
+function DecisionControls(props: {
+  item: PlanItemRow;
+  candidate: ListedCandidate;
+  name: string;
+  formId: string;
+  show: PlanShow;
+}) {
+  const { item, candidate, name, formId, show } = props;
+  return (
+    <>
       <button
         type="submit"
         form={formId}
@@ -1211,7 +1210,7 @@ function DecisionTile(props: {
           </button>
         </PostForm>
       </details>
-    </li>
+    </>
   );
 }
 

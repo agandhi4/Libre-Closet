@@ -523,7 +523,7 @@ export const planTools = [
           declined: looks
             .filter((look) => look.reaction === 'declined')
             .map(lookOut),
-          // A rejected or deleted candidate empties its slot: the look waits on a new piece.
+          // A deleted candidate empties its slot, a rejected one stays as a missing piece: the look waits on a new piece.
           incomplete: looks
             .filter(
               (look) =>

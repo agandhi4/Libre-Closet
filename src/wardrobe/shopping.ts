@@ -77,7 +77,11 @@ export function fromCents(cents: number): string {
   return (cents / 100).toFixed(2);
 }
 
-function budgetFit(price: string | null, budget: string | null): BudgetFit {
+/** Whether a listed price is within an item's budget; unknown when either is missing. */
+export function budgetFit(
+  price: string | null,
+  budget: string | null,
+): BudgetFit {
   if (price === null || budget === null) return 'unknown';
   return toCents(price) <= toCents(budget) ? 'within' : 'over';
 }

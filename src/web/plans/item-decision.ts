@@ -39,6 +39,8 @@ export type ItemDecision = {
   pick?: number | null;
   /** "Remove the products I didn't pick from my wishlist": the owner's box, unticked by default. */
   removeUnpicked?: boolean;
+  /** The candidates the sheet drew: the only ones `removeUnpicked` lets go (ReleaseChoice). */
+  offered?: readonly number[];
 };
 
 export type DecisionOutcome =
@@ -104,6 +106,7 @@ export async function decideItem(
           pick === null
             ? { kind: 'decline' }
             : { kind: 'candidate', garmentId: pick },
+        offered: decision.offered ?? [],
         rejected: new Map(),
       };
       const release = await releasedCandidates(
@@ -138,8 +141,9 @@ export type RejectionOutcome =
  * "Not this one" on one candidate of a proposed item: records the product
  * and the reason (plan_item_rejection) and lets it go by the review's
  * release rule (deleted from the wishlist when it stands for no other plan
- * item, else unlinked from this one). The item stays proposed: rejecting
- * one option is not deciding the item. `asOf` guards as a decision's does.
+ * item and no look, outfit or capsule holds it, else unlinked from this
+ * one). The item stays proposed: rejecting one option is not deciding the
+ * item. `asOf` guards as a decision's does.
  */
 export async function rejectCandidate(
   deps: Deps,

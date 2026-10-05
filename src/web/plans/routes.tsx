@@ -772,6 +772,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       asOf?: string;
       pick?: string;
       removeUnpicked?: '1';
+      offered?: number[];
       show?: 'proposed';
     } = {},
   ): Promise<FastifyReply> {
@@ -783,6 +784,7 @@ export const planRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       asOf: asOfOf(input.asOf),
       pick: input.pick === undefined ? null : Number(input.pick),
       removeUnpicked: input.removeUnpicked === '1',
+      offered: input.offered,
     });
     switch (outcome.kind) {
       case 'stale':

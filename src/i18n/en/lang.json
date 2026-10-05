@@ -844,6 +844,7 @@
     "ALREADY_MOVED": "This item has already moved on. Go back to the plan to see where it stands.",
     "NOT_THIS_ONE": "Not this one",
     "USE_THIS": "Use this",
+    "SHOP": "Shop",
     "DECIDE_HERE": "Decide here",
     "SHOW_ALL": "Show all items",
     "REVIEWING_PROPOSED": "{count} to decide",
@@ -892,8 +893,6 @@
       "medium": "Medium",
       "low": "Low"
     },
-    "OPTIONS": "{count} options",
-    "OPTIONS_ONE": "1 option",
     "AGENTS_PICK": "Agent’s pick",
     "NO_OPTIONS": "No options yet",
     "status": {

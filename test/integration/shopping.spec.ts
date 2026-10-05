@@ -876,15 +876,16 @@ describe('the shopping loop', () => {
       const html = unescapeHtml(res.body);
       expect(html).toContain('href="/wardrobe/shopping"');
       expect(html).toContain(`href="/wardrobe/plans/compare?a=${planId}"`);
-      expect(html).toContain(
-        `href="/wardrobe/plans/${planId}/items/${items.boots}/candidates"`,
-      );
-      // The boots' card (#295): its products as thumbs, and how many.
+      // The boots' card (#295, #315): its products as tiles in its sheet,
+      // never a link to the candidates picker or a wishlist page.
       const boots = html
         .split('<li id="plan-item-')
         .find((card) => card.startsWith(`${items.boots}"`))!;
-      expect(boots).toContain('aria-label="Black boots"');
-      expect(boots).toMatch(/>(1 option|\d+ options)</);
+      expect(boots).toContain('data-candidate="');
+      expect(boots).not.toMatch(/>(1 option|\d+ options)</);
+      expect(boots).not.toContain(
+        `href="/wardrobe/plans/${planId}/items/${items.boots}/candidates"`,
+      );
       expect(html).toContain(
         `href="/wardrobe/plans/${planId}/items/${items.oxford}/candidates"`,
       );

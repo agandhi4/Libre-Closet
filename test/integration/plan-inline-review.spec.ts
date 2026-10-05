@@ -1,12 +1,15 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { randomUUID } from 'node:crypto';
 import {
   garment,
   planItem,
   planItemCandidate,
   planItemRejection,
+  planLookSlot,
 } from '../../src/db/schema';
 import { changeCandidates } from '../../src/web/plans/candidates';
+import { proposeLook } from '../../src/web/plans/looks';
 import { createTestApp, type TestApp, unescapeHtml } from './harness';
 import { createAccessToken, tool } from './mcp';
 
@@ -133,6 +136,67 @@ describe('the inline review in the item sheet', () => {
     return match[1];
   };
 
+  /** One item's sheet, as the plan page draws it. */
+  const sheetOf = async (planId: number, itemId: number) => {
+    const html = unescapeHtml((await get(`/wardrobe/plans/${planId}`)).body);
+    const start = html.indexOf(`id="plan-sheet-${itemId}"`);
+    return html.slice(start, html.indexOf('</dialog>', start));
+  };
+
+  /** The candidates the sheet's decision form posts (`offered`), as drawn. */
+  const offeredOnPage = async (planId: number, itemId: number) =>
+    [
+      ...(await sheetOf(planId, itemId)).matchAll(
+        /name="offered" value="(\d+)"/g,
+      ),
+    ].map((match) => match[1]);
+
+  /** A closet garment of the owner's, for a look's other pieces. */
+  const closetGarment = async (category: string) =>
+    (
+      await t.db
+        .insert(garment)
+        .values({
+          ownerId: t.owner.id,
+          status: 'closet',
+          category,
+          name: `${category} ${++seq}`,
+          shareableId: randomUUID(),
+        })
+        .returning({ id: garment.id })
+    )[0].id;
+
+  /** A look of the plan holding `candidate` as its to-buy piece, loved by the owner. */
+  const lovedLookWith = async (planId: number, candidate: number) => {
+    const look = await proposeLook(
+      t.db,
+      t.owner.id,
+      planId,
+      { name: `Look ${++seq}`, occasion: 'work', note: 'Why it works' },
+      [
+        await closetGarment('bottoms'),
+        await closetGarment('footwear'),
+        candidate,
+      ],
+    );
+    const loved = await post(`/wardrobe/plans/${planId}/looks/${look.id}/love`);
+    expect(loved.statusCode, loved.body).toBe(303);
+    return look.id;
+  };
+
+  const slotHolds = async (lookId: number, garmentId: number) =>
+    (
+      await t.db
+        .select({ garmentId: planLookSlot.garmentId })
+        .from(planLookSlot)
+        .where(
+          and(
+            eq(planLookSlot.lookId, lookId),
+            eq(planLookSlot.garmentId, garmentId),
+          ),
+        )
+    ).length === 1;
+
   const planUrl = (planId: number) => `/wardrobe/plans/${planId}`;
   const itemUrl = (planId: number, itemId: number, suffix: string) =>
     `${planUrl(planId)}/items/${itemId}${suffix}`;
@@ -172,6 +236,26 @@ describe('the inline review in the item sheet', () => {
       );
       expect(sheet).toMatch(/name="removeUnpicked" value="1"(?![^>]*checked)/);
       expect(sheet).toContain(itemUrl(planId, itemId, '/change'));
+      expect(await offeredOnPage(planId, itemId)).toEqual(garments.map(String));
+    });
+
+    it('draws an accepted item’s candidates the same way, with Shop and no wishlist links', async () => {
+      const { planId, itemId, garments } = await proposal(2);
+      await post(itemUrl(planId, itemId, '/accept'), {});
+      const sheet = await sheetOf(planId, itemId);
+      for (const id of garments) {
+        const tile = sheet.slice(sheet.indexOf(`data-candidate="${id}"`));
+        expect(tile).toMatch(
+          /^[^]*?<a href="https:\/\/shop\.example\/tee" target="_blank" rel="noopener noreferrer"[^>]*data-shop="">Shop<\/a>/,
+        );
+        expect(sheet).not.toContain(`href="/wardrobe/${id}"`);
+      }
+      expect(sheet).toContain('Uniqlo');
+      expect(sheet).toContain('$25.00');
+      expect(sheet).not.toContain('options');
+      expect(sheet).not.toContain(`${itemUrl(planId, itemId, '/candidates')}"`);
+      expect(sheet).not.toContain('Use this');
+      expect(sheet).not.toContain('name="offered"');
     });
 
     it('an item with no candidates says so and still offers Keep and Don’t buy', async () => {
@@ -239,6 +323,7 @@ describe('the inline review in the item sheet', () => {
       const res = await post(itemUrl(planId, itemId, '/accept'), {
         pick: String(garments[1]),
         removeUnpicked: '1',
+        offered: await offeredOnPage(planId, itemId),
         show: 'proposed',
       });
       expect(res.statusCode, res.body).toBe(303);
@@ -258,6 +343,7 @@ describe('the inline review in the item sheet', () => {
       await post(itemUrl(planId, itemId, '/accept'), {
         pick: String(garments[0]),
         removeUnpicked: '1',
+        offered: garments.map(String),
       });
       expect(await existing(garments)).toEqual(garments);
       expect(await candidatesOf(itemId)).toEqual([garments[0]]);
@@ -276,6 +362,7 @@ describe('the inline review in the item sheet', () => {
       const gone = await proposal(2);
       const res = await post(itemUrl(gone.planId, gone.itemId, '/decline'), {
         removeUnpicked: '1',
+        offered: gone.garments.map(String),
       });
       expect(res.statusCode).toBe(303);
       expect(res.headers.location).toBe(
@@ -283,6 +370,54 @@ describe('the inline review in the item sheet', () => {
       );
       expect((await rowOf(gone.itemId)).review).toBe('declined');
       expect(await existing(gone.garments)).toEqual([]);
+    });
+
+    it('lets go only of the candidates the sheet drew: one the agent added since stays, row and garment', async () => {
+      const { planId, itemId, garments } = await proposal(2);
+      const offered = await offeredOnPage(planId, itemId);
+      const late = await addWishlist(`Tee ${++seq}`);
+      await tool(t, token, 'add_candidate', { itemId, garmentId: late });
+
+      const res = await post(itemUrl(planId, itemId, '/accept'), {
+        pick: String(garments[0]),
+        removeUnpicked: '1',
+        offered,
+        asOf: await asOfOnPage(planId, itemId),
+      });
+      expect(res.statusCode, res.body).toBe(303);
+      expect((await rowOf(itemId)).review).toBe('accepted');
+      expect(await existing([...garments, late])).toEqual([garments[0], late]);
+      expect(await candidatesOf(itemId)).toEqual([garments[0], late]);
+
+      // Don't buy judges the same way; and a box ticked with nothing offered lets go of nothing.
+      const declined = await proposal(1);
+      const added = await addWishlist(`Tee ${++seq}`);
+      await link([declined.itemId], [added]);
+      await post(itemUrl(declined.planId, declined.itemId, '/decline'), {
+        removeUnpicked: '1',
+        offered: declined.garments.map(String),
+      });
+      expect(await existing([...declined.garments, added])).toEqual([added]);
+      expect(await candidatesOf(declined.itemId)).toEqual([added]);
+      const bare = await proposal(1);
+      await post(itemUrl(bare.planId, bare.itemId, '/decline'), {
+        removeUnpicked: '1',
+      });
+      expect(await existing(bare.garments)).toEqual(bare.garments);
+    });
+
+    it('an unpicked candidate a loved look holds is unlinked here and kept in its slot', async () => {
+      const { planId, itemId, garments } = await proposal(2);
+      const look = await lovedLookWith(planId, garments[1]);
+      const res = await post(itemUrl(planId, itemId, '/accept'), {
+        pick: String(garments[0]),
+        removeUnpicked: '1',
+        offered: garments.map(String),
+      });
+      expect(res.headers.location).toBe(`${planUrl(planId)}?saved=1`);
+      expect(await existing(garments)).toEqual(garments);
+      expect(await candidatesOf(itemId)).toEqual([garments[0]]);
+      expect(await slotHolds(look, garments[1])).toBe(true);
     });
 
     it('Change this sends the item back with the note, and refuses a blank one', async () => {
@@ -354,6 +489,26 @@ describe('the inline review in the item sheet', () => {
       expect(await candidatesOf(itemId)).toEqual([]);
       expect(await candidatesOf(other)).toEqual(garments);
       expect((await rejectionsOf(itemId))[0].reason).toBeNull();
+    });
+
+    it('a candidate a loved look holds is recorded and unlinked, and stays in the look', async () => {
+      const { planId, itemId, garments } = await proposal(2);
+      const look = await lovedLookWith(planId, garments[0]);
+      const res = await post(
+        itemUrl(planId, itemId, `/candidates/${garments[0]}/reject`),
+        { reason: 'Too shiny', asOf: await asOfOnPage(planId, itemId) },
+      );
+      expect(res.statusCode, res.body).toBe(303);
+      expect(res.headers.location).toBe(
+        `${planUrl(planId)}?open=${itemId}&saved=1`,
+      );
+      expect((await rowOf(itemId)).review).toBe('proposed');
+      expect(await existing(garments)).toEqual(garments);
+      expect(await candidatesOf(itemId)).toEqual([garments[1]]);
+      expect(await slotHolds(look, garments[0])).toBe(true);
+      expect((await rejectionsOf(itemId)).map((row) => row.reason)).toEqual([
+        'Too shiny',
+      ]);
     });
 
     it('is a 409 for a product that is no candidate (any more), or an item decided meanwhile', async () => {
