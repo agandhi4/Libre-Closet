@@ -1,11 +1,13 @@
 import type { Child } from 'hono/jsx';
 import { PostForm } from '../auth/form';
-import { imageUrl } from '../files/image-url';
+import { imageUrl, type SignablePhotoRef } from '../files/image-url';
+import { enlargeLabel, PhotoSet, viewerTrigger } from '../files/photo-viewer';
 import { t } from '../i18n';
 import { LOOK_GRID } from '../layout/columns';
 import { HangerIcon } from '../layout/parts';
+import { inViewerSet } from '../outfits/collage';
 import { categoryLabel } from '../wardrobe/garment';
-import { CHIPS, LookSaveAction, lookMeta } from './look-tile';
+import { CHIPS, LookSaveAction, lookGarments, lookMeta } from './look-tile';
 import type { LookGroups, LookSlotView, PlanLookView } from './looks';
 import { lookUrl } from './urls';
 
@@ -103,6 +105,12 @@ function LooksFold(props: {
 
 function LookCard(props: { look: PlanLookView; eager: boolean }) {
   const { look } = props;
+  const viewerSet = `look-${look.id}-photos`;
+  // The set's builder and each tile's trigger share `inViewerSet`, so a tap
+  // opens its own slide.
+  const pieces = lookGarments(look);
+  const opensViewer = (slot: LookSlotView) =>
+    inViewerSet(pieces[look.slots.indexOf(slot)]);
   return (
     <li
       id={`look-${look.id}`}
@@ -134,9 +142,20 @@ function LookCard(props: { look: PlanLookView; eager: boolean }) {
           </p>
         )}
       </div>
+      <PhotoSet
+        id={viewerSet}
+        photos={look.slots.filter(opensViewer).map((slot) => ({
+          photo: slot.photo!,
+          alt: pieceName(slot),
+        }))}
+      />
       <ul class={PIECE_GRID}>
         {look.slots.map((slot) => (
-          <PieceTile slot={slot} eager={props.eager} />
+          <PieceTile
+            slot={slot}
+            eager={props.eager}
+            viewerSet={opensViewer(slot) ? viewerSet : undefined}
+          />
         ))}
       </ul>
       <div class="mt-auto border-t border-base-300 pt-3">
@@ -147,9 +166,17 @@ function LookCard(props: { look: PlanLookView; eager: boolean }) {
 }
 
 /** One piece, big: its photo on the plinth colour, its name under it, To buy over its foot. */
-function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
+const pieceName = (slot: LookSlotView) =>
+  slot.name ?? categoryLabel(slot.category);
+
+function PieceTile(props: {
+  slot: LookSlotView;
+  eager: boolean;
+  /** The set a tap opens in the photo viewer; none when the piece has no photo. */
+  viewerSet: string | undefined;
+}) {
   const { slot } = props;
-  const name = slot.name ?? categoryLabel(slot.category);
+  const name = pieceName(slot);
   return (
     <li class="flex flex-col gap-1.5" data-piece-state={slot.state}>
       {slot.state === 'missing' ? (
@@ -164,21 +191,13 @@ function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
       ) : (
         <div class="relative aspect-square overflow-hidden rounded-box bg-base-200 flex items-center justify-center p-1 sm:p-2">
           {slot.photo ? (
-            <img
-              src={imageUrl(slot.photo, 'thumb')}
-              alt={name}
-              class="size-full object-contain"
-              width="200"
-              height="200"
-              loading={props.eager ? 'eager' : 'lazy'}
-              decoding="async"
-            />
+            <PieceImage {...props} name={name} photo={slot.photo} />
           ) : (
             <HangerIcon class="size-8 text-muted" strokeWidth="1.5" />
           )}
           {slot.state === 'to-buy' && (
             <span
-              class="badge badge-accent badge-xs sm:badge-sm absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap"
+              class="badge badge-accent badge-xs sm:badge-sm pointer-events-none absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap"
               data-to-buy=""
             >
               {t('plans.looks.TO_BUY')}
@@ -190,6 +209,36 @@ function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
         {name}
       </p>
     </li>
+  );
+}
+
+function PieceImage(props: {
+  photo: SignablePhotoRef;
+  name: string;
+  eager: boolean;
+  viewerSet: string | undefined;
+}) {
+  const img = (
+    <img
+      src={imageUrl(props.photo, 'thumb')}
+      alt={props.viewerSet ? '' : props.name}
+      class="size-full object-contain"
+      width="200"
+      height="200"
+      loading={props.eager ? 'eager' : 'lazy'}
+      decoding="async"
+    />
+  );
+  if (!props.viewerSet) return img;
+  return (
+    <button
+      type="button"
+      class="size-full cursor-zoom-in"
+      aria-label={enlargeLabel(props.name)}
+      {...viewerTrigger(props.viewerSet, props.photo)}
+    >
+      {img}
+    </button>
   );
 }
 

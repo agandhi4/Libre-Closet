@@ -607,25 +607,28 @@ function ItemCard(props: { card: PlanCard; gaps: PlanGaps }) {
               the sheet, this opens the photo viewer. */}
           <button
             type="button"
-            class="btn btn-circle btn-xs btn-neutral absolute right-1.5 top-1.5 z-10 opacity-80"
+            class="absolute right-0 top-0 z-10 flex size-11 items-center justify-center"
             aria-label={enlargeLabel(lead.name)}
             {...viewerTrigger(viewerSetId(card), lead.photo)}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke-width="2"
-              stroke="currentColor"
-              class="size-3.5"
-              aria-hidden="true"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
-              />
-            </svg>
+            {/* The visible disc stays small; the button around it is the 44 px target. */}
+            <span class="btn btn-circle btn-xs btn-neutral opacity-80 pointer-events-none">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke-width="2"
+                stroke="currentColor"
+                class="size-3.5"
+                aria-hidden="true"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"
+                />
+              </svg>
+            </span>
           </button>
         </>
       )}
