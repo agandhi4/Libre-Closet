@@ -186,6 +186,7 @@ function open(trigger) {
   const row = track(dialog);
   slides = sources.map(buildSlide);
   row.replaceChildren(...slides);
+  row.addEventListener('touchmove', holdPinch, { passive: false });
   dialog.showModal();
   row.scrollTo({ left: start * row.clientWidth, behavior: 'instant' });
   sync(dialog, start);
@@ -267,6 +268,7 @@ document.addEventListener(
   (event) => {
     if (event.target.id !== 'photo-viewer') return;
     const dialog = event.target;
+    track(dialog).removeEventListener('touchmove', holdPinch);
     track(dialog).replaceChildren();
     delete track(dialog).dataset.zoomed;
     slides = [];
@@ -331,6 +333,13 @@ const midpoint = () => {
   const [a, b] = [...pointers.values()];
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 };
+// Two fingers on a slide are a pinch, never a scroll of the row beneath.
+// Non-passive, so it sits on the track only while the viewer is open: on the
+// document it would hold up every page's scrolling (test/styling.spec.ts).
+const holdPinch = (event) => {
+  if (event.touches.length === 2 && event.cancelable) event.preventDefault();
+};
+
 const onSlide = (event) =>
   viewer()?.open && event.target.closest?.('.photo-viewer-slide');
 
@@ -356,14 +365,3 @@ for (const type of ['pointerup', 'pointercancel']) {
     if (pointers.size < 2) pinch = null;
   });
 }
-
-// Two fingers on a slide are a pinch, never a scroll of the row beneath.
-document.addEventListener(
-  'touchmove',
-  (event) => {
-    if (event.touches.length === 2 && onSlide(event) && event.cancelable) {
-      event.preventDefault();
-    }
-  },
-  { passive: false },
-);

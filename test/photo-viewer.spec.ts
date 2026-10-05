@@ -6,6 +6,7 @@ import { proposeLook } from '../src/web/plans/looks';
 import { addPhotographedGarment } from './support/e2e-data';
 import { SAME_ORIGIN, signIn } from './support/e2e-session';
 import { pageErrors } from './support/page-errors';
+import { blockingScrollListeners } from './support/scroll-listeners';
 import { userIdOf, withServerDb } from './support/server-db';
 import { networkSwitch, waitForServiceWorker } from './support/service-worker';
 
@@ -204,6 +205,9 @@ test.describe('on a phone', () => {
     const errors = pageErrors(page);
     const { tee } = await seed(page);
     await openGarment(page, tee);
+    // The pinch's non-passive touchmove exists only while the viewer is
+    // open; closed, nothing on the page holds up scrolling.
+    expect(await blockingScrollListeners(page)).toEqual([]);
     await page.getByRole('button', { name: 'Enlarge photo of Grey tee' }).tap();
     await expect(position(page)).toHaveText('1 of 2');
     await page.screenshot({ path: 'test-results/313-viewer-390.png' });
