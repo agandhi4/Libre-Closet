@@ -218,7 +218,7 @@ async function buildFixture(client: Client): Promise<Fixture> {
   await link(shirtB, shared, 1);
   await client.query(
     `insert into plan_item_rejection (plan_item_id, name, url, reason)
-     values ($1, 'Pink shirt', 'https://shop.example/pink', 'not pink')`,
+     values ($1, 'Pink shirt', 'ftp://shop.example/pink', 'not pink')`,
     [shirtB],
   );
   // A duplicated plan: its copy links the same products as the original.
@@ -282,6 +282,7 @@ interface SuggestionRow {
   dismissed_at: Date | null;
   dismissed_reason: string | null;
   dismissed_note: string | null;
+  source_url: string | null;
 }
 
 let t: TestApp;
@@ -318,7 +319,8 @@ beforeAll(async () => {
       (
         await client.query<SuggestionRow>(
           `select id, status, suggestion_group_id, suggested_by_token_id, suggestion_note,
-             suggestion_rank, suggested_at, dismissed_at, dismissed_reason, dismissed_note
+             suggestion_rank, suggested_at, dismissed_at, dismissed_reason, dismissed_note,
+             source_url
            from garment`,
         )
       ).rows.map((row) => [row.id, row]),
@@ -496,6 +498,8 @@ describe('every other case', () => {
     expect(rejections).toEqual([
       expect.objectContaining({ dismissed_note: 'not pink' }),
     ]);
+    // Its link was no http(s) one: dropped, the boot carried on.
+    expect(rejections[0].source_url).toBeNull();
   });
 
   it('leaves an owner’s own plan alone: no group, and its candidates stay plain wishlist items', () => {

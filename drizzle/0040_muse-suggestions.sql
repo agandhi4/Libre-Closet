@@ -53,8 +53,9 @@ ALTER TABLE "garment" ADD CONSTRAINT "garment_dismissed_check" CHECK ("garment".
 -- option groups, their candidates the groups' suggestions (already
 -- wishlist garments), their rejections dismissed suggestions. The plan
 -- tables are read, never changed: the plans pages keep working until #337
--- removes them. Aborts, naming the problem, on data these steps would map
--- wrongly.
+-- removes them. Aborts, naming the problem, on a candidate of another
+-- owner: no app path makes one, so it would be corruption to surface, not
+-- skip.
 DO $$
 BEGIN
   IF EXISTS (
@@ -65,15 +66,6 @@ BEGIN
     WHERE p.drafted_by_token_id IS NOT NULL AND g.owner_id <> p.owner_id
   ) THEN
     RAISE EXCEPTION '0040: a plan candidate is not its plan owner''s garment';
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM plan_item_rejection r
-    JOIN plan_item i ON i.id = r.plan_item_id
-    JOIN wardrobe_plan p ON p.id = i.plan_id
-    WHERE p.drafted_by_token_id IS NOT NULL
-      AND r.url IS NOT NULL AND r.url !~* '^https?://'
-  ) THEN
-    RAISE EXCEPTION '0040: a plan rejection''s url is not an http(s) link';
   END IF;
 END $$;
 --> statement-breakpoint
@@ -163,7 +155,9 @@ INSERT INTO "garment" (
   "owner_id", "status", "suggested_at", "suggested_by_token_id",
   "suggestion_group_id", "dismissed_at", "dismissed_note"
 )
-SELECT gen_random_uuid()::text, r.name, i.category, r.brand, r.url, r.price,
+SELECT gen_random_uuid()::text, r.name, i.category, r.brand,
+  -- A link the garment's check would refuse is dropped, not a failed boot.
+  CASE WHEN r.url ~* '^https?://' THEN r.url END, r.price,
   og.owner_id, 'wishlist', r.created_at, og.suggested_by_token_id,
   og.id, r.created_at, nullif(trim(r.reason), '')
 FROM plan_item_rejection r
