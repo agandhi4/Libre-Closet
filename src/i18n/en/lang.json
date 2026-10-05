@@ -1191,7 +1191,6 @@
       "YOU_ASKED": "You asked: {note}",
       "NEEDS_REPLACEMENT": "Needs a replacement: {name} was set aside",
       "SET_ASIDE": "Set aside",
-      "SEE_PIECE": "See the piece",
       "SET_ASIDE_COUNT": "{count} set aside",
       "UNDO_LABEL": "Undo setting {name} aside",
       "SET_ASIDE_LINE": "Set aside: {reason}",

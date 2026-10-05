@@ -178,7 +178,18 @@ test.beforeAll(async () => {
   });
 });
 
-async function shoot(page: Page, testInfo: TestInfo, name: string) {
+/**
+ * A screenshot attached to the test: the page whole at 1440, but the
+ * screen alone on a phone, where a page of 8 cards and the closet's
+ * outfits is too tall to judge (and a full-page capture paints the fixed
+ * dock where the first screen ended).
+ */
+async function shoot(
+  page: Page,
+  testInfo: TestInfo,
+  name: string,
+  fullPage: boolean,
+) {
   await page.evaluate(async () => {
     for (const img of document.querySelectorAll('img')) img.loading = 'eager';
     await Promise.all(
@@ -188,7 +199,7 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
     );
   });
   const path = testInfo.outputPath(`muse-outfits-${name}.png`);
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path, fullPage });
   await testInfo.attach(`muse-outfits-${name}.png`, {
     path,
     contentType: 'image/png',
@@ -237,8 +248,25 @@ for (const [label, device] of [
           );
         }
       }
+      if (label === '1440') {
+        // The pieces being decided on are the page's largest images.
+        const tile = page
+          .locator(`[data-muse-outfit="${ids[1]}"] [data-piece]`)
+          .first();
+        // About 150 px (143 at 1440): two cards across the page, four pieces each,
+        // larger than any piece of the collages below.
+        expect((await tile.boundingBox())!.width).toBeGreaterThanOrEqual(140);
+      }
       await noSideScroll(page, width);
-      await shoot(page, testInfo, `tab-${label}`);
+      await shoot(page, testInfo, `tab-${label}`, label === '1440');
+      // The dock sits at the foot of the screen, not over the cards.
+      const dock = await page
+        .locator('nav.dock, [data-dock]')
+        .first()
+        .boundingBox();
+      if (dock && label === '390') {
+        expect(dock.y + dock.height).toBeGreaterThanOrEqual(844 - 1);
+      }
       // A piece opens the photo viewer.
       await page
         .locator(`[data-muse-outfit="${ids[1]}"] [data-photo-open]`)
@@ -262,9 +290,11 @@ for (const [label, device] of [
       if (label === '390') {
         expect((await reason.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       }
-      await card.scrollIntoViewIfNeeded();
+      await card
+        .locator('[data-not-for-me]')
+        .evaluate((el) => el.scrollIntoView({ block: 'center' }));
       await noSideScroll(page, width);
-      await shoot(page, testInfo, `not-for-me-${label}`);
+      await shoot(page, testInfo, `not-for-me-${label}`, label === '1440');
       expect(errors).toEqual([]);
     });
   });

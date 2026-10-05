@@ -20,7 +20,7 @@ import { outfitUrl } from './urls';
  * cards, every piece big (a tap opens the photo viewer), pieces to buy
  * badged with their price and what they unlock; then those set aside,
  * collapsed, each with Undo. One markup: a card per row on a phone, two
- * from `lg`, three from `xl` (MUSE_GRID). Static: the bytes change only
+ * from `lg` (MUSE_GRID), the four pieces of a row filling the card. Static: the bytes change only
  * when an outfit or a piece does, so bare /outfits stays byte-stable.
  */
 export function MuseSection(props: {
@@ -77,7 +77,7 @@ function primaryOf(item: MuseOutfit): Primary {
   return { kind: toBuy ? 'love' : 'save' };
 }
 
-const PIECE_GRID = 'grid grid-cols-4 gap-1.5 sm:gap-3';
+const PIECE_GRID = 'grid grid-cols-4 gap-1.5';
 // 44 px on a phone; compact where a mouse is the pointer.
 const ACTION = 'btn min-h-11 fine:min-h-8';
 
@@ -95,7 +95,7 @@ function MuseCard(props: {
       id={`muse-outfit-${item.id}`}
       data-muse-outfit={String(item.id)}
       data-reaction={item.reaction}
-      class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 p-4"
+      class="flex flex-col gap-3 rounded-box border border-base-300 bg-base-100 p-4 lg:p-3"
     >
       <div class="flex flex-col gap-1">
         <div class="flex items-start justify-between gap-2">
@@ -224,10 +224,13 @@ const pieceName = (piece: MusePiece) =>
   piece.name ?? categoryLabel(piece.category);
 
 /**
- * One piece, big: its photo on the plinth colour (a tap opens the viewer),
- * its name; a piece to buy wears its price over its foot and, under it,
- * what it unlocks with the closet, a link to its page (where This one and
- * Bought it are, and its need's options).
+ * One piece, big: its photo on the plinth colour (a tap opens the viewer,
+ * which names it; the button's label does too). No name under it: the
+ * card is the pieces. A piece to buy wears its price over its foot and,
+ * when it is a number worth reading, what it unlocks with the closet, a
+ * link to its page (where This one and Bought it are, and its need's
+ * options): never at the cap ("50+", which a large closet gives most
+ * pieces and so tells nothing, the inbox's rule).
  */
 function PieceTile(props: {
   piece: MusePiece;
@@ -274,16 +277,13 @@ function PieceTile(props: {
           </span>
         )}
       </div>
-      <p class="text-xs sm:text-sm leading-snug truncate">{name}</p>
-      {toBuy && (
+      {toBuy && props.unlocks && !props.unlocks.capped && (
         <a
           href={`/wardrobe/${piece.id}`}
-          class="text-xs link link-hover inline-flex min-h-11 fine:min-h-0 items-start"
+          class="text-xs link link-hover inline-flex min-h-11 fine:min-h-0 items-start leading-tight"
           data-unlocks-link=""
         >
-          {props.unlocks
-            ? unlocksText(props.unlocks)
-            : t('outfits.muse.SEE_PIECE')}
+          {unlocksText(props.unlocks)}
         </a>
       )}
     </li>
