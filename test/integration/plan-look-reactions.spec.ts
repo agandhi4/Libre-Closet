@@ -417,6 +417,20 @@ describe('plan looks in the app', () => {
       expect(statements).toHaveLength(6);
     });
 
+    it('reads the Outfits view in as many statements for 8 looks as for 1', async () => {
+      const f = await fixture();
+      await f.look('Office Tuesday');
+      const one = await recordStatements(() =>
+        get(`/wardrobe/plans/${f.planId}?view=outfits`, f.cookie),
+      );
+      for (let n = 2; n <= 8; n++) await f.look(`Look ${n}`);
+      const eight = await recordStatements(() =>
+        get(`/wardrobe/plans/${f.planId}?view=outfits`, f.cookie),
+      );
+      expect(eight.result.statusCode).toBe(200);
+      expect(eight.statements).toHaveLength(one.statements.length);
+    });
+
     it('draws the looks in the Outfits panel (?view=outfits checks it), listing those sent back or turned down apart', async () => {
       const f = await fixture();
       const first = await f.look('Office Tuesday');

@@ -8,7 +8,12 @@ import { HangerIcon } from '../layout/parts';
 import { inViewerSet } from '../outfits/collage';
 import { categoryLabel } from '../wardrobe/garment';
 import { CHIPS, LookSaveAction, lookGarments, lookMeta } from './look-tile';
-import type { LookGroups, LookSlotView, PlanLookView } from './looks';
+import {
+  type LookGroups,
+  type LookSlotView,
+  lookSaveState,
+  type PlanLookView,
+} from './looks';
 import { lookUrl } from './urls';
 
 /**
@@ -184,7 +189,7 @@ function PieceTile(props: {
           class="aspect-square rounded-box border border-dashed border-warning flex items-center justify-center p-1 sm:p-2"
           data-missing-piece=""
         >
-          <span class="text-[0.625rem] sm:text-xs text-warning text-center">
+          <span class="text-xs text-warning text-center">
             {t('plans.looks.MISSING')}
           </span>
         </div>
@@ -242,6 +247,10 @@ function PieceImage(props: {
   );
 }
 
+// 44 px on a phone; compact where a mouse is the pointer.
+const MOVE_BUTTON = 'btn min-h-11 fine:btn-sm';
+const MOVE_LINK = 'link link-hover inline-flex min-h-11 items-center text-sm';
+
 function MoveButton(props: {
   look: PlanLookView;
   move: string;
@@ -253,7 +262,7 @@ function MoveButton(props: {
       action={lookUrl(props.look.planId, props.look.id, props.move)}
       needsNetwork
     >
-      <button type="submit" class={`btn btn-sm ${props.class}`}>
+      <button type="submit" class={`${MOVE_BUTTON} ${props.class}`}>
         {props.children}
       </button>
     </PostForm>
@@ -269,12 +278,24 @@ function MoveButton(props: {
  * outfit it became) leads, #292.
  */
 function LookMoves({ look }: { look: PlanLookView }) {
+  // A loved look leads with Save as outfit; one still missing a piece can't
+  // be saved, so its next step is to change it (swap the piece for one owned).
+  const saveState = lookSaveState(look);
+  const primary =
+    look.reaction !== 'loved'
+      ? null
+      : saveState === 'saveable'
+        ? 'save'
+        : saveState === 'not-yet'
+          ? 'change'
+          : null;
   return (
     <div class="flex flex-wrap items-center gap-2">
       <LookSaveAction
         look={look}
         plain
-        buttonClass={`btn btn-sm ${look.reaction === 'loved' ? 'btn-primary' : 'btn-outline'}`}
+        linkClass={MOVE_LINK}
+        buttonClass={`${MOVE_BUTTON} ${primary === 'save' ? 'btn-primary' : 'btn-outline'}`}
       />
       {look.reaction === 'declined' ? (
         <MoveButton look={look} move="/reconsider" class="btn-outline">
@@ -297,7 +318,9 @@ function LookMoves({ look }: { look: PlanLookView }) {
           {look.reaction !== 'revise' && (
             <a
               href={lookUrl(look.planId, look.id, '/change')}
-              class="link link-hover text-sm"
+              class={
+                primary === 'change' ? `${MOVE_BUTTON} btn-primary` : MOVE_LINK
+              }
             >
               {t('plans.looks.CHANGE')}
             </a>

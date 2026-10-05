@@ -271,6 +271,7 @@ export function LookSaveAction({
   look,
   plain = false,
   buttonClass = 'btn btn-xs btn-primary',
+  linkClass = 'link link-hover text-xs font-medium',
 }: {
   look: Pick<
     PlanLookView,
@@ -280,6 +281,8 @@ export function LookSaveAction({
   plain?: boolean;
   /** The save button's classes; the plan page's cards size and rank it. */
   buttonClass?: string;
+  /** The saved look's link to its outfit. */
+  linkClass?: string;
 }) {
   const stripAction = (action: string) =>
     plain ? {} : { 'data-strip-action': action };
@@ -288,7 +291,7 @@ export function LookSaveAction({
       return (
         <a
           href={outfitUrl(look.outfitId!)}
-          class="link link-hover text-xs font-medium"
+          class={linkClass}
           data-look-saved=""
           {...stripAction('saved')}
         >
