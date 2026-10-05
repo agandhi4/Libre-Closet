@@ -19,13 +19,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import type { CutoutStatus } from '../../cutout/state';
 import type { Db, Queryable } from '../../db/client';
-import {
-  capsuleGarment,
-  file,
-  garment,
-  outfitSlot,
-  planLookSlot,
-} from '../../db/schema';
+import { capsuleGarment, file, garment, outfitSlot } from '../../db/schema';
 import type { AwayReason } from '../../wardrobe/availability';
 import type { CareLabel, CareWash } from '../../wardrobe/care';
 import type { EntryStatus, GarmentStatus } from '../../wardrobe/status';
@@ -701,11 +695,13 @@ export function deleteGarment(
 }
 
 /**
- * Of `ids`, the garments something else still holds: an outfit's slot, a
- * capsule or a plan look's slot. Their foreign keys would quietly empty
- * the slot or drop the membership on a delete, so a clean-up that deletes
- * a wishlist product only because no plan item wants it any more (the
- * review's release rule, releasedCandidates) asks here first. Wears,
+ * Of `ids`, the garments the owner's own collections still hold: a saved
+ * outfit's slot or a capsule. Their foreign keys would quietly empty the
+ * slot or drop the membership on a delete, so a clean-up that deletes a
+ * wishlist product only because no plan item wants it any more (the
+ * review's release rule, releasedCandidates) asks here first. An agent
+ * plan look's slot is deliberately not held: it empties, so the agent
+ * sees the gap and proposes a replacement. Wears,
  * repairs, packing and avoided pairs are records of closet garments, never
  * of a wishlist one, so they do not count.
  */
@@ -732,12 +728,6 @@ export async function garmentsInUse(
               .select({ one: sql`1` })
               .from(capsuleGarment)
               .where(eq(capsuleGarment.garmentId, garment.id)),
-          ),
-          exists(
-            db
-              .select({ one: sql`1` })
-              .from(planLookSlot)
-              .where(eq(planLookSlot.garmentId, garment.id)),
           ),
         ),
       ),

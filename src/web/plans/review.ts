@@ -69,8 +69,8 @@ import {
  *   the item's. One is deleted from the wishlist (deleteGarment,
  *   'wishlist') only when every plan item it stands for (any plan, any
  *   review: candidaciesOf) is one of this post that lets it go, no item
- *   here picked it, and no look, outfit or capsule holds it
- *   (garmentsInUse: a look's to-buy piece stays in its slot); one bought meanwhile is kept (the delete judges the
+ *   here picked it, and no saved outfit or capsule holds it
+ *   (garmentsInUse; an agent look's slot just empties); one bought meanwhile is kept (the delete judges the
  *   status under the row lock), and logged. One kept because it stands for
  *   something else is unlinked from each item here that let it go
  *   (changeCandidates), so a rejected product leaves the item and frees its
@@ -630,7 +630,7 @@ export async function dropPhotos(
  * the page was drawn): which to remove was not shown against it. A garment
  * is deletable when every plan item it is a candidate of is one of these
  * that lets it go, no item here picked it, and nothing else holds it (a
- * plan look's slot, an outfit, a capsule: garmentsInUse; the look writers
+ * saved outfit, a capsule: garmentsInUse; the look writers
  * take the same owner lock, so none adds it meanwhile). One held is only
  * unlinked. Reads nothing when nothing can be let go.
  */

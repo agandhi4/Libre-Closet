@@ -1623,9 +1623,8 @@ export const planLook = pgTable(
 // written (the slot it fills). `garment_id` is a closet garment or a
 // wishlist candidate of the look's plan, both the plan owner's (the
 // writer's rule); deleting the garment (a candidate taken off the
-// wishlist) empties the slot, so the look shows the role it is missing. A
-// review never deletes one a slot holds (garmentsInUse): "Not this one"
-// only unlinks it, and the slot reads as missing. Whether a piece is owned, to buy or no longer valid is
+// wishlist, "Not this one") empties the slot, so the look shows the role
+// it is missing. Whether a piece is owned, to buy or no longer valid is
 // derived on every read, never stored.
 export const planLookSlot = pgTable(
   'plan_look_slot',

@@ -2,6 +2,8 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import {
+  capsule,
+  capsuleGarment,
   garment,
   planItem,
   planItemCandidate,
@@ -406,7 +408,7 @@ describe('the inline review in the item sheet', () => {
       expect(await existing(bare.garments)).toEqual(bare.garments);
     });
 
-    it('an unpicked candidate a loved look holds is unlinked here and kept in its slot', async () => {
+    it('an unpicked candidate a loved look holds is deleted and empties the look’s slot', async () => {
       const { planId, itemId, garments } = await proposal(2);
       const look = await lovedLookWith(planId, garments[1]);
       const res = await post(itemUrl(planId, itemId, '/accept'), {
@@ -414,10 +416,30 @@ describe('the inline review in the item sheet', () => {
         removeUnpicked: '1',
         offered: garments.map(String),
       });
-      expect(res.headers.location).toBe(`${planUrl(planId)}?saved=1`);
+      expect(res.headers.location).toBe(
+        `${planUrl(planId)}?reviewed=1&removed=1`,
+      );
+      expect(await existing(garments)).toEqual([garments[0]]);
+      expect(await candidatesOf(itemId)).toEqual([garments[0]]);
+      expect(await slotHolds(look, garments[1])).toBe(false);
+    });
+
+    it('an unpicked candidate in a capsule is unlinked, never deleted', async () => {
+      const { planId, itemId, garments } = await proposal(2);
+      const [{ id: capsuleId }] = await t.db
+        .insert(capsule)
+        .values({ ownerId: t.owner.id, name: `Capsule ${++seq}` })
+        .returning({ id: capsule.id });
+      await t.db
+        .insert(capsuleGarment)
+        .values({ capsuleId, garmentId: garments[1] });
+      await post(itemUrl(planId, itemId, '/accept'), {
+        pick: String(garments[0]),
+        removeUnpicked: '1',
+        offered: garments.map(String),
+      });
       expect(await existing(garments)).toEqual(garments);
       expect(await candidatesOf(itemId)).toEqual([garments[0]]);
-      expect(await slotHolds(look, garments[1])).toBe(true);
     });
 
     it('Change this sends the item back with the note, and refuses a blank one', async () => {
@@ -491,7 +513,7 @@ describe('the inline review in the item sheet', () => {
       expect((await rejectionsOf(itemId))[0].reason).toBeNull();
     });
 
-    it('a candidate a loved look holds is recorded and unlinked, and stays in the look', async () => {
+    it('a candidate a loved look holds is recorded and deleted, and empties the look’s slot', async () => {
       const { planId, itemId, garments } = await proposal(2);
       const look = await lovedLookWith(planId, garments[0]);
       const res = await post(
@@ -500,12 +522,12 @@ describe('the inline review in the item sheet', () => {
       );
       expect(res.statusCode, res.body).toBe(303);
       expect(res.headers.location).toBe(
-        `${planUrl(planId)}?open=${itemId}&saved=1`,
+        `${planUrl(planId)}?open=${itemId}&reviewed=1&removed=1`,
       );
       expect((await rowOf(itemId)).review).toBe('proposed');
-      expect(await existing(garments)).toEqual(garments);
+      expect(await existing(garments)).toEqual([garments[1]]);
       expect(await candidatesOf(itemId)).toEqual([garments[1]]);
-      expect(await slotHolds(look, garments[0])).toBe(true);
+      expect(await slotHolds(look, garments[0])).toBe(false);
       expect((await rejectionsOf(itemId)).map((row) => row.reason)).toEqual([
         'Too shiny',
       ]);

@@ -65,7 +65,7 @@ The owner read the first production draft as "a flat list" with no photos and no
 - **Deleted or unlinked.** A garment is deleted from the wishlist (`deleteGarment(..., 'wishlist')`) only when both hold:
   - Every link it has, in any plan and any review (`candidaciesOf`), is to an item of this post that lets it go.
   - No item of this post picked it.
-  - Nothing else holds it: a plan look's slot, an outfit's or a capsule (`garmentsInUse`, `src/web/wardrobe/queries.ts`). A look's to-buy piece stays in its slot (reading as missing, `not-a-candidate`, once no item holds it), never silently emptied. The look writers take the same owner lock, so none adds it meanwhile.
+  - Nothing else holds it: a saved outfit's slot or a capsule (`garmentsInUse`, `src/web/wardrobe/queries.ts`): one held is only unlinked. An agent look's slot is not held: the product is deleted and the slot empties, so the agent sees the gap and proposes a replacement. The look writers take the same owner lock, so none adds it meanwhile.
 
   A candidate bought meanwhile is kept and logged. One kept because it stands for something else is unlinked from each item that let it go, which frees a place under the cap.
 
@@ -128,7 +128,7 @@ A look is an outfit the agent designs from a plan, mixing closet garments with t
 **Tables** (`drizzle/0037_plan-looks.sql`):
 
 - `plan_look` has the name, `occasion` (nullable, `OCCASIONS`), the agent's `note`, `reaction`, `owner_note` and `agent_changed_at` (as on `plan_item`). It cascades with its plan.
-- `plan_look_slot` has `outfit_slot`'s shape: `(look_id, position)` as the key, `category` (the garment's own when the look was written), and `garment_id` nullable with `ON DELETE SET NULL`. A garment fills one slot per look. Deleting a candidate from the wishlist empties its slot, so the look still knows the role it is missing; a review never deletes one a look holds (it only unlinks it, and the slot reads as missing). The slot shape also lets #292 save a look slot for slot as an outfit.
+- `plan_look_slot` has `outfit_slot`'s shape: `(look_id, position)` as the key, `category` (the garment's own when the look was written), and `garment_id` nullable with `ON DELETE SET NULL`. A garment fills one slot per look. Deleting a candidate (from the wishlist, or "Not this one") empties its slot, so the look still knows the role it is missing; the owner's outfits and capsules, not looks, protect a product from a review. The slot shape also lets #292 save a look slot for slot as an outfit.
 
 **The reaction machine** (`src/wardrobe/look-reaction.ts`; `look-reaction.spec.ts` covers all 20 pairs):
 
