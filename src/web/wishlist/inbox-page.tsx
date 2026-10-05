@@ -28,12 +28,14 @@ import {
   type NewNeed,
   type MusePick,
   type SetAsideRow,
+  sharedUnlocks,
 } from './inbox';
 import {
   type DecisionToast,
   DecisionToastView,
   FromAgent,
   NeedFacts,
+  NeedLink,
   PriceAgainstBudget,
   ProductPhoto,
   reasonText,
@@ -77,6 +79,7 @@ const TO_WISHLIST = destinationParams({ to: 'wishlist' });
 export function InboxPage(props: { ctx: ViewContext; model: InboxModel }) {
   const { ctx, model } = props;
   const { inbox, viewOwner, canEdit } = model;
+  // Nothing to buy or decide; what was set aside still shows, to be undone.
   const empty =
     inbox.readyToBuy.length === 0 &&
     inbox.groups.length === 0 &&
@@ -109,9 +112,9 @@ export function InboxPage(props: { ctx: ViewContext; model: InboxModel }) {
               <MusePicks model={model} />
               <OwnWishlist model={model} />
               <StillLooking model={model} returnTo={returnTo} />
-              <SetAside model={model} returnTo={returnTo} />
             </>
           )}
+          <SetAside model={model} returnTo={returnTo} />
         </PageMain>
       </div>
       <DecisionToastView toast={model.toast} />
@@ -173,6 +176,8 @@ function ProductCard(props: {
   };
   viewOwner: number | undefined;
   canBuy: boolean;
+  /** Bought it as the solid primary (Ready to buy), else outlined (one's own wishlist). */
+  primary: boolean;
   children?: Child;
   attributes?: Record<string, string>;
 }) {
@@ -203,7 +208,7 @@ function ProductCard(props: {
       {props.canBuy && (
         <a
           href={garmentUrl(item.id, viewOwner, '/bought')}
-          class="btn btn-primary btn-sm btn-block mt-auto"
+          class={`btn btn-primary btn-sm btn-block mt-auto${props.primary ? '' : ' btn-outline'}`}
         >
           {t('wishlist.BOUGHT_IT')}
         </a>
@@ -217,7 +222,7 @@ function BrandNote(props: {
   brand: string | null;
 }) {
   return props.brandSizes ? (
-    <BrandSizeNote note={props.brandSizes(props.brand)} size="text-xs" />
+    <BrandSizeNote note={props.brandSizes(props.brand)} size="text-xs" clamp />
   ) : null;
 }
 
@@ -234,14 +239,13 @@ function ReadyToBuy({ model }: { model: InboxModel }) {
             item={pick}
             viewOwner={model.viewOwner}
             canBuy={model.canEdit}
+            primary
             attributes={{ 'data-ready': String(pick.id) }}
           >
-            <a
+            <NeedLink
+              name={need.name}
               href={needUrl(need.id, model.viewOwner)}
-              class="link link-hover truncate"
-            >
-              {t('muse.FOR_NEED', { need: need.name })}
-            </a>
+            />
             {pick.brand && <span>{pick.brand}</span>}
             <PriceAgainstBudget
               price={pick.price}
@@ -317,7 +321,8 @@ export function GroupCards(props: {
 
 /**
  * A need: its name, budget and how many options, then each option's
- * thumb with its price and "Unlocks N". The card is one link to the
+ * photo (the link named for a screen reader: the card's title is the need) with
+ * its price and, when the options differ, "Unlocks N". The card is one link to the
  * decision screen (stretched over it, its one primary); a thumb opens the
  * screen with that option centred.
  */
@@ -327,6 +332,8 @@ function GroupCard(props: {
 }) {
   const { group, viewOwner } = props;
   const { need, options } = group;
+  // The same count on every option decides nothing: said once, above them.
+  const shared = sharedUnlocks(options, group.unlocks);
   return (
     <li
       class="card bg-base-100 border border-base-300 relative"
@@ -335,27 +342,29 @@ function GroupCard(props: {
       <div class="card-body p-4 gap-3">
         <div class="min-w-0">
           <h3 class="font-semibold break-words">{need.name}</h3>
-          <NeedFacts budget={need.budget} options={options.length} />
+          <NeedFacts
+            budget={need.budget}
+            options={options.length}
+            unlocks={shared}
+          />
         </div>
-        <ul class="grid grid-cols-3 gap-2 lg:grid-cols-5">
+        <ul class="grid grid-cols-3 gap-2 lg:gap-3">
           {options.map((pick) => (
             <li>
               <a
                 href={needUrl(need.id, viewOwner, '', { option: pick.id })}
                 class="relative z-10 flex flex-col gap-1 no-underline"
+                aria-label={itemName(pick)}
                 data-option={String(pick.id)}
               >
                 <ProductPhoto photo={pick.photo} alt="" />
-                <span class="text-xs font-medium truncate">
-                  {itemName(pick)}
-                </span>
                 <PriceAgainstBudget
                   price={pick.price}
                   budget={need.budget}
                   class="text-xs"
                   compact
                 />
-                <Unlocks count={group.unlocks?.get(pick.id)} />
+                {!shared && <Unlocks count={group.unlocks?.get(pick.id)} />}
               </a>
             </li>
           ))}
@@ -396,6 +405,7 @@ function OwnWishlist({ model }: { model: InboxModel }) {
             item={item}
             viewOwner={model.viewOwner}
             canBuy={model.canEdit}
+            primary={false}
             attributes={{ 'data-own': String(item.id) }}
           >
             {item.suggested && <FromAgent agent={null} />}

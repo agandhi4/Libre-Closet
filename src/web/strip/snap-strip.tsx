@@ -71,14 +71,15 @@ const SIZES = {
   },
   // A Muse need's options (#333, src/web/wishlist/group-page.tsx): a card
   // with the next peeking on a phone, flush left like `peek`; from `lg`
-  // the strip stops being one: every option is a column side by side, so
-  // nothing scrolls and the step buttons have nothing to step.
+  // the strip stops being one: every option is a column side by side, all
+  // one height (a card's foot lines up across them), nothing scrolls and
+  // the step buttons have nothing to step. On a touch screen the steps are
+  // hidden anyway (the `fine` variant).
   options: {
     item: 'w-[85%] lg:w-auto lg:flex-1 lg:min-w-0 lg:max-w-md',
     gap: 'gap-3 lg:gap-4',
     ends: 'before:w-0 after:w-0 before:-mr-3 after:-ml-3 lg:before:hidden lg:after:hidden before:shrink-0 after:shrink-0',
-    strip:
-      'lg:overflow-x-visible lg:snap-none lg:justify-center lg:items-start',
+    strip: 'lg:overflow-x-visible lg:snap-none lg:justify-center',
     frame: 'lg:[&>[data-snap-step]]:hidden',
   },
 } as const satisfies Record<string, SizeClasses>;

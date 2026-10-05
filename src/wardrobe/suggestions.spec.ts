@@ -223,6 +223,51 @@ describe('decideSuggestion', () => {
     ).toEqual({ ok: false, refusal: 'not-in-group' });
   });
 
+  it('takes a different one only for a need still to buy for: open, or its choice unbought', () => {
+    const different = { kind: 'bought', garmentId: 42, groupId: 7 } as const;
+    const boughtFirst: GroupState = {
+      status: 'resolved',
+      resolvedGarmentId: 41,
+      decidedAt: AT,
+    };
+    // Settled by another different one already (a second phone, a double post).
+    expect(
+      decideSuggestion(
+        boughtFirst,
+        [...picks, pick(41, { wanted: false })],
+        different,
+      ),
+    ).toEqual({ ok: false, refusal: 'not-allowed' });
+    // Settled by a pick bought.
+    const pickBought: GroupState = { ...boughtFirst, resolvedGarmentId: 1 };
+    expect(
+      decideSuggestion(
+        pickBought,
+        [pick(1, { wanted: false }), pick(2)],
+        different,
+      ),
+    ).toEqual({ ok: false, refusal: 'not-allowed' });
+    // Set aside.
+    const dismissed: GroupState = {
+      status: 'dismissed',
+      resolvedGarmentId: null,
+      decidedAt: AT,
+    };
+    expect(decideSuggestion(dismissed, picks, different)).toEqual({
+      ok: false,
+      refusal: 'not-allowed',
+    });
+    // Open, or chosen and unbought: taken.
+    expect(decideSuggestion(open, picks, different).ok).toBe(true);
+    expect(
+      decideSuggestion(
+        { ...boughtFirst, resolvedGarmentId: 1 },
+        picks,
+        different,
+      ).ok,
+    ).toBe(true);
+  });
+
   it('Returned sets the bought garment aside and reopens the need it settled', () => {
     const bought: GroupState = {
       status: 'resolved',

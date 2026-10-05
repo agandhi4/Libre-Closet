@@ -734,7 +734,6 @@
     "OPTIONS_ONE": "1 option",
     "UP_TO": "Up to {price}",
     "DECIDE": "Compare and choose",
-    "FOR_NEED": "For {need}",
     "NEW": "New from Muse:",
     "NEW_MORE": "and {count} more",
     "FROM": "From {agent}",
@@ -753,13 +752,13 @@
     "SET_ASIDE": "Set aside",
     "NEED_SET_ASIDE": "You set this need aside: {reason}",
     "UNDO_CHOICE": "Undo choice",
-    "NO_OPTIONS_LEFT": "No options left. Muse will look again.",
-    "OTHER_OPTIONS": "Other options for {need}",
+    "NO_OPTIONS_LEFT": "No options left for this need.",
+    "OTHER_OPTIONS": "Other options",
     "COMPARE": "Compare options",
     "OPTIONS_LABEL": "The options for {need}",
     "BEST_LABEL": "Its best outfits with your closet",
     "RETURNED_IT": "Returned it",
-    "CONFIRM_RETURNED": "Returned it? It moves to the archive, and Muse looks again for this need.",
+    "CONFIRM_RETURNED": "Returned it? It moves to the archive, and the need is open again.",
     "BOUGHT_FOR": "Bought for “{need}”: Muse sees what you chose instead of its picks.",
     "BACK_TO_INBOX": "Wishlist",
     "TODAY_CARD": "{agent} has {count} needs for you to decide on",
@@ -770,7 +769,7 @@
       "choose": "Chosen: it’s in Ready to buy",
       "dismiss": "Set aside. Muse learns from it.",
       "undo": "Back on your list",
-      "returned": "Archived as returned. Muse will look again.",
+      "returned": "Archived as returned. The need is open again.",
       "boughtFor": "In your closet now. Muse sees the need is met."
     },
     "reason": {
@@ -783,7 +782,9 @@
       "chose_another": "Chose another",
       "returned": "Returned",
       "none": "Not this one"
-    }
+    },
+    "NEED": "Need",
+    "EACH": "{unlocks} each"
   },
   "weather": {
     "RANGE": "{low}–{high} {unit}",

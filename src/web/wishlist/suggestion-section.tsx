@@ -1,11 +1,12 @@
 import { t } from '../i18n';
 import { categoryLabel } from '../wardrobe/garment';
 import type { GarmentDetail } from '../wardrobe/queries';
-import { garmentUrl, needUrl, wardrobeUrl } from '../wardrobe/urls';
+import { garmentUrl, needUrl } from '../wardrobe/urls';
 import { isOpenPick, type MusePick, type SuggestionContext } from './inbox';
 import {
   ChooseForm,
   FromAgent,
+  NeedLink,
   NotForMe,
   PriceAgainstBudget,
   ProductPhoto,
@@ -76,9 +77,7 @@ export function SuggestionSection(props: {
           <StateBadge state={state} suggestion={suggestion} />
         </div>
         {need && (
-          <a href={needUrl(need.id, viewOwner)} class="link link-hover text-sm">
-            {t('muse.FOR_NEED', { need: need.name })}
-          </a>
+          <NeedLink name={need.name} href={needUrl(need.id, viewOwner)} />
         )}
         {garment.status === 'wishlist' && (
           <PriceAgainstBudget
@@ -110,7 +109,6 @@ export function SuggestionSection(props: {
             picks={need.picks.filter(
               (pick) => pick.id !== garment.id && isOpenPick(pick),
             )}
-            needName={need.name}
             compare={needUrl(need.id, viewOwner)}
             viewOwner={viewOwner}
           />
@@ -168,14 +166,6 @@ function Decisions(props: {
   const { garment, suggestion, state, self } = props;
   const { need } = suggestion;
   const bought = garmentUrl(garment.id, undefined, '/bought');
-  const boughtDifferent = need && (
-    <a
-      href={wardrobeUrl(undefined, { forNeed: need.id }, '/wardrobe/new')}
-      class="btn btn-ghost btn-sm"
-    >
-      {t('muse.BOUGHT_DIFFERENT')}
-    </a>
-  );
   switch (state) {
     case 'open':
       return (
@@ -196,7 +186,6 @@ function Decisions(props: {
                 {t('wishlist.BOUGHT_IT')}
               </a>
             )}
-            {boughtDifferent}
             <NotForMe
               action={garmentUrl(garment.id, undefined, '/dismiss')}
               returnTo={self}
@@ -211,7 +200,6 @@ function Decisions(props: {
             {t('wishlist.BOUGHT_IT')}
           </a>
           <div class="flex flex-wrap items-start gap-1">
-            {boughtDifferent}
             {need && (
               <UndoForm
                 action={needUrl(need.id, undefined, '/undo')}
@@ -248,16 +236,13 @@ function Decisions(props: {
 /** The need's other open options, each to its own page, and the way to compare them. */
 function OtherOptions(props: {
   picks: readonly MusePick[];
-  needName: string;
   compare: string;
   viewOwner: number | undefined;
 }) {
   if (props.picks.length === 0) return null;
   return (
     <div class="flex flex-col gap-2 border-t border-base-300 pt-3">
-      <p class="text-sm font-medium">
-        {t('muse.OTHER_OPTIONS', { need: props.needName })}
-      </p>
+      <p class="text-sm font-medium">{t('muse.OTHER_OPTIONS')}</p>
       <ul class="grid grid-cols-4 gap-2" data-other-options="">
         {props.picks.map((pick) => (
           <li>

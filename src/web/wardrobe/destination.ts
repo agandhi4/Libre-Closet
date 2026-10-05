@@ -11,7 +11,7 @@ import {
   requireCandidateRoom,
 } from '../plans/candidates';
 import { decide } from '../wishlist/decisions';
-import { findOpenNeed, type NeedBoughtFor } from '../wishlist/inbox';
+import { findNeedToBuyFor, type NeedBoughtFor } from '../wishlist/inbox';
 import { decideOrderItem, findPendingOrderItem } from './order-mail/queries';
 import type { WithGarment } from './writes';
 import { findGarment, type GarmentDetail } from './queries';
@@ -59,9 +59,10 @@ export async function resolveCandidateFor(
 
 /**
  * The Muse need `needId` a new closet garment is bought for ("Bought a
- * different one", #333): the requester's own open need, in their own
- * wardrobe (decisions are the owner's); anything else a 404 like an
- * unknown id, before anything is stored.
+ * different one", #333): the requester's own need still to buy for (open,
+ * or chosen and unbought), in their own wardrobe (decisions are the
+ * owner's); anything else a 404 like an unknown id, before anything is
+ * stored. decide checks it again under the owner lock (a 409 then).
  */
 async function resolveNeed(
   db: Db,
@@ -69,7 +70,7 @@ async function resolveNeed(
   access: WardrobeAccess,
 ): Promise<NeedBoughtFor> {
   const need = access.isOwner
-    ? await findOpenNeed(db, access.ownerId, needId)
+    ? await findNeedToBuyFor(db, access.ownerId, needId)
     : undefined;
   if (!need) throw new HttpError(404, 'Need not found');
   return need;

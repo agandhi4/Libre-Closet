@@ -166,15 +166,51 @@ describe('the Muse inbox', () => {
       expect(html).not.toContain(`data-need="${asideNeed}"`);
     });
 
-    it('counts what each option unlocks, and sorts the options by it', async () => {
+    it('says what each option unlocks once when they all unlock the same, on each when they differ', async () => {
+      // Shoes and a scarf: closet bottoms and tops make them differ.
+      const differ = await need('Something for autumn');
+      await pick('Suede loafers', differ, { category: 'footwear' });
+      await pick('Wool scarf', differ, { category: 'accessories' });
+      const same = await need('A second white tee');
+      await pick('White tee A', same);
+      await pick('White tee B', same);
       const html = (await get('/wardrobe/wishlist')).body;
-      const card = html.slice(html.indexOf(`data-need="${blazers}"`));
-      const counts = [...card.matchAll(/data-unlocks="(\d+)\+?"/g)]
-        .slice(0, 2)
-        .map((m) => Number(m[1]));
+      const cardOf = (id: number) => {
+        const start = html.indexOf(`data-need="${id}"`);
+        return html.slice(
+          start,
+          html.indexOf('</li>\n', start) + 1 || undefined,
+        );
+      };
+      const chips = (card: string) =>
+        [...card.matchAll(/data-unlocks="(\d+)\+?"/g)].map((m) => Number(m[1]));
+      const sameCard = html.slice(
+        html.indexOf(`data-need="${same}"`),
+        html.indexOf('Compare and choose', html.indexOf(`data-need="${same}"`)),
+      );
+      expect(sameCard).toMatch(/data-unlocks-each="\d+\+?"/);
+      expect(chips(sameCard)).toEqual([]);
+      const differCard = html.slice(
+        html.indexOf(`data-need="${differ}"`),
+        html.indexOf(
+          'Compare and choose',
+          html.indexOf(`data-need="${differ}"`),
+        ),
+      );
+      expect(differCard).not.toContain('data-unlocks-each');
+      const counts = chips(differCard);
       expect(counts).toHaveLength(2);
-      expect(counts[0]).toBeGreaterThanOrEqual(counts[1]);
-      expect(counts[0]).toBeGreaterThan(0);
+      // Most unlocks first.
+      expect(counts[0]).toBeGreaterThan(counts[1]);
+      void cardOf;
+      for (const id of [differ, same]) {
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-group',
+          groupId: id,
+          reason: 'not_now',
+          note: null,
+        });
+      }
     });
 
     it('is two statements: the session, and one for every section and the unlocks', async () => {
@@ -241,6 +277,33 @@ describe('the Muse inbox', () => {
       expect(page).toContain('Navy blazer');
       expect(page).not.toContain('/choose"');
       expect(page).not.toContain('data-unlocks');
+    });
+  });
+
+  describe('an inbox with only what was set aside', () => {
+    it('still lists it under the empty state, to be undone', async () => {
+      const cookie = await t.register('aside-only@example.com');
+      const asideOwner = await userIdOf(t, 'aside-only@example.com');
+      const [row] = await t.db
+        .insert(optionGroup)
+        .values({ ownerId: asideOwner, name: 'A trench coat' })
+        .returning({ id: optionGroup.id });
+      expect(
+        (
+          await decide(t.db, asideOwner, {
+            kind: 'dismiss-group',
+            groupId: row.id,
+            reason: 'not_now',
+            note: null,
+          })
+        ).ok,
+      ).toBe(true);
+      const html = unescapeHtml((await get('/wardrobe/wishlist', cookie)).body);
+      expect(html).toContain('Nothing on the wishlist yet');
+      expect(html).toContain(`data-set-aside="need:${row.id}"`);
+      expect(html).toContain(
+        `action="/wardrobe/wishlist/needs/${row.id}/undo"`,
+      );
     });
   });
 
@@ -491,6 +554,86 @@ describe('the Muse inbox', () => {
     });
   });
 
+  describe('Bought a different one on a chosen need', () => {
+    it('is offered beside Bought it, and settles the need, setting the chosen pick aside', async () => {
+      const id = await need('A weekend bag');
+      const chosen = await pick('Canvas holdall', id, { category: 'bags' });
+      await post(`/wardrobe/${chosen}/choose`);
+      const page = unescapeHtml(
+        (await get(`/wardrobe/wishlist/needs/${id}`)).body,
+      );
+      const card = page.slice(page.indexOf(`data-option="${chosen}"`));
+      expect(card).toMatch(
+        new RegExp(
+          `/wardrobe/${chosen}/bought"[\\s\\S]*?/wardrobe/new\\?forNeed=${id}"`,
+        ),
+      );
+      // Prefilled from the chosen pick.
+      const form = await get(`/wardrobe/new?forNeed=${id}`);
+      expect(form.statusCode).toBe(200);
+      expect(unescapeHtml(form.body)).toContain('value="bags"');
+
+      const res = await post('/wardrobe', {
+        name: 'Leather holdall',
+        category: 'bags',
+        forNeed: String(id),
+      });
+      expect(res.statusCode).toBe(302);
+      const bought = Number(
+        /\/wardrobe\/(\d+)/.exec(String(res.headers.location))![1],
+      );
+      expect((await groupRow(id)).resolvedGarmentId).toBe(bought);
+      expect((await garmentRow(t, chosen))?.dismissedReason).toBe(
+        'chose_another',
+      );
+    });
+
+    it('settles a need once when two phones post a different one together: one garment, the other a 409', async () => {
+      const id = await need('A belt bag');
+      await pick('Nylon belt bag', id, { category: 'bags' });
+      const before = await t.db.$count(garment);
+      const [a, b] = await Promise.all(
+        ['Sling bag', 'Waist pack'].map((name) =>
+          post('/wardrobe', { name, category: 'bags', forNeed: String(id) }),
+        ),
+      );
+      // The loser is refused before anything is stored (404: settled by
+      // the time it looked) or by decide under the owner lock (409).
+      const [won, lost] = [a.statusCode, b.statusCode].sort();
+      expect(won).toBe(302);
+      expect([404, 409]).toContain(lost);
+      // The refused one rolled back with its garment.
+      expect(await t.db.$count(garment)).toBe(before + 1);
+      const settled = await groupRow(id);
+      const [winner] = [a, b].filter((res) => res.statusCode === 302);
+      expect(String(winner.headers.location)).toContain(
+        `/wardrobe/${settled.resolvedGarmentId}?`,
+      );
+    });
+
+    it('takes one of two different ones decided at once, under the owner lock', async () => {
+      const id = await need('A tote');
+      await pick('Canvas tote', id, { category: 'bags' });
+      const [first, second] = await Promise.all(
+        ['Leather tote', 'Nylon tote'].map((name) =>
+          createGarment(t, { name, category: 'bags' }),
+        ),
+      );
+      const outcomes = await Promise.all(
+        [first, second].map((garmentId) =>
+          decide(t.db, ownerId, { kind: 'bought', garmentId, groupId: id }),
+        ),
+      );
+      expect(outcomes.map((o) => o.ok).sort()).toEqual([false, true]);
+      expect(outcomes.find((o) => !o.ok)).toEqual({
+        ok: false,
+        reason: 'not-allowed',
+      });
+      const settled = await groupRow(id);
+      expect([first, second]).toContain(settled.resolvedGarmentId);
+    });
+  });
+
   describe('the decision screen (C)', () => {
     let id: number;
     let first: number;
@@ -514,7 +657,7 @@ describe('the Muse inbox', () => {
       expect(html).toContain(`data-option="${second}"`);
       expect(html).toContain('data-budget="within"');
       expect(html).toContain('data-budget="over"');
-      expect(html).toContain('data-unlocks=');
+      expect(html).toMatch(/data-unlocks(-each)?="\d+\+?"/);
       expect(html).toContain(`action="/wardrobe/${first}/choose"`);
       expect(html).toContain(`action="/wardrobe/${second}/dismiss"`);
       expect(html).toContain('value="too_pricey"');

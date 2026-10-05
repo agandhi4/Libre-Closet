@@ -18,7 +18,7 @@ import {
   wardrobeUrl,
   WISHLIST_PATH,
 } from '../wardrobe/urls';
-import type { NeedDetail, MusePick } from './inbox';
+import { type MusePick, type NeedDetail, sharedUnlocks } from './inbox';
 import { Unlocks } from './inbox-page';
 import {
   ChooseForm,
@@ -88,6 +88,8 @@ export function NeedPage(props: { ctx: ViewContext; model: NeedPageModel }) {
       ? need.picks.find((pick) => pick.id === need.resolvedGarmentId)
       : undefined;
   const shown = chosen ? [chosen] : need.status === 'open' ? options : [];
+  // The same count on every option decides nothing: said once, in the facts.
+  const shared = sharedUnlocks(shown, model.detail.judged);
   return (
     <Layout ctx={ctx} title={need.name}>
       <AppBar
@@ -101,7 +103,11 @@ export function NeedPage(props: { ctx: ViewContext; model: NeedPageModel }) {
             <FromAgent agent={need.agent} />
             <NeedState model={model} chosen={chosen} />
           </div>
-          <NeedFacts budget={need.budget} options={options.length} />
+          <NeedFacts
+            budget={need.budget}
+            options={options.length}
+            unlocks={shared}
+          />
           {need.note && (
             <details class="text-sm">
               <summary class="link link-hover text-muted">
@@ -135,6 +141,7 @@ export function NeedPage(props: { ctx: ViewContext; model: NeedPageModel }) {
                       : pick.id === model.option
                   }
                   self={self}
+                  showUnlocks={!shared}
                 />
               ))}
             </SnapStrip>
@@ -149,16 +156,7 @@ export function NeedPage(props: { ctx: ViewContext; model: NeedPageModel }) {
         <SetAsidePicks model={model} picks={setAside} self={self} />
         {model.isOwner && need.status === 'open' && (
           <footer class="flex flex-wrap items-start gap-2 border-t border-base-300 pt-4">
-            <a
-              href={wardrobeUrl(
-                undefined,
-                { forNeed: need.id },
-                '/wardrobe/new',
-              )}
-              class="btn btn-ghost btn-sm"
-            >
-              {t('muse.BOUGHT_DIFFERENT')}
-            </a>
+            <BoughtDifferent needId={need.id} />
             <NotForMe
               action={needUrl(need.id, undefined, '/dismiss')}
               returnTo={self}
@@ -170,6 +168,22 @@ export function NeedPage(props: { ctx: ViewContext; model: NeedPageModel }) {
       <DecisionToastView toast={model.toast} />
       <Dock ctx={ctx} />
     </Layout>
+  );
+}
+
+/**
+ * "Bought a different one": the closet form for this need (`?forNeed=`).
+ * The need's, so on C only: in its foot while open, beside Bought it once
+ * a pick is chosen.
+ */
+function BoughtDifferent({ needId }: { needId: number }) {
+  return (
+    <a
+      href={wardrobeUrl(undefined, { forNeed: needId }, '/wardrobe/new')}
+      class="btn btn-ghost btn-sm self-start"
+    >
+      {t('muse.BOUGHT_DIFFERENT')}
+    </a>
   );
 }
 
@@ -228,6 +242,7 @@ function OptionCard(props: {
   chosen: boolean;
   selected: boolean;
   self: string;
+  showUnlocks: boolean;
 }) {
   const { model, pick, chosen, self } = props;
   const { need, judged, brandSizes } = model.detail;
@@ -243,7 +258,7 @@ function OptionCard(props: {
       })}
       data-option={String(pick.id)}
     >
-      <div class="card-body p-3 gap-2">
+      <div class="card-body p-3 gap-2 flex-1">
         {pick.photo ? (
           <button
             type="button"
@@ -265,17 +280,25 @@ function OptionCard(props: {
           {pick.brand && <p class="text-sm text-muted">{pick.brand}</p>}
         </div>
         <PriceAgainstBudget price={pick.price} budget={need.budget} />
-        {model.isOwner && <Unlocks count={best} />}
+        {model.isOwner && props.showUnlocks && <Unlocks count={best} />}
         {brandSizes && (
-          <BrandSizeNote note={brandSizes(pick.brand)} size="text-xs" />
+          <BrandSizeNote note={brandSizes(pick.brand)} size="text-xs" clamp />
         )}
         {pick.note && (
           <p class="text-sm line-clamp-2" data-pick-note="">
             {pick.note}
           </p>
         )}
-        <OptionActions model={model} pick={pick} chosen={chosen} self={self} />
-        {best && <BestOutfitRows best={best} pickId={pick.id} />}
+        {/* At the card's foot, so This one lines up across the columns. */}
+        <div class="mt-auto flex flex-col gap-2">
+          <OptionActions
+            model={model}
+            pick={pick}
+            chosen={chosen}
+            self={self}
+          />
+          {best && <BestOutfitRows best={best} pickId={pick.id} />}
+        </div>
       </div>
     </article>
   );
@@ -310,6 +333,7 @@ function OptionActions(props: {
           {t('wishlist.BOUGHT_IT')}
         </a>
       )}
+      {chosen && model.isOwner && <BoughtDifferent needId={need.id} />}
       <div class="flex flex-wrap items-start gap-1">
         {pick.sourceUrl && (
           <a

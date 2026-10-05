@@ -20,6 +20,13 @@ import { type MuseSeed, seedMuseInbox } from './support/seed-muse';
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1440, height: 900 };
 
+/**
+ * The phone as a phone: a touch screen, so the page's `fine` variant (the
+ * snap strip's step buttons, a mouse's) is off as on a real one.
+ */
+const PHONE_DEVICE = { viewport: PHONE, hasTouch: true, isMobile: true };
+const DESKTOP_DEVICE = { viewport: DESKTOP };
+
 let seed: MuseSeed;
 let email: string;
 
@@ -31,13 +38,7 @@ test.beforeAll(async () => {
 });
 
 async function shoot(page: Page, testInfo: TestInfo, name: string) {
-  // Lazy images below the fold load before a full-page shot, and the
-  // phone's fixed dock goes to the page's end: a full-page capture would
-  // otherwise draw it across the middle of the page.
-  await page.addStyleTag({
-    content:
-      '@media (width < 64rem) { .dock { position: static !important; } }',
-  });
+  // Lazy images below the fold load before the shot.
   await page.evaluate(async () => {
     for (const img of document.querySelectorAll('img')) {
       img.loading = 'eager';
@@ -48,8 +49,18 @@ async function shoot(page: Page, testInfo: TestInfo, name: string) {
         .map((img) => img.decode().catch(() => undefined)),
     );
   });
+  // The page's whole height as the viewport, not `fullPage`: Chromium's
+  // full-page capture drops the touch emulation for the shot, so the
+  // phone would be drawn with a mouse's controls (the strip's steps). The
+  // fixed dock lands at the foot, over the page's own bottom padding.
+  const viewport = page.viewportSize()!;
+  const height = await page.evaluate(
+    () => document.documentElement.scrollHeight,
+  );
+  await page.setViewportSize({ width: viewport.width, height });
   const path = testInfo.outputPath(`muse-${name}.png`);
-  await page.screenshot({ path, fullPage: true });
+  await page.screenshot({ path });
+  await page.setViewportSize(viewport);
   await testInfo.attach(`muse-${name}.png`, { path, contentType: 'image/png' });
 }
 
@@ -59,12 +70,17 @@ function noSideScroll(page: Page, width: number) {
     .toBeLessThanOrEqual(width);
 }
 
-for (const [label, viewport] of [
-  ['390', PHONE],
-  ['1440', DESKTOP],
+for (const [label, device] of [
+  ['390', PHONE_DEVICE],
+  ['1440', DESKTOP_DEVICE],
 ] as const) {
+  const { viewport } = device;
   test.describe(`at ${label} px`, () => {
-    test.use({ viewport });
+    test.skip(
+      ({ browserName }) => browserName === 'firefox' && 'isMobile' in device,
+      'Firefox cannot emulate a phone (isMobile): the phone shots are Chromium’s and WebKit’s',
+    );
+    test.use(device);
 
     test('the inbox: Ready to buy, Muse’s picks, your wishlist, still looking, set aside', async ({
       page,
@@ -79,7 +95,9 @@ for (const [label, viewport] of [
       );
       const blazer = page.locator(`[data-need="${seed.needs[0]}"]`);
       await expect(blazer).toContainText('A navy unstructured blazer');
-      await expect(blazer.locator('[data-unlocks]').first()).toBeVisible();
+      await expect(
+        blazer.locator('[data-unlocks], [data-unlocks-each]').first(),
+      ).toBeVisible();
       await expect(
         page.locator('[data-inbox-section="still-looking"]'),
       ).toContainText('A light rain shell');
@@ -110,9 +128,11 @@ for (const [label, viewport] of [
         expect(second!.x).toBeGreaterThan(first!.x + first!.width - 1);
         await expect(page.locator('[data-snap-step]').first()).toBeHidden();
       } else {
-        // A phone: one card centred, the next peeking.
+        // A phone: one card centred, the next peeking, and no step buttons
+        // over it (a touch screen swipes).
         const width = (await options.first().boundingBox())!.width;
         expect(width).toBeLessThan(viewport.width * 0.9);
+        await expect(page.locator('[data-snap-step]').first()).toBeHidden();
       }
       await noSideScroll(page, viewport.width);
       await shoot(page, testInfo, `decision-${label}`);
@@ -127,7 +147,9 @@ for (const [label, viewport] of [
       await page.goto(`/wardrobe/${seed.options[0][0]}`);
       const section = page.locator('[data-suggestion-state="open"]');
       await expect(section).toContainText('From Muse');
-      await expect(section).toContainText('For A navy unstructured blazer');
+      await expect(section.locator('[data-need-link]')).toContainText(
+        'A navy unstructured blazer',
+      );
       await expect(
         section.getByRole('button', { name: 'This one' }),
       ).toBeVisible();

@@ -1,3 +1,4 @@
+import type { OutfitCount } from '../../wardrobe/goes-with';
 import { budgetFit } from '../../wardrobe/shopping';
 import {
   type DismissReason,
@@ -5,6 +6,7 @@ import {
 } from '../../wardrobe/suggestions';
 import { PostForm } from '../auth/form';
 import { imageUrl, type SignablePhotoRef } from '../files/image-url';
+import { unlocksText } from '../gallery/goes-with';
 import { t } from '../i18n';
 import { HangerIcon, SavedToast, StripFlags } from '../layout/parts';
 import { priceLabel } from '../wardrobe/garment';
@@ -163,19 +165,54 @@ export function PriceAgainstBudget(props: {
   );
 }
 
-/** "Up to $300 · 3 options": a need's budget and how many options are open. */
+/**
+ * "Up to $300 · 3 options", and "Unlocks 50+ outfits each" when every
+ * option unlocks the same (sharedUnlocks): a need's budget, how many
+ * options are open, and the count once instead of on each option.
+ */
 export function NeedFacts(props: {
   budget: string | null;
   options: number;
+  unlocks?: OutfitCount;
   class?: string;
 }) {
+  const { unlocks } = props;
   const facts = [
     props.budget && t('muse.UP_TO', { price: priceLabel(props.budget) }),
     props.options === 1
       ? t('muse.OPTIONS_ONE')
       : t('muse.OPTIONS', { count: props.options }),
+    unlocks &&
+      (props.options === 1
+        ? unlocksText(unlocks)
+        : t('muse.EACH', { unlocks: unlocksText(unlocks) })),
   ].filter(Boolean);
-  return <p class={props.class ?? 'text-sm text-muted'}>{facts.join(' · ')}</p>;
+  return (
+    <p
+      class={props.class ?? 'text-sm text-muted'}
+      data-unlocks-each={
+        unlocks && `${unlocks.outfits}${unlocks.capped ? '+' : ''}`
+      }
+    >
+      {facts.join(' · ')}
+    </p>
+  );
+}
+
+/**
+ * The need a product is for: a muted label, then its name as a link to its
+ * decision screen (a need's name is a phrase of its own, "A navy blazer",
+ * never spliced into a sentence).
+ */
+export function NeedLink(props: { name: string; href: string }) {
+  return (
+    <p class="text-xs" data-need-link="">
+      <span class="text-muted uppercase tracking-wide">{t('muse.NEED')}</span>{' '}
+      <a href={props.href} class="link link-hover break-words">
+        {props.name}
+      </a>
+    </p>
+  );
 }
 
 /**

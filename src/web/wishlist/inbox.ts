@@ -319,6 +319,27 @@ export interface Inbox {
   brandSizes: BrandSizeLookup | undefined;
 }
 
+/**
+ * The one count every option shares, when they all unlock the same (a
+ * closet past OUTFIT_COUNT_CAP makes most "50+"): said once for the need
+ * rather than on every option, where it decides nothing. Undefined when
+ * they differ, or with no unlocks (a grantee).
+ */
+export function sharedUnlocks(
+  options: readonly MusePick[],
+  unlocks: ReadonlyMap<number, OutfitCount> | undefined,
+): OutfitCount | undefined {
+  const counts = options.map((pick) => unlocks?.get(pick.id));
+  const [first] = counts;
+  if (!first) return undefined;
+  return counts.every(
+    (count) =>
+      count?.outfits === first.outfits && count.capped === first.capped,
+  )
+    ? first
+    : undefined;
+}
+
 /** A count to sort by: "50+" above 50. */
 function countValue(count: OutfitCount | undefined): number {
   if (!count) return -1;
@@ -517,20 +538,23 @@ export function needsToDecideSql(ownerId: number): SQL<NeedsToDecide | null> {
   )`;
 }
 
-/** An open need a different garment was bought for, and its pick to prefill the form from. */
+/** A need a different garment was bought for, and the pick to prefill the form from. */
 export interface NeedBoughtFor {
   id: number;
   name: string;
-  /** Its best open pick (Muse's rank first), or null when none is left. */
+  /** The chosen pick, else its best open one (Muse's rank first); null when none is left. */
   pickId: number | null;
 }
 
 /**
- * The owner's open need `groupId` (undefined when it is not theirs or not
- * open): "Bought a different one" (src/web/wardrobe/destination.ts). One
- * statement.
+ * The owner's need `groupId` while it is still to buy for (undefined when
+ * it is not theirs, or settled or set aside): open, or chosen and the pick
+ * not bought yet, the rule of the machine's stillToBuy
+ * (src/wardrobe/suggestions.ts), which decide applies again under the
+ * owner lock. "Bought a different one" (src/web/wardrobe/destination.ts).
+ * One statement.
  */
-export async function findOpenNeed(
+export async function findNeedToBuyFor(
   db: Queryable,
   ownerId: number,
   groupId: number,
@@ -543,7 +567,8 @@ export async function findOpenNeed(
         'pickId', (
           select ${garment.id} from ${garment}
           where ${and(eq(garment.suggestionGroupId, optionGroup.id), wanted())}
-          order by ${garment.suggestionRank} nulls last, ${garment.id}
+          order by ${garment.id} = ${optionGroup.resolvedGarmentId} desc nulls last,
+            ${garment.suggestionRank} nulls last, ${garment.id}
           limit 1
         )
       )
@@ -551,7 +576,8 @@ export async function findOpenNeed(
       where ${and(
         eq(optionGroup.id, groupId),
         eq(optionGroup.ownerId, ownerId),
-        eq(optionGroup.status, 'open'),
+        sql`${optionGroup.status} <> 'dismissed'`,
+        inInbox,
       )}
     )`,
   });
