@@ -1,5 +1,6 @@
 import { categoryRole, type GarmentRole } from '../../wardrobe/properties';
 import { type SignablePhotoRef, imageUrl } from '../files/image-url';
+import { viewerTrigger } from '../files/photo-viewer';
 import { t } from '../i18n';
 import { HangerIcon } from '../layout/parts';
 
@@ -120,6 +121,12 @@ export function OutfitCollage(props: {
   /** The first card on a page: its images load at once. */
   eager?: boolean;
   size?: CollageSize;
+  /**
+   * A photo viewer set (PhotoSet) whose id makes each photo a button that
+   * opens it (#313). Only where the collage is not itself inside a link or
+   * button.
+   */
+  viewerSet?: string;
 }) {
   const { garments, eager = false } = props;
   const size = props.size ?? 'card';
@@ -135,6 +142,7 @@ export function OutfitCollage(props: {
       garment={garment}
       class={height}
       eager={eager}
+      viewerSet={props.viewerSet}
       labelled={size === 'card'}
       words={size !== 'thumb' && size !== 'cell' && size !== 'cover'}
     />
@@ -178,6 +186,7 @@ function CollagePiece(props: {
   garment: CollagePieceView;
   class: string;
   eager: boolean;
+  viewerSet: string | undefined;
   labelled: boolean;
   words: boolean;
 }) {
@@ -226,13 +235,23 @@ function CollageFace(props: {
   garment: CollagePieceView;
   class: string;
   eager: boolean;
+  viewerSet: string | undefined;
   labelled: boolean;
 }) {
   const { garment } = props;
+  const viewer =
+    props.viewerSet && garment.photo
+      ? {
+          ...viewerTrigger(props.viewerSet, garment.photo),
+          role: 'button',
+          tabindex: '0',
+        }
+      : {};
   return garment.photo ? (
     <img
       src={imageUrl(garment.photo, 'thumb')}
       alt={garment.name ?? ''}
+      {...viewer}
       class={`${props.class} w-auto max-w-full aspect-square object-contain`}
       width="200"
       height="200"
