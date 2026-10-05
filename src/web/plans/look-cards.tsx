@@ -36,7 +36,7 @@ export function PlanLookCards({ looks }: { looks: LookGroups }) {
         <section class="flex flex-col gap-3" aria-labelledby="plan-looks-title">
           <div class="flex flex-col gap-0.5">
             <h2 id="plan-looks-title" class="font-semibold">
-              {t('plans.looks.TITLE')}{' '}
+              {t('plans.looks.PANEL_TITLE')}{' '}
               <span class="font-normal text-muted">· {looks.strip.length}</span>
             </h2>
             <p class="text-xs text-muted">{t('plans.looks.PLAN_HINT')}</p>
@@ -46,19 +46,24 @@ export function PlanLookCards({ looks }: { looks: LookGroups }) {
       )}
       <LooksFold
         id="plan-looks-revise"
-        title={t('plans.looks.REVISE')}
+        title={t('plans.looks.PANEL_WAITING')}
         hint={t('plans.REVISE_HINT')}
         looks={looks.revise}
       />
       <LooksFold
         id="plan-looks-declined"
-        title={t('plans.looks.DECLINED')}
+        title={t('plans.looks.PANEL_TURNED_DOWN')}
         hint={t('plans.DECLINED_HINT')}
         looks={looks.declined}
       />
     </>
   );
 }
+
+// Pieces in one row of small tiles on a phone (a look is ~3.5 pieces, and
+// eight looks of two big rows each are 4,000 px); the big two-column grid
+// from `sm`. The viewer is the detail on a phone.
+const PIECE_GRID = 'grid grid-cols-4 gap-1.5 sm:grid-cols-2 sm:gap-3';
 
 function LookGrid(props: {
   id?: string;
@@ -129,7 +134,7 @@ function LookCard(props: { look: PlanLookView; eager: boolean }) {
           </p>
         )}
       </div>
-      <ul class="grid grid-cols-2 gap-3">
+      <ul class={PIECE_GRID}>
         {look.slots.map((slot) => (
           <PieceTile slot={slot} eager={props.eager} />
         ))}
@@ -149,15 +154,15 @@ function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
     <li class="flex flex-col gap-1.5" data-piece-state={slot.state}>
       {slot.state === 'missing' ? (
         <div
-          class="aspect-square rounded-box border border-dashed border-warning flex items-center justify-center p-2"
+          class="aspect-square rounded-box border border-dashed border-warning flex items-center justify-center p-1 sm:p-2"
           data-missing-piece=""
         >
-          <span class="text-xs text-warning text-center">
+          <span class="text-[0.625rem] sm:text-xs text-warning text-center">
             {t('plans.looks.MISSING')}
           </span>
         </div>
       ) : (
-        <div class="relative aspect-square overflow-hidden rounded-box bg-base-200 flex items-center justify-center p-2">
+        <div class="relative aspect-square overflow-hidden rounded-box bg-base-200 flex items-center justify-center p-1 sm:p-2">
           {slot.photo ? (
             <img
               src={imageUrl(slot.photo, 'thumb')}
@@ -173,7 +178,7 @@ function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
           )}
           {slot.state === 'to-buy' && (
             <span
-              class="badge badge-accent badge-sm absolute bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap"
+              class="badge badge-accent badge-xs sm:badge-sm absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap"
               data-to-buy=""
             >
               {t('plans.looks.TO_BUY')}
@@ -181,7 +186,9 @@ function PieceTile(props: { slot: LookSlotView; eager: boolean }) {
           )}
         </div>
       )}
-      <p class="text-sm leading-snug line-clamp-2 break-words">{name}</p>
+      <p class="text-xs sm:text-sm leading-snug truncate sm:whitespace-normal sm:line-clamp-2 sm:break-words">
+        {name}
+      </p>
     </li>
   );
 }
@@ -215,7 +222,11 @@ function MoveButton(props: {
 function LookMoves({ look }: { look: PlanLookView }) {
   return (
     <div class="flex flex-wrap items-center gap-2">
-      <LookSaveAction look={look} plain />
+      <LookSaveAction
+        look={look}
+        plain
+        buttonClass={`btn btn-sm ${look.reaction === 'loved' ? 'btn-primary' : 'btn-outline'}`}
+      />
       {look.reaction === 'declined' ? (
         <MoveButton look={look} move="/reconsider" class="btn-outline">
           {t('plans.RECONSIDER')}

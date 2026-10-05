@@ -244,6 +244,7 @@ export function LooksApart(props: {
 export function LookSaveAction({
   look,
   plain = false,
+  buttonClass = 'btn btn-xs btn-primary',
 }: {
   look: Pick<
     PlanLookView,
@@ -251,6 +252,8 @@ export function LookSaveAction({
   >;
   /** Not in a snap strip: no `data-strip-action` (that hides it off-centre). */
   plain?: boolean;
+  /** The save button's classes; the plan page's cards size and rank it. */
+  buttonClass?: string;
 }) {
   const stripAction = (action: string) =>
     plain ? {} : { 'data-strip-action': action };
@@ -271,7 +274,7 @@ export function LookSaveAction({
         <PostForm action={lookUrl(look.planId, look.id, '/save')} needsNetwork>
           <button
             type="submit"
-            class="btn btn-xs btn-primary"
+            class={buttonClass}
             data-save-look={String(look.id)}
             {...stripAction('save')}
           >

@@ -292,6 +292,11 @@ function PlanViewTabs(props: {
   outfits: number;
 }) {
   const counts = { items: props.items, outfits: props.outfits };
+  // What the number counts: both panels' every entry, collapsed sections too.
+  const titles = {
+    items: t('plans.VIEW_ITEMS_COUNTS'),
+    outfits: t('plans.VIEW_OUTFITS_COUNTS'),
+  };
   const labels = {
     items: t('plans.VIEW_ITEMS'),
     outfits: t('plans.VIEW_OUTFITS'),
@@ -310,6 +315,7 @@ function PlanViewTabs(props: {
           id={`plan-view-${view}`}
           class="tab"
           aria-label={`${labels[view]} ${counts[view]}`}
+          title={titles[view]}
           data-view={view}
           checked={props.view === view}
         />
