@@ -319,12 +319,7 @@ export async function buyCandidate(
       // A suggestion bought settles its option group: resolved by it, its
       // other open picks set aside as "chose another" (#333). Not one: the
       // writer finds no group and writes nothing.
-      const settled = await decide(
-        tx,
-        ownerId,
-        { garmentId },
-        { kind: 'bought', garmentId },
-      );
+      const settled = await decide(tx, ownerId, { kind: 'bought', garmentId });
 
       const adjusted: number[] = [];
       const adjust = itemIds.filter((id) => followUps.adjustItems.includes(id));
@@ -361,9 +356,11 @@ export async function buyCandidate(
       const kept: number[] = [];
       for (const id of new Set(followUps.removeCandidates)) {
         if (!others.includes(id)) continue;
+        // A suggestion is never deleted (deleteGarment refuses it): the
+        // purchase's decide above already set it aside as chose_another.
         const deleted = await deleteGarment(tx, id, ownerId, 'wishlist');
-        if (deleted === undefined) kept.push(id);
-        else removed.push({ id, photo: deleted.photo });
+        if (deleted.ok) removed.push({ id, photo: deleted.photo });
+        else if (deleted.reason === 'not-found') kept.push(id);
       }
       return {
         ok: true as const,

@@ -46,12 +46,15 @@ ALTER TABLE "garment" ADD CONSTRAINT "garment_suggestion_note_check" CHECK ("gar
 ALTER TABLE "garment" ADD CONSTRAINT "garment_suggestion_rank_check" CHECK ("garment"."suggestion_rank" between 1 and 5);--> statement-breakpoint
 ALTER TABLE "garment" ADD CONSTRAINT "garment_dismissed_reason_check" CHECK ("garment"."dismissed_reason" in ('too_pricey', 'colour', 'style', 'already_have', 'fit_size', 'not_now', 'chose_another', 'returned'));--> statement-breakpoint
 ALTER TABLE "garment" ADD CONSTRAINT "garment_dismissed_check" CHECK ("garment"."dismissed_at" is not null or ("garment"."dismissed_reason" is null and "garment"."dismissed_note" is null));--> statement-breakpoint
--- Data (#333, docs/plans/2026-10-05-muse-suggestions.md section 8): wardrobe
--- plans' items become option groups, their candidates the groups'
--- suggestions (they are already wishlist garments), their rejections
--- dismissed suggestions. The plan tables are read, never changed: the plans
--- pages keep working until #337 removes them. Aborts, naming the problem,
--- on data these steps would map wrongly.
+-- Data (#333, docs/plans/2026-10-05-muse-suggestions.md section 8): the
+-- plans the owner's agent drafted (drafted_by_token_id set; owner decision,
+-- 2026-10-05: an owner's own plan, the demo persona's included, is left
+-- alone and its candidates stay plain wishlist items). Their items become
+-- option groups, their candidates the groups' suggestions (already
+-- wishlist garments), their rejections dismissed suggestions. The plan
+-- tables are read, never changed: the plans pages keep working until #337
+-- removes them. Aborts, naming the problem, on data these steps would map
+-- wrongly.
 DO $$
 BEGIN
   IF EXISTS (
@@ -59,29 +62,39 @@ BEGIN
     JOIN plan_item i ON i.id = c.plan_item_id
     JOIN wardrobe_plan p ON p.id = i.plan_id
     JOIN garment g ON g.id = c.garment_id
-    WHERE g.owner_id <> p.owner_id
+    WHERE p.drafted_by_token_id IS NOT NULL AND g.owner_id <> p.owner_id
   ) THEN
     RAISE EXCEPTION '0040: a plan candidate is not its plan owner''s garment';
   END IF;
   IF EXISTS (
-    SELECT 1 FROM plan_item_rejection WHERE url IS NOT NULL AND url !~* '^https?://'
+    SELECT 1 FROM plan_item_rejection r
+    JOIN plan_item i ON i.id = r.plan_item_id
+    JOIN wardrobe_plan p ON p.id = i.plan_id
+    WHERE p.drafted_by_token_id IS NOT NULL
+      AND r.url IS NOT NULL AND r.url !~* '^https?://'
   ) THEN
     RAISE EXCEPTION '0040: a plan rejection''s url is not an http(s) link';
   END IF;
 END $$;
 --> statement-breakpoint
--- Each item is one need: its name (else its type or category), budget, the
--- agent's note and the owner's, the agent's token from a drafted plan. A
--- declined item ("Don't buy") is a dismissed need; every other review state
--- is open (proposed and accepted alike: matching targets are retired). An
--- item without candidates is a need still being looked for. A garment
--- linked to several items (a duplicated plan copies its links) belongs to
--- the lowest item id's, the original; an item whose every candidate went
--- elsewhere is a copy and is left out.
-WITH claim AS (
-  SELECT garment_id, min(plan_item_id) AS plan_item_id
-  FROM plan_item_candidate GROUP BY garment_id
-)
+-- Each drafted item is one need: its name (else its type or category),
+-- budget, the agent's note and the owner's, the plan's token. A declined
+-- item ("Don't buy") is a dismissed need; every other review state is open
+-- (proposed and accepted alike: matching targets are retired). An item
+-- without candidates is a need still being looked for. A garment linked to
+-- several items belongs to one: the lowest plan id's (a duplicated plan
+-- copies its links, and the original is older), then the lowest item id's.
+-- An item every candidate of which belongs to another plan's item is that
+-- item's copy and is left out; two items of one plan sharing a garment
+-- both stay (the later one without it).
+CREATE TEMPORARY TABLE "muse_claim" ON COMMIT DROP AS
+  SELECT DISTINCT ON (c.garment_id) c.garment_id, c.plan_item_id, i.plan_id
+  FROM plan_item_candidate c
+  JOIN plan_item i ON i.id = c.plan_item_id
+  JOIN wardrobe_plan p ON p.id = i.plan_id
+  WHERE p.drafted_by_token_id IS NOT NULL
+  ORDER BY c.garment_id, i.plan_id, c.plan_item_id;
+--> statement-breakpoint
 INSERT INTO "option_group" (
   "owner_id", "name", "budget", "note", "suggested_by_token_id", "status",
   "dismissed_reason", "owner_note", "decided_at", "created_at", "plan_item_id"
@@ -96,23 +109,27 @@ SELECT p.owner_id,
   i.created_at, i.id
 FROM plan_item i
 JOIN wardrobe_plan p ON p.id = i.plan_id
-WHERE NOT EXISTS (SELECT 1 FROM plan_item_candidate c WHERE c.plan_item_id = i.id)
-  OR EXISTS (SELECT 1 FROM claim WHERE claim.plan_item_id = i.id)
+WHERE p.drafted_by_token_id IS NOT NULL
+  -- A copy: it has candidates, and none of them belongs to its own plan.
+  AND NOT (
+    EXISTS (SELECT 1 FROM plan_item_candidate c WHERE c.plan_item_id = i.id)
+    AND NOT EXISTS (
+      SELECT 1 FROM plan_item_candidate c
+      JOIN muse_claim claim ON claim.garment_id = c.garment_id
+      WHERE c.plan_item_id = i.id AND claim.plan_id = i.plan_id
+    )
+  )
 ORDER BY i.id;
 --> statement-breakpoint
--- Each candidate becomes its group's suggestion: the agent's note and rank,
--- the plan's token, and when it was linked.
-WITH claim AS (
-  SELECT garment_id, min(plan_item_id) AS plan_item_id
-  FROM plan_item_candidate GROUP BY garment_id
-)
+-- Each claimed candidate becomes its group's suggestion: the agent's note
+-- and rank, the plan's token, and when it was linked.
 UPDATE "garment" g SET
   "suggested_at" = c.created_at,
   "suggested_by_token_id" = og.suggested_by_token_id,
   "suggestion_group_id" = og.id,
   "suggestion_note" = c.note,
   "suggestion_rank" = c.rank
-FROM claim
+FROM muse_claim claim
 JOIN plan_item_candidate c
   ON c.plan_item_id = claim.plan_item_id AND c.garment_id = claim.garment_id
 JOIN "option_group" og ON og.plan_item_id = claim.plan_item_id
@@ -139,7 +156,8 @@ WHERE g.suggestion_group_id = og.id AND og.status = 'resolved'
 -- A rejected candidate ("Not this one") was deleted from the wishlist with
 -- it, leaving a snapshot: it comes back as a dismissed suggestion without a
 -- photo, its free-text reason as the note (no reason of the fixed set), so
--- the agent can still be kept from proposing it again.
+-- the agent can still be kept from proposing it again. Only a migrated
+-- item's (its group exists).
 INSERT INTO "garment" (
   "shareable_id", "name", "category", "brand", "source_url", "price",
   "owner_id", "status", "suggested_at", "suggested_by_token_id",

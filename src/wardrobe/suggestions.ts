@@ -18,14 +18,17 @@
  *                                                    other open picks chose_another
  *   dismiss-pick  an open or chosen pick             the pick dismissed (the
  *                                                    owner's reason); a chosen one
- *                                                    reopens its group
+ *                                                    reopens its group and restores
+ *                                                    the siblings it set aside
  *   undo-pick     a pick dismissed by the owner or   the pick open again
  *                 chose_another, its group open
  *   dismiss-group an open group                      group dismissed (reason, note)
  *   undo-group    a dismissed group, or one resolved group open; a choice's
  *                 by a pick still on the wishlist    chose_another siblings restored
+ *                 (or by a garment deleted since)
  *   bought        a garment bought for the group     group resolved by it; every
- *                 (a pick, or "a different one")     other open pick chose_another
+ *                 (a pick, or "a different one")     other open pick chose_another;
+ *                                                    a pick set aside is restored
  *   returned      the group's bought garment         it dismissed `returned`; the
  *                                                    group open again
  *
@@ -86,18 +89,38 @@ export interface PickState {
   dismissedReason: DismissReason | null;
 }
 
+/**
+ * A decision names what it is about: a garment (whose group is the one it
+ * is a pick of, or resolved), or, for a need's own decisions and "Bought a
+ * different one" (a garment that is none of its picks), the group.
+ */
 export type SuggestionDecision =
   | { kind: 'choose'; garmentId: number }
   | {
       kind: 'dismiss-pick';
       garmentId: number;
-      reason: OwnerDismissReason;
+      /**
+       * The owner's reason; chose_another when a plans page drops the
+       * unpicked options; null only for the plans review's "Not this one",
+       * whose reason is free text (the note) until plans go (#337).
+       */
+      reason: OwnerDismissReason | 'chose_another' | null;
       note: string | null;
     }
   | { kind: 'undo-pick'; garmentId: number }
-  | { kind: 'dismiss-group'; reason: OwnerDismissReason; note: string | null }
-  | { kind: 'undo-group' }
-  | { kind: 'bought'; garmentId: number }
+  | {
+      kind: 'dismiss-group';
+      groupId: number;
+      reason: OwnerDismissReason;
+      note: string | null;
+    }
+  | { kind: 'undo-group'; groupId: number }
+  | {
+      kind: 'bought';
+      garmentId: number;
+      /** For a different one: the group it was bought for. */
+      groupId?: number;
+    }
   | { kind: 'returned'; garmentId: number };
 
 /** The group's new state; `decided` stamps decided_at with the transaction's time, else clears it. */
@@ -112,7 +135,7 @@ export interface GroupChange {
 
 export interface Dismissal {
   garmentId: number;
-  reason: DismissReason;
+  reason: DismissReason | null;
   note: string | null;
 }
 
@@ -205,11 +228,18 @@ export function decideSuggestion(
   }
 }
 
-/** The group resolved by `garmentId`, every other open pick set aside. */
+/**
+ * The group resolved by `garmentId`, every other open pick set aside. The
+ * garment itself is no longer set aside if it was: chosen or bought, it is
+ * the answer (a pick bought from its page after another was chosen).
+ */
 function resolvedBy(
   picks: readonly PickState[],
   garmentId: number,
 ): DecisionOutcome {
+  const setAside = picks.some(
+    (pick) => pick.id === garmentId && pick.dismissedAt !== null,
+  );
   return {
     ok: true,
     group: {
@@ -219,8 +249,29 @@ function resolvedBy(
       dismissedReason: null,
     },
     dismiss: othersAside(picks, garmentId),
-    restore: [],
+    restore: setAside ? [garmentId] : [],
   };
+}
+
+/**
+ * The siblings a choice set aside: dismissed chose_another in its own
+ * transaction, so at the very time it stamped on the group, and still on
+ * the wishlist. What its undo, or the chosen pick's own dismissal,
+ * restores; not picks the owner set aside before.
+ */
+function choiceSiblings(
+  group: GroupState,
+  picks: readonly PickState[],
+): number[] {
+  const decidedAt = group.decidedAt?.getTime();
+  return picks
+    .filter(
+      (p) =>
+        p.wanted &&
+        p.dismissedReason === 'chose_another' &&
+        p.dismissedAt?.getTime() === decidedAt,
+    )
+    .map((p) => p.id);
 }
 
 /** The decisions about one of the group's garments. */
@@ -234,7 +285,8 @@ function decideOnPick(
   >,
 ): DecisionOutcome {
   // A chosen pick set aside, or a bought one returned, reopens its need.
-  const reopens = group?.resolvedGarmentId === pick.id ? REOPENED : undefined;
+  const settled = group?.resolvedGarmentId === pick.id;
+  const reopens = settled ? REOPENED : undefined;
   switch (decision.kind) {
     case 'choose':
       if (!group) return refused('not-in-group');
@@ -249,23 +301,33 @@ function decideOnPick(
         dismiss: [
           { garmentId: pick.id, reason: decision.reason, note: decision.note },
         ],
-        restore: [],
+        // The chosen one set aside: the options its choice set aside are
+        // open again, as its undo would leave them.
+        restore: settled && group ? choiceSiblings(group, picks) : [],
       };
     case 'undo-pick':
       return canRestore(group, pick)
         ? { ok: true, group: undefined, dismiss: [], restore: [pick.id] }
         : refused('not-allowed');
     case 'returned':
-      if (pick.wanted || pick.dismissedReason === 'returned') {
-        return refused('not-allowed');
-      }
-      return {
-        ok: true,
-        group: reopens,
-        dismiss: [{ garmentId: pick.id, reason: 'returned', note: null }],
-        restore: [],
-      };
+      return returnedOf(pick, reopens);
   }
+}
+
+/** A bought garment returned: set aside `returned`, its need reopened if it settled one. */
+function returnedOf(
+  pick: PickState,
+  reopens: GroupChange | undefined,
+): DecisionOutcome {
+  if (pick.wanted || pick.dismissedReason === 'returned') {
+    return refused('not-allowed');
+  }
+  return {
+    ok: true,
+    group: reopens,
+    dismiss: [{ garmentId: pick.id, reason: 'returned', note: null }],
+    restore: [],
+  };
 }
 
 /** A pick set aside (not returned) and still wanted, whose group is open. */
@@ -287,23 +349,16 @@ function undoGroup(
     return { ok: true, group: REOPENED, dismiss: [], restore: [] };
   }
   if (group.status !== 'resolved') return refused('not-allowed');
-  const chosen = picks.find((p) => p.id === group.resolvedGarmentId);
-  // Resolved by a purchase (or by a garment deleted since): Returned is its undo.
-  if (!chosen?.wanted) return refused('not-allowed');
-  const decidedAt = group.decidedAt?.getTime();
+  const resolver = picks.find((p) => p.id === group.resolvedGarmentId);
+  // Resolved by a purchase: Returned is its undo. A resolving garment
+  // deleted since (the foreign key nulled it) leaves nothing to keep.
+  if (group.resolvedGarmentId !== null && !resolver?.wanted) {
+    return refused('not-allowed');
+  }
   return {
     ok: true,
     group: REOPENED,
     dismiss: [],
-    // The siblings this choice set aside: dismissed in its own transaction,
-    // so at the very time it stamped on the group.
-    restore: picks
-      .filter(
-        (p) =>
-          p.wanted &&
-          p.dismissedReason === 'chose_another' &&
-          p.dismissedAt?.getTime() === decidedAt,
-      )
-      .map((p) => p.id),
+    restore: choiceSiblings(group, picks),
   };
 }

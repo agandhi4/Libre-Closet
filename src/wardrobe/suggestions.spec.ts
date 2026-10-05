@@ -118,6 +118,7 @@ describe('decideSuggestion', () => {
     expect(
       decideSuggestion(open, picks, {
         kind: 'dismiss-group',
+        groupId: 7,
         reason: 'not_now',
         note: 'next spring',
       }),
@@ -149,7 +150,9 @@ describe('decideSuggestion', () => {
       pick(3, { dismissedAt: EARLIER, dismissedReason: 'chose_another' }),
       pick(5, { dismissedAt: EARLIER, dismissedReason: 'style' }),
     ];
-    expect(decideSuggestion(chosen, after, { kind: 'undo-group' })).toEqual({
+    expect(
+      decideSuggestion(chosen, after, { kind: 'undo-group', groupId: 7 }),
+    ).toEqual({
       ok: true,
       group: {
         status: 'open',
@@ -168,7 +171,10 @@ describe('decideSuggestion', () => {
       resolvedGarmentId: null,
       decidedAt: AT,
     };
-    const reopened = decideSuggestion(dismissed, picks, { kind: 'undo-group' });
+    const reopened = decideSuggestion(dismissed, picks, {
+      kind: 'undo-group',
+      groupId: 7,
+    });
     expect(reopened.ok && reopened.group?.status).toBe('open');
     const bought: GroupState = {
       status: 'resolved',
@@ -178,9 +184,12 @@ describe('decideSuggestion', () => {
     expect(
       decideSuggestion(bought, [pick(1, { wanted: false }), pick(2)], {
         kind: 'undo-group',
+        groupId: 7,
       }),
     ).toEqual({ ok: false, refusal: 'not-allowed' });
-    expect(decideSuggestion(open, picks, { kind: 'undo-group' })).toEqual({
+    expect(
+      decideSuggestion(open, picks, { kind: 'undo-group', groupId: 7 }),
+    ).toEqual({
       ok: false,
       refusal: 'not-allowed',
     });
@@ -238,5 +247,74 @@ describe('decideSuggestion', () => {
     expect(
       decideSuggestion(bought, owned, { kind: 'returned', garmentId: 2 }),
     ).toEqual({ ok: false, refusal: 'not-allowed' });
+  });
+
+  it('a group whose resolving garment was deleted can still be undone', () => {
+    const orphaned: GroupState = {
+      status: 'resolved',
+      resolvedGarmentId: null,
+      decidedAt: AT,
+    };
+    const after = [
+      pick(2, { dismissedAt: AT, dismissedReason: 'chose_another' }),
+    ];
+    expect(
+      decideSuggestion(orphaned, after, { kind: 'undo-group', groupId: 7 }),
+    ).toMatchObject({ ok: true, group: { status: 'open' }, restore: [2] });
+  });
+
+  it('buying a pick that was set aside restores it, and sets the chosen one aside', () => {
+    const chosen: GroupState = {
+      status: 'resolved',
+      resolvedGarmentId: 1,
+      decidedAt: AT,
+    };
+    const after = [
+      pick(1),
+      pick(2, {
+        wanted: false,
+        dismissedAt: AT,
+        dismissedReason: 'chose_another',
+      }),
+    ];
+    expect(
+      decideSuggestion(chosen, after, { kind: 'bought', garmentId: 2 }),
+    ).toMatchObject({
+      ok: true,
+      group: { status: 'resolved', resolvedGarmentId: 2 },
+      dismiss: [{ garmentId: 1, reason: 'chose_another', note: null }],
+      restore: [2],
+    });
+  });
+
+  it('Not for me on the chosen pick restores the siblings its choice set aside', () => {
+    const chosen: GroupState = {
+      status: 'resolved',
+      resolvedGarmentId: 1,
+      decidedAt: AT,
+    };
+    const after = [
+      pick(1),
+      pick(2, { dismissedAt: AT, dismissedReason: 'chose_another' }),
+      pick(3, { dismissedAt: EARLIER, dismissedReason: 'colour' }),
+    ];
+    expect(
+      decideSuggestion(chosen, after, {
+        kind: 'dismiss-pick',
+        garmentId: 1,
+        reason: 'fit_size',
+        note: null,
+      }),
+    ).toEqual({
+      ok: true,
+      group: {
+        status: 'open',
+        resolvedGarmentId: null,
+        decided: false,
+        dismissedReason: null,
+      },
+      dismiss: [{ garmentId: 1, reason: 'fit_size', note: null }],
+      restore: [2],
+    });
   });
 });

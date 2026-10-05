@@ -25,11 +25,15 @@ import {
 
 /**
  * drizzle/0040_muse-suggestions.sql (#333) on a database the previous build
- * migrated, holding the owner's production plan in its shape (2026-10-05:
- * Muse's draft, 24 proposed items, of which 10 have no candidate, 4 one,
- * 8 two and 2 three; 26 wishlist candidates; no rejections) and, for
- * another owner, every other case the data step maps (a declined item, a
- * revise item with a bought candidate, a rejection, a duplicated plan).
+ * migrated, holding production in its shape (2026-10-05): the owner's
+ * draft plan (Muse's: 24 proposed items, of which 10 have no candidate, 4
+ * one, 8 two and 2 three; 26 wishlist candidates, every link without a
+ * rank or note; no rejections), the demo persona's hand-made plan (19
+ * accepted items, 2 candidates, no token: left alone, owner decision) and,
+ * for a third owner's drafted plans, every other case the data step maps
+ * (a declined item, a revise item with a bought candidate, ranked and
+ * noted links, a rejection, two items of one plan sharing a garment, a
+ * duplicated plan).
  * The real app boots on it (createApp runs 0040), and the plans pages
  * still work after it: they read the plan tables, which it never changes.
  */
@@ -76,10 +80,16 @@ async function migrationsBeforeSuggestions(): Promise<string> {
 
 interface Fixture {
   muse: { owner: number; token: number; plan: number; items: number[] };
-  /** Muse's candidates by item index, in rank order. */
+  /** Muse's candidates by item index, in link order. */
   candidates: number[][];
+  /** The demo persona's own plan and its two candidates. */
+  persona: { owner: number; candidates: number[] };
   edge: {
     owner: number;
+    token: number;
+    shirtA: number;
+    shirtB: number;
+    shared: number;
     declined: number;
     declinedPick: number;
     revise: number;
@@ -107,20 +117,23 @@ async function buildFixture(client: Client): Promise<Fixture> {
        values (gen_random_uuid()::text, 'tops', $1, $2, $3, '90.00', 'https://shop.example/' || md5($3))`,
       [owner, status, name],
     );
+  // Production's links carry no rank or note; the edge cases' do.
   const link = (item: number, garment: number, rank: number | null) =>
     client.query(
       `insert into plan_item_candidate (plan_item_id, garment_id, note, rank, created_at)
        values ($1, $2, $3, $4, '2026-10-04T08:00:00Z')`,
       [item, garment, rank === null ? null : `Muse on ${rank}`, rank],
     );
+  const tokenOf = (owner: number) =>
+    insert(
+      `insert into personal_access_token (user_id, name, token_hash, token_prefix)
+       values ($1, 'Muse', md5($2) || md5($2), 'cl_' || $2)`,
+      [owner, String(owner)],
+    );
 
   // The owner's production plan, in shape.
   const owner = await userOf('muse-owner@example.com');
-  const token = await insert(
-    `insert into personal_access_token (user_id, name, token_hash, token_prefix)
-     values ($1, 'Muse', repeat('a', 64), 'cl_aaaa')`,
-    [owner],
-  );
+  const token = await tokenOf(owner);
   const plan = await insert(
     `insert into wardrobe_plan (owner_id, name, active, drafted_by_token_id)
      values ($1, 'Muse’s draft', false, $2)`,
@@ -137,19 +150,43 @@ async function buildFixture(client: Client): Promise<Fixture> {
     );
     items.push(item);
     const garments: number[] = [];
-    for (let rank = 1; rank <= count; rank++) {
-      const garment = await wish(owner, `Option ${n}.${rank}`);
-      await link(item, garment, rank);
+    for (let option = 1; option <= count; option++) {
+      const garment = await wish(owner, `Option ${n}.${option}`);
+      await link(item, garment, null);
       garments.push(garment);
     }
     candidates.push(garments);
   }
 
-  // Every other case, another owner's plans (no agent: drafted by no token).
+  // The demo persona's own plan: made by hand, no token.
+  const persona = await userOf('persona@example.com');
+  const personaPlan = await insert(
+    `insert into wardrobe_plan (owner_id, name, active) values ($1, 'His plan', true)`,
+    [persona],
+  );
+  const personaItems: number[] = [];
+  for (let n = 1; n <= 19; n++) {
+    personaItems.push(
+      await insert(
+        `insert into plan_item (plan_id, name, category, review) values ($1, $2, 'tops', 'accepted')`,
+        [personaPlan, `His need ${n}`],
+      ),
+    );
+  }
+  const personaCandidates = [
+    await wish(persona, 'His candidate 1'),
+    await wish(persona, 'His candidate 2'),
+  ];
+  await link(personaItems[0], personaCandidates[0], 1);
+  await link(personaItems[1], personaCandidates[1], 1);
+
+  // Every other case, another owner's drafted plans.
   const edgeOwner = await userOf('edge@example.com');
+  const edgeToken = await tokenOf(edgeOwner);
   const edgePlan = await insert(
-    `insert into wardrobe_plan (owner_id, name, active) values ($1, 'Mine', true)`,
-    [edgeOwner],
+    `insert into wardrobe_plan (owner_id, name, active, drafted_by_token_id)
+     values ($1, 'Drafted', false, $2)`,
+    [edgeOwner, edgeToken],
   );
   const item = (name: string | null, review: string, ownerNote?: string) =>
     insert(
@@ -172,10 +209,23 @@ async function buildFixture(client: Client): Promise<Fixture> {
     [rejected],
   );
   const unnamed = await item(null, 'accepted');
+  // Two needs of one plan with the same option: both stay, the earlier
+  // holds it, and the later keeps its rejection.
+  const shirtA = await item('Oxford shirt', 'proposed');
+  const shirtB = await item('Work shirt', 'proposed');
+  const shared = await wish(edgeOwner, 'Blue oxford');
+  await link(shirtA, shared, 1);
+  await link(shirtB, shared, 1);
+  await client.query(
+    `insert into plan_item_rejection (plan_item_id, name, url, reason)
+     values ($1, 'Pink shirt', 'https://shop.example/pink', 'not pink')`,
+    [shirtB],
+  );
   // A duplicated plan: its copy links the same products as the original.
   const copyPlan = await insert(
-    `insert into wardrobe_plan (owner_id, name, active) values ($1, 'Mine (copy)', false)`,
-    [edgeOwner],
+    `insert into wardrobe_plan (owner_id, name, active, drafted_by_token_id)
+     values ($1, 'Drafted (copy)', false, $2)`,
+    [edgeOwner, edgeToken],
   );
   const copy = await insert(
     `insert into plan_item (plan_id, name, category, review) values ($1, 'Boots', 'shoes', 'accepted')`,
@@ -187,8 +237,13 @@ async function buildFixture(client: Client): Promise<Fixture> {
   return {
     muse: { owner, token, plan, items },
     candidates,
+    persona: { owner: persona, candidates: personaCandidates },
     edge: {
       owner: edgeOwner,
+      token: edgeToken,
+      shirtA,
+      shirtB,
+      shared,
       declined,
       declinedPick,
       revise,
@@ -299,7 +354,7 @@ describe('the owner’s draft plan (production’s shape)', () => {
     }
   });
 
-  it('makes the 26 candidates the groups’ suggestions, with Muse’s note, rank and token', () => {
+  it('makes the 26 candidates the groups’ suggestions, with Muse’s token and no rank or note', () => {
     const { token, items } = fixture.muse;
     expect(fixture.candidates.flat()).toHaveLength(26);
     for (const [index, ids] of fixture.candidates.entries()) {
@@ -308,12 +363,13 @@ describe('the owner’s draft plan (production’s shape)', () => {
         (g) => g.suggestion_group_id === group.id,
       );
       expect(picks.map((p) => p.id).sort()).toEqual([...ids].sort());
-      for (const [position, id] of ids.entries()) {
+      for (const id of ids) {
         expect(garments.get(id)).toMatchObject({
           status: 'wishlist',
           suggested_by_token_id: token,
-          suggestion_note: `Muse on ${position + 1}`,
-          suggestion_rank: position + 1,
+          // Production's links have neither.
+          suggestion_note: null,
+          suggestion_rank: null,
           suggested_at: new Date('2026-10-04T08:00:00Z'),
           dismissed_at: null,
         });
@@ -372,7 +428,7 @@ describe('every other case', () => {
     const { declined, declinedPick } = fixture.edge;
     expect(groupOf(declined)).toMatchObject({
       name: 'Loafers',
-      suggested_by_token_id: null,
+      suggested_by_token_id: fixture.edge.token,
       status: 'dismissed',
       dismissed_reason: 'not_now',
       owner_note: 'have a pair',
@@ -397,6 +453,9 @@ describe('every other case', () => {
     expect(garments.get(bought)).toMatchObject({
       status: 'closet',
       suggestion_group_id: group.id,
+      // A ranked, noted link carries both.
+      suggestion_rank: 1,
+      suggestion_note: 'Muse on 1',
       dismissed_at: null,
     });
     expect(garments.get(unbought)).toMatchObject({
@@ -422,6 +481,36 @@ describe('every other case', () => {
         dismissed_note: 'too shiny',
       }),
     ]);
+  });
+
+  it('two needs of one plan sharing an option both stay: the earlier holds it, the later keeps its rejection', () => {
+    const { shirtA, shirtB, shared } = fixture.edge;
+    const first = groupOf(shirtA)!;
+    const second = groupOf(shirtB)!;
+    expect(first.name).toBe('Oxford shirt');
+    expect(second.name).toBe('Work shirt');
+    expect(garments.get(shared)?.suggestion_group_id).toBe(first.id);
+    const rejections = [...garments.values()].filter(
+      (g) => g.suggestion_group_id === second.id,
+    );
+    expect(rejections).toEqual([
+      expect.objectContaining({ dismissed_note: 'not pink' }),
+    ]);
+  });
+
+  it('leaves an owner’s own plan alone: no group, and its candidates stay plain wishlist items', () => {
+    const { owner, candidates } = fixture.persona;
+    expect(groups.filter((g) => g.owner_id === owner)).toEqual([]);
+    for (const id of candidates) {
+      expect(garments.get(id)).toMatchObject({
+        status: 'wishlist',
+        suggested_at: null,
+        suggestion_group_id: null,
+        suggested_by_token_id: null,
+        suggestion_rank: null,
+        dismissed_at: null,
+      });
+    }
   });
 
   it('names an unnamed need after its category, and leaves a duplicated plan’s copy out', () => {

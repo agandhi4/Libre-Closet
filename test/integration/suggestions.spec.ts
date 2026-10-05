@@ -1,13 +1,31 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   garment,
   optionGroup,
   outfitSlot,
   personalAccessToken,
+  planItem,
+  planItemCandidate,
+  planLook,
+  planLookSlot,
+  wardrobePlan,
 } from '../../src/db/schema';
+import { selectScalars } from '../../src/db/select-scalars';
+import {
+  candidaciesOf,
+  rankedPurchasesSql,
+} from '../../src/web/plans/candidates';
+import { planCovers } from '../../src/web/plans/covers';
+import { looksOfPlan } from '../../src/web/plans/looks';
 import { decide, markSuggestion } from '../../src/web/wishlist/decisions';
-import { createGarment, createWishlistItem, garmentRow } from './garments';
+import {
+  createGarment,
+  createWishlistItem,
+  garmentRow,
+  jpegPhoto,
+  uploadPhoto,
+} from './garments';
 import { createTestApp, type TestApp, unescapeHtml, userIdOf } from './harness';
 import { createAccessToken, tool } from './mcp';
 
@@ -25,6 +43,8 @@ describe('suggestions', () => {
   let tokenId: number;
   let mcpToken: string;
   let jeans: number;
+  let tee: number;
+  let outfitId: number;
 
   const get = (url: string) => t.inject({ method: 'GET', url });
   const post = (url: string, payload: Record<string, unknown> = {}) =>
@@ -84,7 +104,15 @@ describe('suggestions', () => {
       .where(eq(personalAccessToken.userId, ownerId));
     tokenId = token.id;
     jeans = await createGarment(t, { name: 'Raw jeans', category: 'bottoms' });
-    await createGarment(t, { name: 'White tee', category: 'tops' });
+    tee = await createGarment(t, { name: 'White tee', category: 'tops' });
+    const saved = await post('/outfits', {
+      name: 'Tee and jeans',
+      category: ['tops', 'bottoms'],
+      garmentId: [String(tee), String(jeans)],
+    });
+    outfitId = Number(
+      /\/outfits\/(\d+)/.exec(String(saved.headers.location))![1],
+    );
   });
 
   afterAll(() => t?.cleanup());
@@ -126,6 +154,35 @@ describe('suggestions', () => {
         suggestedAt: null,
         suggestionGroupId: null,
       });
+      // A need decided, or one holding its five open options, takes no more.
+      const closed = await group('Closed need');
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-group',
+        groupId: closed,
+        reason: 'not_now',
+        note: null,
+      });
+      const late = await createWishlistItem(t, {
+        name: 'Late option',
+        category: 'tops',
+      });
+      expect(
+        await markSuggestion(t.db, ownerId, late, {
+          ...provenance,
+          groupId: closed,
+        }),
+      ).toBe('refused');
+      const crowded = await group('Crowded need');
+      for (let rank = 1; rank <= 5; rank++) {
+        await pick(`Crowded ${rank}`, crowded, rank);
+      }
+      expect(
+        await markSuggestion(t.db, ownerId, late, {
+          ...provenance,
+          groupId: crowded,
+        }),
+      ).toBe('full');
+      expect((await garmentRow(t, late))?.suggestedAt).toBeNull();
       // The database's backstop: no provenance without suggested_at.
       await expect(
         t.db
@@ -143,27 +200,17 @@ describe('suggestions', () => {
       const b = await pick('Blazer B', blazer, 2);
       const c = await pick('Blazer C', blazer, 3);
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { garmentId: c },
-          {
-            kind: 'dismiss-pick',
-            garmentId: c,
-            reason: 'colour',
-            note: null,
-          },
-        ),
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-pick',
+          garmentId: c,
+          reason: 'colour',
+          note: null,
+        }),
       ).toMatchObject({ ok: true, dismissed: [c] });
       const before = await t.db.$count(garment);
 
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { garmentId: a },
-          { kind: 'choose', garmentId: a },
-        ),
+        await decide(t.db, ownerId, { kind: 'choose', garmentId: a }),
       ).toEqual({ ok: true, groupId: blazer, dismissed: [b], restored: [] });
       const chosen = await groupRow(blazer);
       expect(chosen).toMatchObject({
@@ -181,21 +228,11 @@ describe('suggestions', () => {
       expect(await t.db.$count(garment)).toBe(before);
       // A second tap is refused, not applied twice.
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { garmentId: b },
-          { kind: 'choose', garmentId: b },
-        ),
+        await decide(t.db, ownerId, { kind: 'choose', garmentId: b }),
       ).toEqual({ ok: false, reason: 'not-allowed' });
 
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { groupId: blazer },
-          { kind: 'undo-group' },
-        ),
+        await decide(t.db, ownerId, { kind: 'undo-group', groupId: blazer }),
       ).toMatchObject({ ok: true, restored: [b] });
       expect(await groupRow(blazer)).toMatchObject({
         status: 'open',
@@ -210,29 +247,19 @@ describe('suggestions', () => {
     it('Not for me records the reason and note; Undo opens the pick again', async () => {
       const coat = await group('Rain coat');
       const pickId = await pick('Coat A', coat, 1);
-      await decide(
-        t.db,
-        ownerId,
-        { garmentId: pickId },
-        {
-          kind: 'dismiss-pick',
-          garmentId: pickId,
-          reason: 'too_pricey',
-          note: 'Over $300',
-        },
-      );
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-pick',
+        garmentId: pickId,
+        reason: 'too_pricey',
+        note: 'Over $300',
+      });
       expect(await dismissal(pickId)).toMatchObject({
         status: 'wishlist',
         reason: 'too_pricey',
         note: 'Over $300',
       });
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { garmentId: pickId },
-          { kind: 'undo-pick', garmentId: pickId },
-        ),
+        await decide(t.db, ownerId, { kind: 'undo-pick', garmentId: pickId }),
       ).toMatchObject({ ok: true, restored: [pickId] });
       expect(await dismissal(pickId)).toMatchObject({
         reason: null,
@@ -244,18 +271,18 @@ describe('suggestions', () => {
     it('Not for me on a need dismisses the group with its note; Undo reopens it', async () => {
       const need = await group('Linen shirt');
       await pick('Linen A', need, 1);
-      await decide(
-        t.db,
-        ownerId,
-        { groupId: need },
-        { kind: 'dismiss-group', reason: 'not_now', note: 'Next summer' },
-      );
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-group',
+        groupId: need,
+        reason: 'not_now',
+        note: 'Next summer',
+      });
       expect(await groupRow(need)).toMatchObject({
         status: 'dismissed',
         dismissedReason: 'not_now',
         ownerNote: 'Next summer',
       });
-      await decide(t.db, ownerId, { groupId: need }, { kind: 'undo-group' });
+      await decide(t.db, ownerId, { kind: 'undo-group', groupId: need });
       expect(await groupRow(need)).toMatchObject({
         status: 'open',
         dismissedReason: null,
@@ -268,12 +295,7 @@ describe('suggestions', () => {
       const need = await group('Mine alone');
       const strangerId = await userIdOf(t, 'stranger-suggestions@example.com');
       expect(
-        await decide(
-          t.db,
-          strangerId,
-          { groupId: need },
-          { kind: 'undo-group' },
-        ),
+        await decide(t.db, strangerId, { kind: 'undo-group', groupId: need }),
       ).toEqual({ ok: false, reason: 'not-found' });
     });
 
@@ -281,12 +303,7 @@ describe('suggestions', () => {
       const boots = await group('Chelsea boots');
       const a = await pick('Boots A', boots, 1);
       const b = await pick('Boots B', boots, 2);
-      await decide(
-        t.db,
-        ownerId,
-        { garmentId: b },
-        { kind: 'choose', garmentId: b },
-      );
+      await decide(t.db, ownerId, { kind: 'choose', garmentId: b });
       const res = await post(`/wardrobe/${a}/bought`, {
         acquiredOn: t.today(),
         price: '180',
@@ -306,12 +323,7 @@ describe('suggestions', () => {
       });
 
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { garmentId: a },
-          { kind: 'returned', garmentId: a },
-        ),
+        await decide(t.db, ownerId, { kind: 'returned', garmentId: a }),
       ).toMatchObject({ ok: true, dismissed: [a] });
       expect(await dismissal(a)).toMatchObject({
         status: 'archived',
@@ -331,12 +343,11 @@ describe('suggestions', () => {
         category: 'scarves',
       });
       expect(
-        await decide(
-          t.db,
-          ownerId,
-          { groupId: scarf },
-          { kind: 'bought', garmentId: mine },
-        ),
+        await decide(t.db, ownerId, {
+          kind: 'bought',
+          groupId: scarf,
+          garmentId: mine,
+        }),
       ).toMatchObject({ ok: true, dismissed: [a] });
       expect(await groupRow(scarf)).toMatchObject({
         status: 'resolved',
@@ -345,6 +356,181 @@ describe('suggestions', () => {
       expect(await garmentRow(t, mine)).toMatchObject({
         suggestedAt: null,
         suggestionGroupId: null,
+      });
+    });
+  });
+
+  describe('more decisions', () => {
+    it('buying a pick that was set aside makes it the clean answer, and sets the chosen one aside', async () => {
+      const coat = await group('Overcoat');
+      const a = await pick('Overcoat A', coat, 1);
+      const b = await pick('Overcoat B', coat, 2);
+      await decide(t.db, ownerId, { kind: 'choose', garmentId: a });
+      expect((await dismissal(b)).reason).toBe('chose_another');
+      const res = await post(`/wardrobe/${b}/bought`, {
+        acquiredOn: t.today(),
+        price: '300',
+      });
+      expect(res.statusCode).toBe(303);
+      expect(await dismissal(b)).toEqual({
+        status: 'closet',
+        reason: null,
+        note: null,
+        at: null,
+      });
+      expect((await dismissal(a)).reason).toBe('chose_another');
+      expect(await groupRow(coat)).toMatchObject({
+        status: 'resolved',
+        resolvedGarmentId: b,
+      });
+    });
+
+    it('Not for me on the chosen pick reopens the need with the options its choice set aside', async () => {
+      const need = await group('Belt');
+      const a = await pick('Belt A', need, 1);
+      const b = await pick('Belt B', need, 2);
+      await decide(t.db, ownerId, { kind: 'choose', garmentId: a });
+      expect(
+        await decide(t.db, ownerId, {
+          kind: 'dismiss-pick',
+          garmentId: a,
+          reason: 'fit_size',
+          note: null,
+        }),
+      ).toMatchObject({ ok: true, dismissed: [a], restored: [b] });
+      expect(await groupRow(need)).toMatchObject({ status: 'open' });
+      expect((await dismissal(b)).reason).toBeNull();
+      expect((await dismissal(a)).reason).toBe('fit_size');
+    });
+
+    it('a purchase settles a group only with a garment of the owner’s in the closet', async () => {
+      const need = await group('Gloves');
+      await pick('Gloves A', need, 1);
+      const wished = await createWishlistItem(t, {
+        name: 'Gloves not bought',
+        category: 'accessories',
+      });
+      await t.register('glove-stranger@example.com');
+      const strangerId = await userIdOf(t, 'glove-stranger@example.com');
+      const [theirs] = await t.db
+        .insert(garment)
+        .values({
+          shareableId: 'glove-stranger',
+          category: 'accessories',
+          ownerId: strangerId,
+        })
+        .returning({ id: garment.id });
+      expect(
+        await decide(t.db, ownerId, {
+          kind: 'bought',
+          groupId: need,
+          garmentId: wished,
+        }),
+      ).toEqual({ ok: false, reason: 'not-allowed' });
+      expect(
+        await decide(t.db, ownerId, {
+          kind: 'bought',
+          groupId: need,
+          garmentId: theirs.id,
+        }),
+      ).toEqual({ ok: false, reason: 'not-found' });
+      expect(await groupRow(need)).toMatchObject({ status: 'open' });
+    });
+  });
+
+  describe('a suggestion is never deleted', () => {
+    it('DELETE answers 409 for a suggestion and keeps it; a plain wishlist item still goes', async () => {
+      const need = await group('Socks');
+      const kept = await pick('Socks A', need, 1);
+      const res = await t.inject({
+        method: 'DELETE',
+        url: `/wardrobe/${kept}`,
+      });
+      expect(res.statusCode).toBe(409);
+      expect(await garmentRow(t, kept)).toBeDefined();
+      const plain = await createWishlistItem(t, {
+        name: 'Plain socks',
+        category: 'accessories',
+      });
+      const gone = await t.inject({
+        method: 'DELETE',
+        url: `/wardrobe/${plain}`,
+      });
+      expect(gone.statusCode).toBeLessThan(400);
+      expect(await garmentRow(t, plain)).toBeUndefined();
+    });
+
+    it('the plans review sets aside what it would delete: Not this one with its reason, an unpicked option as chose another', async () => {
+      const [plan] = await t.db
+        .insert(wardrobePlan)
+        .values({
+          ownerId,
+          name: 'Muse review plan',
+          draftedByTokenId: tokenId,
+        })
+        .returning({ id: wardrobePlan.id });
+      const [item] = await t.db
+        .insert(planItem)
+        .values({ planId: plan.id, category: 'tops', review: 'proposed' })
+        .returning({ id: planItem.id });
+      const need = await group('Review need');
+      const picked = await pick('Review picked', need, 1);
+      const unpicked = await pick('Review unpicked', need, 2);
+      const rejected = await pick('Review rejected', need, 3);
+      await t.db.insert(planItemCandidate).values(
+        [picked, unpicked, rejected].map((garmentId) => ({
+          planItemId: item.id,
+          garmentId,
+        })),
+      );
+      const offered = [picked, unpicked, rejected].map(
+        (garmentId) => `${item.id}:${garmentId}`,
+      );
+      const res = await post(`/wardrobe/plans/${plan.id}/review`, {
+        shown: [String(item.id)],
+        pick: [`${item.id}:${picked}`],
+        note: [''],
+        offered,
+        reject: [`${item.id}:${rejected}`],
+        rejectReason: ['', '', 'too shiny'],
+        removeUnpicked: '1',
+      });
+      expect(res.statusCode, res.body).toBeLessThan(400);
+      expect(await dismissal(rejected)).toEqual({
+        status: 'wishlist',
+        reason: null,
+        note: 'too shiny',
+        at: expect.any(Date) as Date,
+      });
+      expect((await dismissal(unpicked)).reason).toBe('chose_another');
+      expect((await dismissal(picked)).reason).toBeNull();
+    });
+
+    it('Bought it with the plan follow-up keeps the siblings, set aside', async () => {
+      const [plan] = await t.db
+        .insert(wardrobePlan)
+        .values({ ownerId, name: 'Muse buy plan', draftedByTokenId: tokenId })
+        .returning({ id: wardrobePlan.id });
+      const [item] = await t.db
+        .insert(planItem)
+        .values({ planId: plan.id, category: 'tops' })
+        .returning({ id: planItem.id });
+      const need = await group('Buy need');
+      const a = await pick('Buy A', need, 1);
+      const b = await pick('Buy B', need, 2);
+      await t.db.insert(planItemCandidate).values([
+        { planItemId: item.id, garmentId: a },
+        { planItemId: item.id, garmentId: b },
+      ]);
+      const res = await post(`/wardrobe/${a}/bought`, {
+        acquiredOn: t.today(),
+        price: '50',
+        removeCandidates: [String(b)],
+      });
+      expect(res.statusCode).toBe(303);
+      expect(await dismissal(b)).toMatchObject({
+        status: 'wishlist',
+        reason: 'chose_another',
       });
     });
   });
@@ -361,45 +547,94 @@ describe('suggestions', () => {
       const cardigan = await group('Cardigan');
       chosen = await pick('Suggested cardigan chosen', cardigan, 1);
       setAside = await pick('Suggested cardigan aside', cardigan, 2);
-      await decide(
-        t.db,
-        ownerId,
-        { garmentId: chosen },
-        { kind: 'choose', garmentId: chosen },
-      );
+      await decide(t.db, ownerId, { kind: 'choose', garmentId: chosen });
       lone = await pick('Suggested lone pick', null);
-      await decide(
-        t.db,
-        ownerId,
-        { garmentId: lone },
-        {
-          kind: 'dismiss-pick',
-          garmentId: lone,
-          reason: 'style',
-          note: null,
-        },
-      );
+      await decide(t.db, ownerId, {
+        kind: 'dismiss-pick',
+        garmentId: lone,
+        reason: 'style',
+        note: null,
+      });
     });
 
-    it('the grid, its archived view, Styling, capsules, laundry, tagging, Ideas, Today and insights', async () => {
-      // Each would show a garment by name; a suggestion is named "Suggested …".
-      for (const url of [
-        '/wardrobe',
-        '/wardrobe?archived=true',
-        '/wardrobe/tiles?before=2147483647',
-        '/styling',
-        '/styling/garments?role=top&before=2147483647',
-        '/capsules',
-        '/laundry',
-        '/outfits/ideas',
-        '/',
-        '/wardrobe/insights',
-        '/wardrobe/tag',
-      ]) {
+    // Each page shows an owned garment by name (its control), so the
+    // absence of every suggestion, all named "Suggested …", means something.
+    async function expectOnlyOwned(pages: [url: string, owned: string][]) {
+      for (const [url, owned] of pages) {
         const res = await get(url);
         expect(res.statusCode, url).toBe(200);
-        expect(unescapeHtml(res.body), url).not.toContain('Suggested');
+        const html = unescapeHtml(res.body);
+        expect(html, url).toContain(owned);
+        expect(html, url).not.toContain('Suggested');
       }
+    }
+
+    it('the grid, Styling, capsules, tagging, Ideas, Today and insights', async () => {
+      const capsule = await post('/capsules', { name: 'Everyday' });
+      const capsuleId = Number(
+        /^\/capsules\/(\d+)/.exec(String(capsule.headers.location))![1],
+      );
+      await post(`/capsules/${capsuleId}/garments`, {
+        ids: [tee],
+        shown: [tee],
+      });
+      // Tagging shows one card, the newest closet garment needing details:
+      // none here has a type.
+      const [newest] = await t.db
+        .select({ name: garment.name })
+        .from(garment)
+        .where(and(eq(garment.ownerId, ownerId), eq(garment.status, 'closet')))
+        .orderBy(desc(garment.id))
+        .limit(1);
+      await expectOnlyOwned([
+        ['/wardrobe', 'Raw jeans'],
+        ['/wardrobe?archived=true', 'Raw jeans'],
+        ['/wardrobe/tiles?before=2147483647', 'Raw jeans'],
+        ['/styling', 'White tee'],
+        ['/styling/garments?role=top&before=2147483647', 'White tee'],
+        [`/capsules/${capsuleId}`, 'White tee'],
+        ['/wardrobe/tag', newest.name!],
+        // Every idea wears the closet's only bottoms (clean, so before the
+        // wear below).
+        ['/outfits/ideas', 'Raw jeans'],
+        ['/', 'Raw jeans'],
+        ['/wardrobe/insights', 'Raw jeans'],
+      ]);
+    });
+
+    it('laundry, the week planner and its calendar, and a trip’s packing list', async () => {
+      // Laundry lists what was worn.
+      await post(`/wardrobe/${jeans}/wear`, { worn: '1' });
+      // The week planner plans every day of a set week.
+      await post(
+        '/auth/profile/week',
+        Object.fromEntries(
+          [0, 1, 2, 3, 4, 5, 6].map((day) => [`day-${day}`, 'all-day']),
+        ),
+      );
+      const planned = await post('/calendar/plan-week', {});
+      expect(planned.statusCode).toBe(303);
+      const trip = await post('/trips', {
+        name: 'Weekend away',
+        destination: '',
+        startsOn: t.today(),
+        endsOn: t.today(),
+        notes: '',
+      });
+      const tripId = Number(
+        /^\/trips\/(\d+)/.exec(String(trip.headers.location))![1],
+      );
+      await post(`/trips/${tripId}/outfits`, {
+        outfitId: String(outfitId),
+        day: '',
+        occasion: '',
+      });
+      await expectOnlyOwned([
+        ['/laundry', 'Raw jeans'],
+        // The planner's outfits, each with the closet's only bottoms.
+        [String(planned.headers.location), 'Raw jeans'],
+        [`/trips/${tripId}`, 'Raw jeans'],
+      ]);
     });
 
     it('cannot be worn, washed or lent, nor saved in an outfit', async () => {
@@ -463,6 +698,82 @@ describe('suggestions', () => {
         .from(garment)
         .where(inArray(garment.id, [open, chosen, setAside, lone]));
       expect(rows).toHaveLength(4);
+    });
+
+    it('a plan’s candidates leave out the one set aside: the shopping list, Styling’s To-buy row, candidacies, covers, Today’s next purchase and its looks', async () => {
+      const [plan] = await t.db
+        .insert(wardrobePlan)
+        .values({ ownerId, name: 'Active plan', active: true })
+        .returning({ id: wardrobePlan.id });
+      // A category the closet lacks: the item is still to buy.
+      const [item] = await t.db
+        .insert(planItem)
+        .values({ planId: plan.id, category: 'knitwear' })
+        .returning({ id: planItem.id });
+      await t.db.insert(planItemCandidate).values([
+        { planItemId: item.id, garmentId: open },
+        { planItemId: item.id, garmentId: setAside },
+      ]);
+      // Covers draw candidates with a photo only.
+      for (const id of [open, setAside]) {
+        await uploadPhoto(t, id, await jpegPhoto(300, 400));
+      }
+      // A loved look per candidate, each completed by it: Today's ranking.
+      for (const [name, candidate] of [
+        ['Look with the open one', open],
+        ['Look with the one set aside', setAside],
+      ] as const) {
+        const [look] = await t.db
+          .insert(planLook)
+          .values({ planId: plan.id, name, reaction: 'loved' })
+          .returning({ id: planLook.id });
+        await t.db.insert(planLookSlot).values([
+          {
+            lookId: look.id,
+            position: 0,
+            category: 'tops',
+            garmentId: candidate,
+          },
+          {
+            lookId: look.id,
+            position: 1,
+            category: 'bottoms',
+            garmentId: jeans,
+          },
+        ]);
+      }
+
+      const shopping = unescapeHtml((await get('/wardrobe/shopping')).body);
+      expect(shopping).toContain('Suggested knit open');
+      expect(shopping).not.toContain('Suggested cardigan aside');
+      const styling = unescapeHtml(
+        (await get(`/styling?plan=${plan.id}`)).body,
+      );
+      expect(styling).toContain('Suggested knit open');
+      expect(styling).not.toContain('Suggested cardigan aside');
+      expect(
+        (await candidaciesOf(t.db, ownerId, [open, setAside])).map(
+          (c) => c.garmentId,
+        ),
+      ).toEqual([open]);
+      // A look is a cover only with a usable piece that has a photo: the
+      // one set aside is no current candidate (and the jeans have none).
+      const covers = (await planCovers(t.db, ownerId)).get(plan.id);
+      expect(covers?.cells.map((cell) => cell.name)).toEqual([
+        'Look with the open one',
+        'Suggested knit open',
+      ]);
+      const { ranked } = await selectScalars(t.db, {
+        ranked: rankedPurchasesSql(ownerId),
+      });
+      expect(ranked.map((r) => r.garmentId)).toEqual([open]);
+      const looks = await looksOfPlan(t.db, ownerId, plan.id);
+      const stateOf = (garmentId: number) =>
+        looks
+          .flatMap((look) => look.slots)
+          .find((slot) => slot.garmentId === garmentId)?.state;
+      expect(stateOf(open)).toBe('to-buy');
+      expect(stateOf(setAside)).toBe('missing');
     });
   });
 });
