@@ -431,6 +431,45 @@ describe('the shopping loop', () => {
       expect(await candidatesOf(copied.id)).toEqual(await candidatesOf(itemId));
     });
 
+    it('reads the shopping list in the same statements, however many items and candidates', async () => {
+      const planOf = async (name: string, items: number, perItem: number) => {
+        const id = await createPlan(name);
+        for (let i = 0; i < items; i += 1) {
+          const item = await addItem(id, {
+            name: `${name} ${i}`,
+            category: 'bags',
+          });
+          const garmentIds: number[] = [];
+          for (let j = 0; j < perItem; j += 1) {
+            garmentIds.push(
+              await addWishlist(`${name} wish ${i}-${j}`, { category: 'bags' }),
+            );
+          }
+          await changeCandidates(t.db, ownerId, {
+            add: { itemIds: [item], garmentIds },
+          });
+        }
+        return id;
+      };
+      const read = async (id: number) => {
+        let body = '';
+        const { statements } = await recordQueries(async () => {
+          const res = await get(`/wardrobe/shopping?plan=${id}`);
+          expect(res.statusCode).toBe(200);
+          body = res.body;
+        });
+        return {
+          statements,
+          candidates: body.match(/id="candidate-/g)!.length,
+        };
+      };
+      const one = await read(await planOf('List one', 1, 1));
+      const many = await read(await planOf('List many', 3, 4));
+      expect(one.candidates).toBe(1);
+      expect(many.candidates).toBe(12);
+      expect(many.statements).toBe(one.statements);
+    });
+
     it('copies every item’s candidates in the same statements, however many (#167)', async () => {
       /** A plan of `n` items, each with its own wishlist candidate. */
       const planOf = async (name: string, n: number) => {
@@ -583,7 +622,7 @@ describe('the shopping loop', () => {
       const { statements } = await recordQueries(async () => {
         res = await get('/wardrobe/shopping', shopper);
       });
-      // Pinned: the page reads in a fixed set of statements, however many candidates.
+      // Pinned; that it does not grow with the candidates is its own test (candidates).
       expect(statements).toBe(5);
       expect(res.statusCode).toBe(200);
       expectFullPage(res);
@@ -601,17 +640,17 @@ describe('the shopping loop', () => {
       expect(html).toContain('2 to buy');
       expect(html).toMatch(
         new RegExp(
-          `id="candidate-${wish.merino}" data-budget="within" data-matches="true"`,
+          `id="candidate-${items.merino}-${wish.merino}" data-budget="within" data-matches="true"`,
         ),
       );
       expect(html).toMatch(
         new RegExp(
-          `id="candidate-${wish.merino2}" data-budget="over" data-matches="true"`,
+          `id="candidate-${items.merino}-${wish.merino2}" data-budget="over" data-matches="true"`,
         ),
       );
       expect(html).toMatch(
         new RegExp(
-          `id="candidate-${wish.navyBoots}" data-budget="within" data-matches="false"`,
+          `id="candidate-${items.boots}-${wish.navyBoots}" data-budget="within" data-matches="false"`,
         ),
       );
       // Each item with candidates is a grid of cards (#316) in that order;
@@ -622,7 +661,7 @@ describe('the shopping loop', () => {
           `id="shopping-item-${itemId}"[^]*?(?=id="shopping-item-|$)`,
         ).exec(html)![0];
       const tiles = (itemId: number) =>
-        [...strip(itemId).matchAll(/id="candidate-(\d+)"/g)].map(([, id]) =>
+        [...strip(itemId).matchAll(/id="candidate-\d+-(\d+)"/g)].map(([, id]) =>
           Number(id),
         );
       expect(tiles(items.merino)).toEqual([wish.merino, wish.merino2]);
@@ -640,8 +679,10 @@ describe('the shopping loop', () => {
       expect(html).toContain('href="https://shop.example/merino"');
       expect(html).toContain(`href="/wardrobe/${wish.merino}/bought"`);
       // The matching candidates first: the black boots over the navy ones.
-      expect(html.indexOf(`candidate-${wish.blackBoots}`)).toBeLessThan(
-        html.indexOf(`candidate-${wish.navyBoots}`),
+      expect(
+        html.indexOf(`candidate-${items.boots}-${wish.blackBoots}`),
+      ).toBeLessThan(
+        html.indexOf(`candidate-${items.boots}-${wish.navyBoots}`),
       );
       // Totals: 4 pieces; budget $50 + $200 + 2 × $100; cheapest matching
       // candidates $49.90 + $220; the oxford has none.

@@ -408,9 +408,13 @@ describe('candidate research notes', () => {
       );
       await post(`/wardrobe/plans/${ranked.plan}/activate`, {});
       const page = await get(`/wardrobe/shopping?plan=${ranked.plan}`);
-      expect(page.indexOf(`id="candidate-${ranked.pick}"`)).toBeGreaterThan(0);
-      expect(page.indexOf(`id="candidate-${ranked.pick}"`)).toBeLessThan(
-        page.indexOf(`id="candidate-${ranked.other}"`),
+      expect(
+        page.indexOf(`id="candidate-${ranked.item}-${ranked.pick}"`),
+      ).toBeGreaterThan(0);
+      expect(
+        page.indexOf(`id="candidate-${ranked.item}-${ranked.pick}"`),
+      ).toBeLessThan(
+        page.indexOf(`id="candidate-${ranked.item}-${ranked.other}"`),
       );
       expect(page).toContain('Italian leather, true to size');
       expect(page.match(/data-agents-pick/g)).toHaveLength(1);

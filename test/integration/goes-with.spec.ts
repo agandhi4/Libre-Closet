@@ -502,7 +502,7 @@ describe('goes with my closet', () => {
       // into view, so the page's cost is the list's whatever its length.
       const res = await get(`/wardrobe/shopping?plan=${planId}`);
       expect(res.statusCode).toBe(200);
-      const row = new RegExp(`id="candidate-${sweater}"[^]*?</li>`).exec(
+      const row = new RegExp(`id="candidate-\\d+-${sweater}"[^]*?</li>`).exec(
         unescapeHtml(res.body),
       )![0];
       expect(row).not.toContain('Goes with');

@@ -18,7 +18,7 @@ import { Layout } from '../layout/layout';
 import { OutfitCollage } from '../outfits/collage';
 import type { NextPurchase } from '../plans/candidates';
 import type { WaitingDraft } from '../plans/queries';
-import { reviewUrl, SHOPPING_PATH } from '../plans/urls';
+import { candidateAnchor, reviewUrl, SHOPPING_PATH } from '../plans/urls';
 import { EntrySelfie } from '../selfies/views';
 import type { ViewContext } from '../view-context';
 import { categoryLabel } from '../wardrobe/garment';
@@ -153,7 +153,7 @@ function NextPurchaseCard({ purchase }: { purchase: NextPurchase }) {
             : t('today.NEXT_STEP', params)}
         </p>
         <a
-          href={`${SHOPPING_PATH}#candidate-${purchase.garmentId}`}
+          href={`${SHOPPING_PATH}#${candidateAnchor(purchase.itemId, purchase.garmentId)}`}
           class="btn btn-primary btn-sm shrink-0"
         >
           {t('today.NEXT_STEP_VIEW')}

@@ -27,7 +27,13 @@ import {
 import { differencesText, itemFacts, itemTitle, priorityLabel } from './labels';
 import type { PlanDetail, PlanItemRow } from './queries';
 import type { ListedCandidate, PlanShoppingList } from './shopping';
-import { candidatesUrl, PLANS_PATH, planUrl, shoppingUrl } from './urls';
+import {
+  candidateAnchor,
+  candidatesUrl,
+  PLANS_PATH,
+  planUrl,
+  shoppingUrl,
+} from './urls';
 
 export interface ShoppingPageModel {
   /** The plan shown; undefined when the owner has no active plan (and asked for none). */
@@ -197,7 +203,11 @@ function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
           aria-label={t('shopping.STRIP_LABEL', { item: itemTitle(item) })}
         >
           {entry.candidates.map(({ candidate, budget }) => (
-            <CandidateCard candidate={candidate} budget={budget} />
+            <CandidateCard
+              itemId={item.id}
+              candidate={candidate}
+              budget={budget}
+            />
           ))}
         </ul>
       )}
@@ -230,14 +240,15 @@ function ItemCard(props: { entry: Entry; plan: PlanDetail }) {
  * can later opt into. The `id` is where Today's next-step card lands.
  */
 function CandidateCard(props: {
+  itemId: number;
   candidate: ListedCandidate;
   budget: BudgetFit;
 }) {
-  const { candidate, budget } = props;
+  const { itemId, candidate, budget } = props;
   return (
     <li
       class="flex flex-col gap-1 scroll-mt-20"
-      id={`candidate-${candidate.garmentId}`}
+      id={candidateAnchor(itemId, candidate.garmentId)}
       data-budget={budget}
       data-matches={String(candidate.matches)}
     >
