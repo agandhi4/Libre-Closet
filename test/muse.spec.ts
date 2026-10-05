@@ -1,4 +1,4 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test, type TestInfo } from '@playwright/test';
 import { signInAs } from './support/e2e-session';
 import { pageErrors } from './support/page-errors';
 import { seedDemoAs } from './support/seed-demo';
@@ -11,12 +11,12 @@ import { type MuseSeed, seedMuseInbox } from './support/seed-muse';
  * a browser shows. The options strip at 390 px and the side-by-side
  * columns at 1440, Not for me opening in place, a reason chip's one tap,
  * the photo viewer, New from Muse arriving after load, a decision disabled
- * offline, and the screenshots the owner reviews before merge
- * (test-results/muse-shots/, gitignored). The rows each decision writes are
+ * offline, and the screenshots the owner reviews before merge: attached to
+ * each test (`muse-<screen>-<width>.png`), so the HTML report keeps them,
+ * CI's uploaded one included. The rows each decision writes are
  * test/integration/muse-inbox.spec.ts's.
  */
 
-const SHOTS = 'test-results/muse-shots';
 const PHONE = { width: 390, height: 844 };
 const DESKTOP = { width: 1440, height: 900 };
 
@@ -30,7 +30,7 @@ test.beforeAll(async () => {
   seed = await seedMuseInbox(email);
 });
 
-async function shoot(page: Page, name: string) {
+async function shoot(page: Page, testInfo: TestInfo, name: string) {
   // Lazy images below the fold load before a full-page shot, and the
   // phone's fixed dock goes to the page's end: a full-page capture would
   // otherwise draw it across the middle of the page.
@@ -48,7 +48,9 @@ async function shoot(page: Page, name: string) {
         .map((img) => img.decode().catch(() => undefined)),
     );
   });
-  await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
+  const path = testInfo.outputPath(`muse-${name}.png`);
+  await page.screenshot({ path, fullPage: true });
+  await testInfo.attach(`muse-${name}.png`, { path, contentType: 'image/png' });
 }
 
 function noSideScroll(page: Page, width: number) {
@@ -66,7 +68,7 @@ for (const [label, viewport] of [
 
     test('the inbox: Ready to buy, Muse’s picks, your wishlist, still looking, set aside', async ({
       page,
-    }) => {
+    }, testInfo) => {
       const errors = pageErrors(page);
       await signInAs(page, email);
       await page.goto('/wardrobe/wishlist');
@@ -83,13 +85,13 @@ for (const [label, viewport] of [
       ).toContainText('A light rain shell');
       await expect(page.getByText('2 set aside')).toBeVisible();
       await noSideScroll(page, viewport.width);
-      await shoot(page, `inbox-${label}`);
+      await shoot(page, testInfo, `inbox-${label}`);
       expect(errors).toEqual([]);
     });
 
     test('a need’s decision screen: the options, This one, Not for me in place', async ({
       page,
-    }) => {
+    }, testInfo) => {
       const errors = pageErrors(page);
       await signInAs(page, email);
       await page.goto(`/wardrobe/wishlist/needs/${seed.needs[0]}`);
@@ -113,13 +115,13 @@ for (const [label, viewport] of [
         expect(width).toBeLessThan(viewport.width * 0.9);
       }
       await noSideScroll(page, viewport.width);
-      await shoot(page, `decision-${label}`);
+      await shoot(page, testInfo, `decision-${label}`);
       expect(errors).toEqual([]);
     });
 
     test('a pick’s own page: From Muse, its need, This one, the other options', async ({
       page,
-    }) => {
+    }, testInfo) => {
       const errors = pageErrors(page);
       await signInAs(page, email);
       await page.goto(`/wardrobe/${seed.options[0][0]}`);
@@ -132,7 +134,7 @@ for (const [label, viewport] of [
       await expect(section.locator('[data-other-options]')).toBeVisible();
       await expect(page.locator('#goes-with')).toBeVisible();
       await noSideScroll(page, viewport.width);
-      await shoot(page, `pick-${label}`);
+      await shoot(page, testInfo, `pick-${label}`);
       expect(errors).toEqual([]);
     });
   });
