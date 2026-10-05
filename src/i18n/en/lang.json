@@ -1194,6 +1194,9 @@
       "SET_ASIDE_COUNT": "{count} set aside",
       "UNDO_LABEL": "Undo setting {name} aside",
       "SET_ASIDE_LINE": "Set aside: {reason}",
+      "PIECE_LINK": "{name}: {label}, open its page",
+      "NOT_YOURS_YET": "Save it first: Muse’s outfits are planned or packed once they’re yours.",
+      "ALREADY_YOURS": "This outfit is yours now: it was saved since this page was drawn.",
       "DELETE_REFUSED": "Not for me sets one of Muse’s outfits aside: Muse learns from it, and you can undo it."
     },
     "TO_BUY": "{count} pieces to buy",

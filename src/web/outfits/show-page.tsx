@@ -63,6 +63,11 @@ export function OutfitPage(props: {
   const { ctx, outfit, entries } = props;
   const name = outfit.name || t('UNTITLED_OUTFIT');
   const toBuy = piecesToBuy(outfit.garments);
+  // Plan is offered only where the outfit may be held (outfitMayBeHeld):
+  // complete, and the owner's (not one of Muse's proposals until saved).
+  const mayBePlanned =
+    toBuy.length === 0 &&
+    (!outfit.proposal || outfit.proposal.reaction === 'loved');
   return (
     <Layout ctx={ctx} title={name}>
       <AppBar
@@ -87,7 +92,7 @@ export function OutfitPage(props: {
         )}
         {toBuy.length > 0 && <ToBuySection pieces={toBuy} />}
         <div class="flex gap-2">
-          {toBuy.length === 0 && (
+          {mayBePlanned && (
             <button
               type="button"
               class="btn btn-primary flex-1"
@@ -118,9 +123,7 @@ export function OutfitPage(props: {
         )}
         {outfit.garments.length > 0 && <GarmentList outfit={outfit} />}
       </main>
-      {toBuy.length === 0 && (
-        <PlanSheet outfitId={outfit.id} today={props.today} />
-      )}
+      {mayBePlanned && <PlanSheet outfitId={outfit.id} today={props.today} />}
       <AlreadySavedToast shown={props.alreadySaved === true} />
       <DecisionToastView toast={props.toast} />
       <Dock ctx={ctx} />

@@ -25,7 +25,7 @@ import {
   updateOutfit,
 } from './queries';
 import { OutfitPage } from './show-page';
-import { type OutfitReaction, reactToOutfit } from './proposals';
+import { type OutfitReaction, reactToOutfit } from './reactions';
 import { OUTFIT_DISMISS_REASONS } from '../../wardrobe/suggestions';
 import { t } from '../i18n';
 import { safeReturnTo } from '../security/return-to';
@@ -413,7 +413,14 @@ export const outfitRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         `Reaction ${change.event} on outfit ${id} by user ${ownerId} refused: ${outcome.reason}`,
       );
       if (outcome.reason === 'not-found') throw outfitNotFound();
-      throw new HttpError(409, t('muse.STALE'));
+      throw new HttpError(
+        409,
+        t(
+          outcome.reason === 'owners'
+            ? 'outfits.muse.ALREADY_YOURS'
+            : 'muse.STALE',
+        ),
+      );
     }
     logger.info(
       `Outfit ${id} ${outcome.from} -> ${outcome.to} by user ${ownerId}${change.event === 'decline' ? ` (${change.reason})` : ''}`,

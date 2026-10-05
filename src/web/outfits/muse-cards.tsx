@@ -223,14 +223,20 @@ function PrimaryAction(props: { item: MuseOutfit; primary: Primary }) {
 const pieceName = (piece: MusePiece) =>
   piece.name ?? categoryLabel(piece.category);
 
+/** A piece to buy's badge: its price, "To buy" without one, or "Set aside". */
+function badgeText(piece: MusePiece): string {
+  if (piece.setAside) return t('outfits.muse.SET_ASIDE');
+  return piece.price ? priceLabel(piece.price) : t('plans.looks.TO_BUY');
+}
+
 /**
  * One piece, big: its photo on the plinth colour (a tap opens the viewer,
  * which names it; the button's label does too). No name under it: the
- * card is the pieces. A piece to buy wears its price over its foot and,
- * when it is a number worth reading, what it unlocks with the closet, a
+ * card is the pieces. A piece to buy wears its price over its foot, the
  * link to its page (where This one and Bought it are, and its need's
- * options): never at the cap ("50+", which a large closet gives most
- * pieces and so tells nothing, the inbox's rule).
+ * options), always; and, when it is a number worth reading, what it
+ * unlocks with the closet, never at the cap ("50+", which a large closet
+ * gives most pieces and so tells nothing, the inbox's rule).
  */
 function PieceTile(props: {
   piece: MusePiece;
@@ -265,16 +271,21 @@ function PieceTile(props: {
           <HangerIcon class="size-8 text-muted" strokeWidth="1.5" />
         )}
         {toBuy && (
-          <span
-            class={`badge badge-xs sm:badge-sm pointer-events-none absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap ${piece.setAside ? 'badge-warning' : 'badge-accent'}`}
+          // The piece's page (This one, Bought it, its need's options): the
+          // badge is the link, its hit area grown to 44 px around it; the
+          // rest of the tile opens the viewer.
+          <a
+            href={`/wardrobe/${piece.id}`}
+            class={`badge badge-xs sm:badge-sm absolute bottom-0.5 sm:bottom-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap after:absolute after:-inset-x-2 after:-inset-y-3 ${piece.setAside ? 'badge-warning' : 'badge-accent'}`}
+            aria-label={t('outfits.muse.PIECE_LINK', {
+              name,
+              label: badgeText(piece),
+            })}
             data-to-buy=""
+            data-piece-link=""
           >
-            {piece.setAside
-              ? t('outfits.muse.SET_ASIDE')
-              : piece.price
-                ? priceLabel(piece.price)
-                : t('plans.looks.TO_BUY')}
-          </span>
+            {badgeText(piece)}
+          </a>
         )}
       </div>
       {toBuy && props.unlocks && !props.unlocks.capped && (

@@ -1,6 +1,11 @@
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { garment, outfit, personalAccessToken } from '../../src/db/schema';
+import {
+  garment,
+  outfit,
+  outfitCalendar,
+  personalAccessToken,
+} from '../../src/db/schema';
 import { createGarment, createWishlistItem } from './garments';
 import {
   createTestApp,
@@ -8,7 +13,7 @@ import {
   type TestApp,
   unescapeHtml,
 } from './harness';
-import { createAccessToken } from './mcp';
+import { createAccessToken, tool } from './mcp';
 
 /**
  * Muse's outfits on the Outfits tab (#335, docs/plans/2026-10-05-muse-
@@ -24,6 +29,7 @@ import { createAccessToken } from './mcp';
 describe('Muse’s outfits (#335)', () => {
   let t: TestApp;
   let tokenId: number;
+  let mcpToken: string;
   let tee: number;
   let jeans: number;
   let shoes: number;
@@ -83,9 +89,14 @@ describe('Muse’s outfits (#335)', () => {
 
   const tab = async () => unescapeHtml((await get('/outfits')).body);
 
+  /** A closet accessory of its own: a garment set no earlier test saved (a save of one reuses it). */
+  let belts = 0;
+  const belt = () =>
+    createGarment(t, { name: `Belt ${++belts}`, category: 'accessories' });
+
   beforeAll(async () => {
     t = await createTestApp();
-    await createAccessToken(t, { name: 'Muse' });
+    mcpToken = await createAccessToken(t, { name: 'Muse' });
     const [token] = await t.db
       .select({ id: personalAccessToken.id })
       .from(personalAccessToken)
@@ -125,6 +136,13 @@ describe('Muse’s outfits (#335)', () => {
         new Date(Date.now() - 60_000),
       );
       const newer = await proposed('Newer look', [knit, jeans]);
+      // Complete, but Muse's until saved: never in a picker either.
+      const completePending = await proposed(
+        'Complete, not saved',
+        [tee, jeans, shoes],
+        'proposed',
+        new Date(Date.now() - 120_000),
+      );
       const html = await tab();
       expect(html).toContain('From Muse');
       expect(html.indexOf(`data-muse-outfit="${newer}"`)).toBeLessThan(
@@ -141,12 +159,29 @@ describe('Muse’s outfits (#335)', () => {
       );
       expect(picking).not.toContain('data-muse-outfits');
       expect(picking).not.toContain(`value="${newer}"`);
+      expect(picking).not.toContain(`value="${completePending}"`);
       const plan = unescapeHtml(
         (await get(`/calendar/plan?for=day:${t.today()}&occasion=all-day`))
           .body,
       );
       expect(plan).toContain(`value="${ownId}"`);
       expect(plan).not.toContain(`value="${newer}"`);
+      expect(plan).not.toContain(`value="${completePending}"`);
+      const tripPicker = await post('/trips', {
+        name: 'Picker trip',
+        destination: '',
+        startsOn: t.today(),
+        endsOn: t.today(),
+        notes: '',
+      });
+      const tripId = Number(
+        /^\/trips\/(\d+)/.exec(String(tripPicker.headers.location))![1],
+      );
+      const add = unescapeHtml(
+        (await get(`/trips/${tripId}/outfits/new`)).body,
+      );
+      expect(add).toContain(`value="${ownId}"`);
+      expect(add).not.toContain(`value="${completePending}"`);
       // The garment page's outfits: the owner's only.
       const jeansPage = unescapeHtml((await get(`/wardrobe/${jeans}`)).body);
       expect(jeansPage).not.toContain('Newer look');
@@ -318,5 +353,185 @@ describe('Muse’s outfits (#335)', () => {
       const loved = unescapeHtml((await get(`/outfits/${id}`)).body);
       expect(loved).toContain(`hx-delete="/outfits/${id}"`);
     });
+  });
+
+  describe('what may be held: complete, and the owner’s (outfitMayBeHeld)', () => {
+    it('a complete proposal not saved is never planned or packed, and its page offers no Plan', async () => {
+      const id = await proposed('Complete proposal', [
+        shoes,
+        tee,
+        await belt(),
+      ]);
+      const planned = await post('/calendar', {
+        outfitId: id,
+        date: t.today(),
+      });
+      expect(planned.statusCode).toBe(409);
+      expect(unescapeHtml(planned.body)).toContain(
+        'Save it first: Muse’s outfits are planned or packed once they’re yours.',
+      );
+      const trip = await post('/trips', {
+        name: 'Proposal trip',
+        destination: '',
+        startsOn: t.today(),
+        endsOn: t.today(),
+        notes: '',
+      });
+      const tripId = Number(
+        /^\/trips\/(\d+)/.exec(String(trip.headers.location))![1],
+      );
+      const packed = await post(`/trips/${tripId}/outfits`, {
+        outfitId: id,
+        day: '',
+        occasion: '',
+      });
+      expect(packed.statusCode).toBe(409);
+      const page = unescapeHtml((await get(`/outfits/${id}`)).body);
+      expect(page).not.toContain('data-outfit-plan=""');
+      expect(page).not.toContain('id="outfit-plan-sheet"');
+      expect(page).toContain(`action="/outfits/${id}/love"`);
+    });
+
+    it('a Styling save of its garments with a day adopts it: loved, then planned', async () => {
+      const extra = await belt();
+      const id = await proposed('Adopted in Styling', [jeans, shoes, extra]);
+      const res = await t.inject({
+        method: 'POST',
+        url: '/styling',
+        payload: {
+          role: ['bottom', 'footwear', 'accessory'],
+          garmentId: [jeans, shoes, extra].map(String),
+          lock: ['', '', ''],
+          scheduleDate: t.today(),
+        },
+      });
+      expect(res.statusCode, res.body).toBe(303);
+      expect(await rowOf(id)).toMatchObject({ reaction: 'loved' });
+      const [entry] = await t.db
+        .select({ id: outfitCalendar.id })
+        .from(outfitCalendar)
+        .where(eq(outfitCalendar.outfitId, id));
+      expect(entry).toBeDefined();
+    });
+
+    it('a gallery pick of its garments adopts one set aside: back, loved, then planned', async () => {
+      const id = await proposed('Adopted by a pick', [tee], 'declined');
+      const picked = await tool<{ id: number; alreadySaved: boolean }>(
+        t,
+        mcpToken,
+        'pick_outfit',
+        { garmentIds: [tee], date: t.today() },
+      );
+      expect(picked).toMatchObject({ id, alreadySaved: true });
+      expect(await rowOf(id)).toMatchObject({
+        reaction: 'loved',
+        dismissedReason: null,
+      });
+    });
+
+    it('no reaction moves an outfit that is the owner’s: loved, bought, planned, then a stale ×', async () => {
+      const scarf = await createWishlistItem(t, {
+        name: 'Wool scarf',
+        category: 'accessories',
+      });
+      const id = await proposed('Scarf day', [scarf, jeans], 'loved');
+      await post(`/wardrobe/${scarf}/bought`, {
+        acquiredOn: t.today(),
+        price: '40',
+      });
+      expect(
+        (await post('/calendar', { outfitId: id, date: t.today() })).statusCode,
+      ).toBe(302);
+      const before = await rowOf(id);
+      const stale = await post(`/outfits/${id}/dismiss`, { reason: 'style' });
+      expect(stale.statusCode).toBe(409);
+      expect(unescapeHtml(stale.body)).toContain(
+        'This outfit is yours now: it was saved since this page was drawn.',
+      );
+      expect(await rowOf(id)).toEqual(before);
+    });
+  });
+
+  describe('MCP', () => {
+    it('list_outfits lists the owner’s own; get_outfit says a proposal’s note and reaction', async () => {
+      const id = await proposed('Proposed over MCP', [
+        knit,
+        shoes,
+        await belt(),
+      ]);
+      const { outfits } = await tool<{ outfits: { id: number }[] }>(
+        t,
+        mcpToken,
+        'list_outfits',
+      );
+      expect(outfits.map((o) => o.id)).not.toContain(id);
+      const one = await tool<{ proposal: unknown }>(t, mcpToken, 'get_outfit', {
+        id,
+      });
+      expect(one.proposal).toEqual({
+        note: 'Why Proposed over MCP',
+        reaction: 'proposed',
+        ownerNote: null,
+        dismissedReason: null,
+      });
+    });
+  });
+
+  it('a piece to buy’s price badge is its page’s link, whatever it unlocks', async () => {
+    const id = await proposed('Badge link', [blazer, shoes, await belt()]);
+    const card = cardOf(await tab(), id)!;
+    expect(card).toMatch(
+      new RegExp(`<a href="/wardrobe/${blazer}"[^>]*data-piece-link=""`),
+    );
+  });
+});
+
+describe('the generator’s memory keeps Muse’s proposals (#335)', () => {
+  let t: TestApp;
+
+  beforeAll(async () => {
+    t = await createTestApp();
+  });
+
+  afterAll(() => t?.cleanup());
+
+  it('Ideas never offers a set Muse proposed, even one the owner set aside', async () => {
+    const tee = await createGarment(t, { name: 'White tee', category: 'tops' });
+    const jeans = await createGarment(t, {
+      name: 'Raw jeans',
+      category: 'bottoms',
+    });
+    const shoes = await createGarment(t, {
+      name: 'Canvas shoes',
+      category: 'footwear',
+    });
+    const ideas = async () =>
+      unescapeHtml(
+        (await t.inject({ method: 'GET', url: '/outfits/ideas' })).body,
+      );
+    // The closet's one idea, before any proposal.
+    expect(await ideas()).toContain('Canvas shoes');
+    const res = await t.inject({
+      method: 'POST',
+      url: '/outfits',
+      payload: {
+        name: 'Muse’s',
+        notes: '',
+        category: ['tops', 'bottoms', 'footwear'],
+        garmentId: [tee, jeans, shoes].map(String),
+      },
+    });
+    const id = Number(
+      /^\/outfits\/(\d+)$/.exec(String(res.headers.location))![1],
+    );
+    await t.db
+      .update(outfit)
+      .set({
+        proposedAt: new Date(),
+        reaction: 'declined',
+        dismissedReason: 'style',
+      })
+      .where(eq(outfit.id, id));
+    expect(await ideas()).not.toContain('Canvas shoes');
   });
 });

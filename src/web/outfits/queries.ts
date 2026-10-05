@@ -1,7 +1,5 @@
 import {
   and,
-  asc,
-  desc,
   eq,
   gte,
   inArray,
@@ -13,6 +11,7 @@ import {
 import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import type { Db, Queryable } from '../../db/client';
+import { selectScalars } from '../../db/select-scalars';
 import {
   file,
   garment,
@@ -30,17 +29,14 @@ import type { OutfitDismissReason } from '../../wardrobe/suggestions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
 import type { SignablePhotoRef } from '../files/image-url';
-import {
-  PHOTO_REF_RELATION,
-  photoRefJson,
-  readPhotoRef,
-} from '../files/queries';
+import { photoRefJson } from '../files/queries';
 import type { IsoDate } from '../calendar/calendar-date';
 import { insertEntry, type ScheduleOutcome } from '../calendar/queries';
 import { entrySelfieSql, type SelfieRef } from '../selfies/queries';
 import { prunePacked, tripsOfOutfit } from '../trips/packed';
 import { detachOutfitWears } from '../wears/queries';
 import { adoptPlannerOutfit } from '../week-plan/adopt';
+import { adoptProposal } from './reactions';
 import {
   offeredIntoSql,
   OutfitGarmentsGone,
@@ -126,45 +122,54 @@ export interface CreateResult extends SaveResult {
 
 /**
  * Outfits matching `where`, newest first, each with its chosen garments in
- * slot order (empty slots show nothing). One statement: db.query nests the
- * slots, garments and photos as JSON, and the result is plain rows.
+ * slot order (empty slots show nothing) and its proposal when Muse proposed
+ * it, as one scalar subquery. Raw SQL, never db.query: the relational
+ * query writes every column of a `where` against its root table, which
+ * breaks a predicate with a subquery of its own (ownersOutfit).
  */
-async function outfitsWithGarments(
-  db: Db,
-  where: SQL | undefined,
-): Promise<OutfitDetail[]> {
-  const rows = await db.query.outfit.findMany({
-    columns: { id: true, name: true, notes: true, shareableId: true },
-    where,
-    orderBy: desc(outfit.id),
-    with: {
-      slots: {
-        columns: {},
-        where: isNotNull(outfitSlot.garmentId),
-        orderBy: asc(outfitSlot.position),
-        with: {
-          garment: {
-            columns: { id: true, name: true, category: true, status: true },
-            with: { photo: PHOTO_REF_RELATION },
-          },
-        },
-      },
-    },
-  });
-  return rows.map(({ slots, ...fields }) => ({
-    ...fields,
-    garments: slots.flatMap(({ garment: shown }) =>
-      shown ? [{ ...shown, photo: readPhotoRef(shown.photo) }] : [],
-    ),
-  }));
+function toolOutfitsSql(where: SQL): SQL<ToolOutfit[]> {
+  return sql<ToolOutfit[]>`(
+    select coalesce(json_agg(json_build_object(
+      'id', ${outfit.id},
+      'name', ${outfit.name},
+      'notes', ${outfit.notes},
+      'shareableId', ${outfit.shareableId},
+      'garments', ${outfitGarmentsSql()},
+      'proposal', case when ${outfit.proposedAt} is null then null else json_build_object(
+        'note', ${outfit.proposalNote},
+        'reaction', ${outfit.reaction},
+        'ownerNote', ${outfit.ownerNote},
+        'dismissedReason', ${outfit.dismissedReason}
+      ) end
+    ) order by ${outfit.id} desc), '[]')
+    from ${outfit}
+    where ${where}
+  )`;
 }
 
+/** toolOutfitsSql alone, in one statement. */
+async function outfitsWithGarments(db: Db, where: SQL): Promise<ToolOutfit[]> {
+  const { outfits } = await selectScalars(db, {
+    outfits: toolOutfitsSql(where),
+  });
+  return outfits;
+}
+
+/** An outfit as the MCP tools answer it: with its proposal when Muse proposed it (#335). */
+export type ToolOutfit = OutfitDetail & {
+  proposal: Omit<OutfitProposal, 'agent'> | null;
+};
+
 /**
- * Every outfit of the owner's, with its notes: the calendar's plan page and
- * list_outfits. The Saved tab and a trip's add page read savedOutfitsSql.
+ * The owner's own outfits (ownersOutfit: Muse's proposals not theirs yet
+ * are the Outfits tab's own section), with their notes: list_outfits. The
+ * Saved tab, the pickers and a trip's add page read savedOutfitsSql.
  */
-export function listOutfits(db: Db, ownerId: number): Promise<OutfitSummary[]> {
-  return outfitsWithGarments(db, eq(outfit.ownerId, ownerId));
+export function listOutfits(db: Db, ownerId: number): Promise<ToolOutfit[]> {
+  return outfitsWithGarments(
+    db,
+    and(eq(outfit.ownerId, ownerId), ownersOutfit())!,
+  );
 }
 /**
  * An outfit as a collage or a saved-outfit button shows it, without its
@@ -320,10 +325,10 @@ export async function findOutfit(
   db: Db,
   id: number,
   ownerId: number,
-): Promise<OutfitDetail | undefined> {
+): Promise<ToolOutfit | undefined> {
   const [found] = await outfitsWithGarments(
     db,
-    and(eq(outfit.id, id), eq(outfit.ownerId, ownerId)),
+    and(eq(outfit.id, id), eq(outfit.ownerId, ownerId))!,
   );
   return found;
 }
@@ -585,7 +590,16 @@ export function sameGarmentsOutfit(
     sql`, `,
   )}]::int[]`;
   return db
-    .select({ id: outfit.id, name: outfit.name })
+    .select({
+      id: outfit.id,
+      name: outfit.name,
+      // One of Muse's proposals not the owner's yet: a save adopts it
+      // (adoptProposal), read here so a plain reuse costs nothing more.
+      pending:
+        sql<boolean>`(${outfit.proposedAt} is not null and ${outfit.reaction} <> 'loved')`.as(
+          'pending',
+        ),
+    })
     .from(outfit)
     .innerJoin(outfitSlot, eq(outfitSlot.outfitId, outfit.id))
     .where(and(eq(outfit.ownerId, ownerId), isNotNull(outfitSlot.garmentId)))
@@ -612,7 +626,12 @@ async function insertOutfitOnce(
   ownerId: number,
   fields: { name: string | null; notes: string | null },
   garmentIds: readonly number[],
-): Promise<{ id: number; name: string | null; existing: boolean }> {
+): Promise<{
+  id: number;
+  name: string | null;
+  existing: boolean;
+  pending: boolean;
+}> {
   // Share links address outfits by this (the /share page).
   const shareableId = randomUUID();
   if (garmentIds.length === 0) {
@@ -620,12 +639,13 @@ async function insertOutfitOnce(
       .insert(outfit)
       .values({ shareableId, ownerId, ...fields })
       .returning({ id: outfit.id, name: outfit.name });
-    return { ...created, existing: false };
+    return { ...created, existing: false, pending: false };
   }
   const { rows } = await tx.execute<{
     id: number;
     name: string | null;
     existing: boolean;
+    pending: boolean;
   }>(sql`
     with existing as (${sameGarmentsOutfit(tx, ownerId, garmentIds)}),
     created as (
@@ -634,9 +654,9 @@ async function insertOutfitOnce(
       where not exists (select from existing)
       returning id, name
     )
-    select id, name, false as existing from created
+    select id, name, false as existing, false as pending from created
     union all
-    select id, name, true as existing from existing`);
+    select id, name, true as existing, pending from existing`);
   return rows[0];
 }
 
@@ -712,9 +732,16 @@ export function createOutfit(
 export async function reuseOutfit(
   tx: Queryable,
   ownerId: number,
-  existing: { id: number; name: string | null },
+  existing: { id: number; name: string | null; pending: boolean },
   plan: OutfitInput['plan'],
 ): Promise<CreateResult> {
+  // A person's save of a proposal's garments makes it theirs (#335), before
+  // any plan: a proposal not theirs may not be held (outfitMayBeHeld). The
+  // week planner never adopts one (its ideas never equal a saved set:
+  // savedSlotsSql counts proposals).
+  if (existing.pending && plan?.plannedBy !== 'auto') {
+    await adoptProposal(tx, ownerId, existing.id);
+  }
   const scheduled =
     plan &&
     (await insertEntry(tx, { ownerId, outfitId: existing.id, ...plan }));

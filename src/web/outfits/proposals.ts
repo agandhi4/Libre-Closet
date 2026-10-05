@@ -1,5 +1,4 @@
 import { and, eq, isNotNull, type SQL, sql } from 'drizzle-orm';
-import type { Queryable } from '../../db/client';
 import {
   file,
   garment,
@@ -11,13 +10,8 @@ import type { GarmentStatus } from '../../wardrobe/status';
 import { photoRefJson } from '../files/queries';
 import type { SignablePhotoRef } from '../files/image-url';
 import type { OutfitCount } from '../../wardrobe/goes-with';
-import {
-  type LookReaction,
-  type LookReactionEvent,
-  lookReactionTransition,
-} from '../../wardrobe/look-reaction';
+import type { LookReaction } from '../../wardrobe/look-reaction';
 import type { OutfitDismissReason } from '../../wardrobe/suggestions';
-import { ownerTransaction } from '../auth/queries';
 import { unlocksOf } from '../gallery/ideas';
 import {
   goesWithManyInputsSql,
@@ -25,7 +19,7 @@ import {
   readManyGoesWithInputs,
 } from '../gallery/queries';
 import { onWishlist } from '../wardrobe/status';
-import { outfitIsComplete, ownersOutfit } from './references';
+import { ownersOutfit } from './references';
 
 /**
  * Muse's outfits (#335, docs/plans/2026-10-05-muse-suggestions.md section
@@ -137,72 +131,4 @@ export function readMuseUnlocks(
 /** Which of Muse's outfits a section shows: awaiting the owner, or set aside. */
 export function isSetAside(item: Pick<MuseOutfit, 'reaction'>): boolean {
   return item.reaction === 'declined';
-}
-
-/** The owner's reactions on the Outfits tab (the agent's own moves are its tools', phase 3). */
-export type OutfitReaction =
-  | { event: 'love' }
-  | { event: 'decline'; reason: OutfitDismissReason; note: string | null }
-  | { event: 'reconsider' };
-
-export type ReactOutcome =
-  | {
-      ok: true;
-      from: LookReaction;
-      to: LookReaction;
-      /** Every piece owned: Love is "Save", the outfit the owner's now. */
-      complete: boolean;
-    }
-  /** Not the owner's outfit, or no proposal: a 404 like an unknown id. */
-  | { ok: false; reason: 'not-found' }
-  /** The reaction does not take the move (a stale page, a double tap): a 409. */
-  | { ok: false; reason: 'not-allowed'; reaction: LookReaction };
-
-/**
- * The one writer of a Muse outfit's reaction: under the owner lock, the
- * outfit locked, the machine asked (lookReactionTransition), then one
- * update: the reaction, the owner's note as the move says (written with
- * Not for me, cleared by Love and Undo), the reason only while declined,
- * and when (`reacted_at`, the agent's "feedback since", phase 3).
- */
-export function reactToOutfit(
-  db: Queryable,
-  ownerId: number,
-  outfitId: number,
-  change: OutfitReaction,
-): Promise<ReactOutcome> {
-  return ownerTransaction(db, ownerId, 'reactToOutfit', async (tx) => {
-    const [row] = await tx
-      .select({
-        reaction: outfit.reaction,
-        ownerNote: outfit.ownerNote,
-        // A parameter, never the column: this select names one table.
-        complete: outfitIsComplete(sql`${outfitId}::int`),
-      })
-      .from(outfit)
-      .where(and(eq(outfit.id, outfitId), eq(outfit.ownerId, ownerId)))
-      .for('update');
-    if (!row?.reaction) return { ok: false, reason: 'not-found' };
-    const event: LookReactionEvent = change.event;
-    const move = lookReactionTransition(row.reaction, event);
-    if (!move.ok) {
-      return { ok: false, reason: 'not-allowed', reaction: move.reaction };
-    }
-    const written = change.event === 'decline' ? change.note : null;
-    await tx
-      .update(outfit)
-      .set({
-        reaction: move.to,
-        ownerNote:
-          move.note === 'write'
-            ? written
-            : move.note === 'clear'
-              ? null
-              : row.ownerNote,
-        dismissedReason: change.event === 'decline' ? change.reason : null,
-        reactedAt: sql`now()`,
-      })
-      .where(eq(outfit.id, outfitId));
-    return { ok: true, from: move.from, to: move.to, complete: row.complete };
-  });
 }
