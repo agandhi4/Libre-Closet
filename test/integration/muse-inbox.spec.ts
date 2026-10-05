@@ -245,45 +245,51 @@ describe('the Muse inbox', () => {
   });
 
   describe('New from Muse (doc section 9)', () => {
-    it('is never in the bare page: only the seen POST’s answer names what is new', async () => {
+    const seenAt = async () =>
+      (
+        await t.db
+          .select({ seen: user.suggestionsSeenAt })
+          .from(user)
+          .where(eq(user.id, ownerId))
+      )[0].seen;
+
+    it('leaves the bare page byte for byte the same when the seen POST moves suggestions_seen_at', async () => {
       await t.db
         .update(user)
         .set({ suggestionsSeenAt: null })
         .where(eq(user.id, ownerId));
-      const first = await post('/wardrobe/wishlist/seen');
-      expect(first.statusCode).toBe(200);
-      expect(first.body).toContain('id="muse-new"');
-      expect(first.body).toContain('hx-swap-oob="true"');
-      expect(first.body).toContain('data-new-from-muse');
-
       const before = (await get('/wardrobe/wishlist')).body;
       expect(before).toContain(
         'hx-post="/wardrobe/wishlist/seen" hx-trigger="load" hx-swap="none"',
       );
       expect(before).not.toContain('data-new-from-muse');
-      // Nothing new since: an empty slot, and the page unchanged by the visit.
-      const none = await post('/wardrobe/wishlist/seen');
-      expect(none.body).not.toContain('data-new-from-muse');
-      expect((await get('/wardrobe/wishlist')).body).toBe(before);
 
-      // A new pick arrives: the page shows its need, never as "new".
+      const seen = await post('/wardrobe/wishlist/seen');
+      expect(seen.statusCode).toBe(200);
+      expect(seen.body).toContain('data-new-from-muse');
+      // The visit did move the marker: from never to the newest pick.
+      expect(await seenAt()).not.toBeNull();
+
+      expect((await get('/wardrobe/wishlist')).body).toBe(before);
+    });
+
+    it('names in the seen POST’s answer, out of band, only the needs with picks since the last look', async () => {
+      // Seen everything: an empty slot.
+      await post('/wardrobe/wishlist/seen');
+      const none = await post('/wardrobe/wishlist/seen');
+      expect(none.body).toContain('id="muse-new"');
+      expect(none.body).toContain('hx-swap-oob="true"');
+      expect(none.body).not.toContain('data-new-from-muse');
+
       const jackets = await need('A field jacket');
       const jacket = await pick('Waxed field jacket', jackets);
-      const arrived = (await get('/wardrobe/wishlist')).body;
-      expect(arrived).toContain(`data-need="${jackets}"`);
-      expect(arrived).not.toContain('data-new-from-muse');
       const fresh = unescapeHtml((await post('/wardrobe/wishlist/seen')).body);
       expect(fresh).toContain(`/wardrobe/wishlist/needs/${jackets}`);
       expect(fresh).toContain('A field jacket');
-      // The visit moved the marker to the newest pick, and the page is the same.
-      const [row] = await t.db
-        .select({ seen: user.suggestionsSeenAt })
-        .from(user)
-        .where(eq(user.id, ownerId));
-      expect(row.seen?.getTime()).toBe(
+      expect(fresh).not.toContain('A navy blazer');
+      expect((await seenAt())?.getTime()).toBe(
         (await garmentRow(t, jacket))?.suggestedAt?.getTime(),
       );
-      expect((await get('/wardrobe/wishlist')).body).toBe(arrived);
     });
 
     it('is two statements: the session, and the marker’s read and move', async () => {
