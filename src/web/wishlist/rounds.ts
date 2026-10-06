@@ -190,11 +190,14 @@ const last = sql.identifier('last');
  * The owners with an open round gone quiet, in one statement across
  * owners (the quiet close's minutely read): their newest Muse write (a
  * garment's `suggested_at`, an outfit's `proposed_at`; each table's
- * partial index on the owner and the time, so only Muse's rows are read)
+ * partial index on the owner and the time, so only Muse's rows are read;
+ * of writes at one instant, a token that still exists, then the highest)
  * is after their last round's end, or there is no round, and at or before
  * `quietSince`; and the round finishRound would store is not empty (what
  * the owner has decided already makes no round), so an owner who decided
- * everything is not found again every minute.
+ * everything is not found again every minute. Each tick reads every Muse
+ * write of every owner: fine at a household's scale, not a pattern for a
+ * table that grows without bound.
  */
 export async function quietRounds(
   db: Queryable,
@@ -219,7 +222,7 @@ export async function quietRounds(
     ),
     ${newest} as (
       select distinct on (owner_id) owner_id, at, token_id from ${writes}
-      order by owner_id, at desc
+      order by owner_id, at desc, token_id desc nulls last
     )
     select ${newest}.owner_id, ${newest}.token_id
     from ${newest}

@@ -21,11 +21,18 @@ import {
 import {
   closeQuietRounds,
   QUIET_PERIOD_MS,
+  QuietCloseFailed,
   type RoundCloseDeps,
 } from '../../src/web/wishlist/round-end';
 import { finishRound, quietRounds } from '../../src/web/wishlist/rounds';
 import { createGarment, createWishlistItem } from './garments';
-import { createTestApp, PWA_ENV, recordQueries, type TestApp } from './harness';
+import {
+  createTestApp,
+  PWA_ENV,
+  recordQueries,
+  type TestApp,
+  userIdOf,
+} from './harness';
 import { createAccessToken, tool } from './mcp';
 
 /**
@@ -285,5 +292,61 @@ describe('a round its agent left open', () => {
       expect(await rounds()).toHaveLength(count + 1);
       expect(sent).toHaveLength(1);
     });
+  });
+
+  it('keeps closing the other owners’ rounds when one fails, then fails the run for the job’s metric', async () => {
+    await suggest(1);
+    // A second owner with a quiet round of their own agent's.
+    const email = 'quiet-other@example.com';
+    const cookie = await t.register(email);
+    const otherId = await userIdOf(t, email);
+    await createAccessToken(t, { cookie, name: 'Muse' });
+    const [otherToken] = await t.db
+      .select({ id: personalAccessToken.id })
+      .from(personalAccessToken)
+      .where(eq(personalAccessToken.userId, otherId));
+    const need = await createOptionGroup(t.db, otherId, {
+      name: 'A raincoat',
+      budget: null,
+      note: null,
+      tokenId: otherToken.id,
+    });
+    if (!need.ok) throw new Error('need exists');
+    const pick = await createWishlistItem(t, { name: 'Raincoat', cookie });
+    expect(
+      await markSuggestion(t.db, otherId, pick, {
+        tokenId: otherToken.id,
+        groupId: need.id,
+        note: null,
+        rank: null,
+      }),
+    ).toBe('marked');
+    const ownerRounds = async (ownerId: number) =>
+      (await rounds()).filter((round) => round.ownerId === ownerId).length;
+    const before = await ownerRounds(t.owner.id);
+
+    // The first owner's finishRound (owners in id order) fails; the run is
+    // timed as server.ts times it.
+    vi.spyOn(t.db, 'transaction').mockRejectedValueOnce(new Error('down'));
+    const run = t.metrics.timeJob('muse_rounds', (now: Date) =>
+      closeQuietRounds(deps, now),
+    );
+    const later = new Date(Date.now() + QUIET_PERIOD_MS + 1_000);
+    const failure = await run(later).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(QuietCloseFailed);
+    expect((failure as QuietCloseFailed).ownerIds).toEqual([t.owner.id]);
+    expect(await ownerRounds(t.owner.id)).toBe(before);
+    expect(await ownerRounds(otherId)).toBe(1);
+    expect(closedLines()).toContain(
+      `Quiet round of user ${t.owner.id} not closed`,
+    );
+    const { body } = await t.metrics.exposition();
+    expect(body).toMatch(
+      /^job_duration_seconds_count\{name="muse_rounds",outcome="failure"\} 1$/m,
+    );
+
+    // The next minute closes it.
+    expect(await closeQuietRounds(deps, later)).toBe(1);
+    expect(await ownerRounds(t.owner.id)).toBe(before + 1);
   });
 });

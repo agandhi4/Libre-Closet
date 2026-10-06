@@ -93,9 +93,11 @@ export interface RoundCloseDeps {
  * nothing logged when it finds none), each round stored by finishRound
  * as the newest write's token, with no summary and the feedback cursor
  * unmoved, then every notification in one batch. An owner's failure is
- * logged and the others still close; a busy owner lock defers that one to
- * the next minute. Started by server.ts only; a spec calls it with the
- * instant it wants. How many rounds it closed.
+ * logged and the others still close, and then the run throws
+ * (QuietCloseFailed), so the job's metric records a failure; a busy owner
+ * lock defers that one to the next minute, no failure. Started by
+ * server.ts only; a spec calls it with the instant it wants. How many
+ * rounds it closed.
  */
 export async function closeQuietRounds(
   deps: RoundCloseDeps,
@@ -106,6 +108,7 @@ export async function closeQuietRounds(
     new Date(now.getTime() - QUIET_PERIOD_MS),
   );
   const closed: (EndedRound & { tokenId: number | null })[] = [];
+  const failed: number[] = [];
   for (const { ownerId, tokenId } of open) {
     try {
       const finished = await finishRound(deps.db, ownerId, {
@@ -133,6 +136,7 @@ export async function closeQuietRounds(
         { err: error },
         `Quiet round of user ${ownerId} not closed`,
       );
+      failed.push(ownerId);
     }
   }
   const notified = await notifyRounds(deps.push, deps.logger, closed);
@@ -141,5 +145,19 @@ export async function closeQuietRounds(
       `Round ${round.id} of user ${round.ownerId} closed after ${QUIET_PERIOD_MS / 60_000} quiet minutes (token ${round.tokenId ?? 'deleted'}): ${round.outfits} outfits, ${round.pieces} pieces, ${notified[index]} devices notified`,
     );
   });
+  if (failed.length > 0) throw new QuietCloseFailed(failed, open.length);
   return closed.length;
+}
+
+/** A run in which some owners' rounds failed to close (each logged with its error); the others closed. */
+export class QuietCloseFailed extends Error {
+  constructor(
+    readonly ownerIds: readonly number[],
+    open: number,
+  ) {
+    super(
+      `${ownerIds.length} of ${open} quiet round(s) not closed (users ${ownerIds.join(', ')})`,
+    );
+    this.name = 'QuietCloseFailed';
+  }
 }
