@@ -35,9 +35,11 @@ export async function migrateBefore(
   const journal = JSON.parse(
     await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
   ) as Journal;
-  const index = journal.entries.findIndex((e) => e.tag.endsWith(`_${name}`));
-  if (index < 1) {
-    throw new Error(`No migration after the first is named ${name}`);
+  // A tag is NNNN_<name>; the name must name exactly one migration.
+  const named = (tag: string) => tag.slice(tag.indexOf('_') + 1) === name;
+  const index = journal.entries.findIndex((e) => named(e.tag));
+  if (index < 1 || journal.entries.filter((e) => named(e.tag)).length > 1) {
+    throw new Error(`No single migration after the first is named ${name}`);
   }
   journal.entries = journal.entries.slice(0, index);
   const dir = await mkdtemp(join(tmpdir(), 'closet-drizzle-'));
