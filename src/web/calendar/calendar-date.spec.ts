@@ -14,7 +14,7 @@ import {
   parseYearMonth,
   startOfWeek,
   todayIn,
-} from './calendar-date';
+} from '../../calendar-date';
 
 /**
  * The plain-date arithmetic the calendar runs on. Runs in America/New_York

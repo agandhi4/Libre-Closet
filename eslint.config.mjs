@@ -20,10 +20,7 @@ const MUTED_TEXT =
 
 export default tseslint.config(
   {
-    ignores: [
-      'eslint.config.mjs',
-      './test/support/legacy-migrations/**/*',
-    ],
+    ignores: ['eslint.config.mjs', './test/support/legacy-migrations/**/*'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -60,7 +57,7 @@ export default tseslint.config(
         { assertionStyle: 'as' },
       ],
       // "Today" and every day from an instant come from todayIn() at
-      // APP_TIMEZONE (src/web/calendar/calendar-date.ts; t.today() in the
+      // APP_TIMEZONE (src/calendar-date.ts; t.today() in the
       // integration specs, householdToday() in Playwright's). A UTC date is
       // tomorrow every evening in New York: main went red at 00:01 UTC.
       'no-restricted-syntax': [
@@ -127,6 +124,47 @@ export default tseslint.config(
               name: 'hono/utils/html',
               message:
                 'Use dangerouslySetInnerHTML, the one raw-HTML escape hatch (CLAUDE.md, Web layer).',
+            },
+          ],
+        },
+      ],
+    },
+  }, // The pure layers (docs/web-layer.md, Code no feature owns): rules over
+  // plain values, no HTTP, no database, no I/O, so they run in a unit test
+  // without a mock and any feature can import them. They sit below
+  // src/web/ and src/db/; a dependency pointing up is a layering bug, so
+  // the shared type or helper moves down (src/calendar-date.ts) or the code
+  // is made generic over the caller's type (InsightGarment<Photo>). Specs
+  // are exempt: they build fixtures. This block replaces the hono/html
+  // restriction above for these files, which import no markup anyway.
+  {
+    files: ['src/wardrobe/**/*.ts', 'src/weather/**/*.ts', 'src/push/**/*.ts'],
+    ignores: ['**/*.spec.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'drizzle-orm',
+              message: 'The pure layers hold no queries (src/db/CLAUDE.md).',
+            },
+          ],
+          patterns: [
+            {
+              group: ['**/web', '**/web/**'],
+              message:
+                'The pure layers sit below src/web/: move the shared code down to src/ or make it generic over the caller type (docs/web-layer.md).',
+            },
+            {
+              group: ['**/db', '**/db/**', 'drizzle-orm/*'],
+              message:
+                'The pure layers hold no queries: the caller reads rows and passes plain values (docs/web-layer.md).',
+            },
+            {
+              group: ['node:*'],
+              message:
+                'The pure layers do no I/O and read no clock, environment or crypto: the caller passes it in (docs/web-layer.md).',
             },
           ],
         },
