@@ -645,10 +645,6 @@
     "WASHED": "Washed",
     "WHERE": "Where it is",
     "IN_CLOSET": "In the closet",
-    "away": {
-      "lent": "Lent",
-      "repair": "At repair"
-    },
     "AWAY_NOTE": "Where, or who has it",
     "AWAY_NOTE_PLACEHOLDER": "e.g. Dana has it, or the cobbler on Fulton St",
     "FILTER_NEEDS_WASH": "Needs a wash",

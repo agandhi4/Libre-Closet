@@ -45,6 +45,15 @@ describe('garmentMarks', () => {
     ).toEqual(['to-buy']);
   });
 
+  it('a bought or archived pick is no longer set aside', () => {
+    expect(garmentMarks({ status: 'closet', setAside: true }, OWNER)).toEqual(
+      [],
+    );
+    expect(garmentMarks({ status: 'archived', setAside: true }, OWNER)).toEqual(
+      ['archived'],
+    );
+  });
+
   it('never shows a viewer of a shared wardrobe away or the wash', () => {
     const lentAndDirty = { away: 'lent', needsWash: true } as const;
     expect(garmentMarks({ status: 'closet', ...lentAndDirty }, VIEWER)).toEqual(

@@ -2,9 +2,10 @@ import type { GarmentMarkKind } from '../../wardrobe/marks';
 import { type StringKey, t } from '../i18n';
 
 /**
- * Each mark's one look and one string: the badge variant, the dot's colour
- * (the same token) and its words. A mark reads the same on every surface;
- * a new mark is a row here and in GARMENT_MARKS (src/wardrobe/marks.ts).
+ * Each mark's one look and one string: the badge variant, the dot (its fill,
+ * or set-aside's outline, in the badge's token) and its words. A mark
+ * reads the same on every surface; a new mark is a row here and in
+ * GARMENT_MARKS (src/wardrobe/marks.ts).
  */
 const MARKS: Record<
   GarmentMarkKind,
@@ -32,8 +33,8 @@ const MARKS: Record<
     label: 'mark.NEEDS_WASH',
   },
   'set-aside': {
-    badge: 'badge-ghost',
-    dot: 'bg-base-300',
+    badge: 'badge-outline',
+    dot: 'border border-base-content',
     label: 'mark.SET_ASIDE',
   },
 };

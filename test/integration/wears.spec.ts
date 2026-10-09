@@ -968,7 +968,8 @@ describe('wears and washes', () => {
       // with no wash marks or away, and the filter is not offered.
       expect(grid.body).toContain('Shared tees');
       expect(grid.body).not.toContain('data-mark="needs-wash"');
-      expect(grid.body).not.toContain('>Lent</span>');
+      expect(grid.body).not.toContain('data-mark="away:lent"');
+      expect(grid.body).not.toContain('data-mark="away:repair"');
       expect(hasText(grid.body, '×3')).toBe(true);
       expect(grid.body).not.toContain('name="needsWash"');
       expect(grid.body).not.toContain('href="/laundry"');

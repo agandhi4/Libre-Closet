@@ -6,7 +6,8 @@ import type { GarmentStatus } from './status';
  * the first is the one in words, the rest go to screen readers. Status
  * first (not owned yet, owned once), then why an owned garment cannot be
  * worn now (away, then the wash). `set-aside` is a Muse pick the owner
- * turned down and stands in for `to-buy`, so the two never meet.
+ * turned down and stands in for `to-buy`, so the two never meet; only a
+ * wishlist garment is set aside (buying one keeps its `dismissedAt`).
  *
  * The badge itself (one daisyUI variant and one string per mark) is
  * `<GarmentMark>`, src/web/layout/garment-mark.tsx; this is the rule every
@@ -53,6 +54,7 @@ export function garmentMarks(
   if (garment.status === 'archived') marks.push('archived');
   if (ownerView && garment.away) marks.push(`away:${garment.away}`);
   if (ownerView && garment.needsWash) marks.push('needs-wash');
-  if (garment.setAside) marks.push('set-aside');
+  if (garment.status === 'wishlist' && garment.setAside)
+    marks.push('set-aside');
   return marks;
 }
