@@ -234,10 +234,14 @@ function CollageRow(props: {
   garments: readonly CollagePieceView[];
   eager: boolean;
 }) {
+  // Callers wrap it in aria-hidden (its imgs carry alt text, which would
+  // pad the button's or link's name); tabindex -1 keeps the scrolling strip
+  // from becoming a tab stop inside that hidden subtree (axe aria-hidden-focus).
   return (
     <span
       class="bg-base-200 rounded-field p-1 flex gap-1 w-fit max-w-full overflow-x-auto *:shrink-0"
       data-collage="row"
+      tabindex={-1}
     >
       {inOutfitOrderByCategory(props.garments).map((garment) => (
         <CollagePiece

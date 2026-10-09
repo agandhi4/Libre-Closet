@@ -52,6 +52,23 @@ describe('outfit rows', () => {
     return match![0];
   };
 
+  /** The one element whose class has `token`, open tag to its matching close (spans only). */
+  const elementWithClass = (html: string, token: string) => {
+    const opens = [
+      ...html.matchAll(new RegExp(`<span[^>]*class="[^"]*${token}[^"]*"`, 'g')),
+    ];
+    expect(opens, `one element with ${token}`).toHaveLength(1);
+    const start = opens[0].index;
+    const tags = /<span\b|<\/span>/g;
+    tags.lastIndex = start;
+    let depth = 0;
+    for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
+      depth += tag[0] === '</span>' ? -1 : 1;
+      if (depth === 0) return html.slice(start, tags.lastIndex);
+    }
+    throw new Error(`unclosed element with ${token}`);
+  };
+
   const piecesIn = (html: string) =>
     [...html.matchAll(/data-collage-piece="([^"]+)"/g)].map((m) => m[1]);
 
@@ -123,9 +140,11 @@ describe('outfit rows', () => {
     expect(button).toMatch(/<button[^>]*disabled/);
     expect(piecesIn(button)).toEqual(['tops', 'footwear']);
     expect(marksIn(button)).toEqual(['to-buy']);
-    expect(button).toMatch(
-      /group-disabled:opacity-50[^"]*" aria-hidden="true"/,
-    );
+    const dimmed = elementWithClass(button, 'group-disabled:opacity-50');
+    expect(dimmed).toMatch(/^<span[^>]*aria-hidden="true"/);
+    expect(dimmed).toContain('data-collage-piece=');
+    expect(dimmed).not.toContain('Waiting on boots');
+    expect(button).toContain('Waiting on boots');
   });
 
   it("a trip's add page shows every piece, and the mark", async () => {
