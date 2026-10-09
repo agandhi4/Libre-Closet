@@ -49,7 +49,7 @@ describe('date labels', () => {
     garmentId = await createGarment(t, { name: 'Old coat', cookie });
     await t.db
       .update(garment)
-      .set({ acquiredOn: daysAgo(500) })
+      .set({ acquiredOn: daysAgo(500), lastWashedOn: daysAgo(20) })
       .where(eq(garment.id, garmentId));
     // Worn long ago (Insights' least worn and not-worn-for lists) and this
     // week on the calendar.
@@ -91,12 +91,15 @@ describe('date labels', () => {
     expect(shown.match(ISO_DATE)).toBeNull();
   });
 
-  it('an old date reads as a date with its year: last worn, acquired', async () => {
+  it('an old date reads as a date with its year: last worn, acquired, washed', async () => {
     expect(await text('/wardrobe/insights')).toContain(
       `Last worn ${dateLabel(daysAgo(400), t.today())}`,
     );
     expect(await text(`/wardrobe/${garmentId}`)).toContain(
       dateLabel(daysAgo(500), t.today()),
+    );
+    expect(await text(`/wardrobe/${garmentId}`)).toContain(
+      `Last washed ${dateLabel(daysAgo(20), t.today())}`,
     );
     expect(dateLabel(daysAgo(500), t.today())).toMatch(
       /^[A-Z][a-z]{2} \d{1,2}, \d{4}$/,
