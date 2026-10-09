@@ -904,6 +904,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           ctx={viewContext(reply)}
           model={{
             garment,
+            today,
             capsules: context.capsules,
             viewOwner,
             wear: own && { summary: own.wear, today },

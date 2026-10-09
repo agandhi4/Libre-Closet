@@ -1,7 +1,7 @@
 import type { InsightGarment } from '../../wardrobe/insights';
 import { RECAP_MIN_WEARS, type YearRecap } from '../../wardrobe/recap';
 import { imageUrl, type SignablePhotoRef } from '../files/image-url';
-import { shortDayLabel, weekRangeLabel } from '../calendar/labels';
+import { shortDayLabel, weekRangeLabel } from '../date-labels';
 import { CALENDAR_PATH } from '../calendar/urls';
 import { jsonForScript } from '../html';
 import { t } from '../i18n';
