@@ -2,7 +2,14 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
-import { bodyOf, OutfitCollage, outfitLabel } from '../outfits/collage';
+import {
+  bodyOf,
+  hiddenBlockingMark,
+  OutfitCollage,
+  outfitLabel,
+  type CollagePieceView,
+} from '../outfits/collage';
+import { GarmentMark } from '../layout/garment-mark';
 import type { ViewContext } from '../view-context';
 import {
   WeatherCellSlot,
@@ -107,11 +114,7 @@ function MonthDay({ ctx, day }: { ctx: ViewContext; day: MonthDayView }) {
         {day.dayNum}
       </span>
       {weather && <WeatherCellSlot ctx={ctx} day={day.date} />}
-      {first && (
-        <span class="w-full">
-          <OutfitCollage garments={bodyOf(first.pieces)} size="cell" />
-        </span>
-      )}
+      {first && <CellCollage pieces={first.pieces} />}
       {worn && <span class="size-1 rounded-full bg-accent"></span>}
       {more > 0 && (
         <span class="text-xs text-muted">
@@ -119,6 +122,27 @@ function MonthDay({ ctx, day }: { ctx: ViewContext; day: MonthDayView }) {
         </span>
       )}
     </a>
+  );
+}
+
+/**
+ * The cell draws the body only (bodyOf): a blocking mark on a bag or
+ * accessory it leaves out shows as one dot, the same look and corner as a
+ * drawn piece's. aria-hidden: the cell link's label already says it
+ * (outfitLabel).
+ */
+function CellCollage({ pieces }: { pieces: CollagePieceView[] }) {
+  const drawn = bodyOf(pieces);
+  const hidden = hiddenBlockingMark(pieces, drawn);
+  return (
+    <span class="relative w-full">
+      <OutfitCollage garments={drawn} size="cell" />
+      {hidden && (
+        <span class="absolute bottom-0 right-0" aria-hidden="true">
+          <GarmentMark marks={[hidden]} dot />
+        </span>
+      )}
+    </span>
   );
 }
 

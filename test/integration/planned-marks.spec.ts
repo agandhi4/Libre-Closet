@@ -147,6 +147,34 @@ describe('planned outfits: unavailable pieces', () => {
     expect(marksIn(cell)).toEqual(['away:lent']);
   });
 
+  it("marks the month's cell for a lent bag it does not draw", async () => {
+    const bag = await createGarment(t, { name: 'Lent bag', category: 'bags' });
+    const top = await createGarment(t, { name: 'Bag top', category: 'tops' });
+    const bagOutfit = await createOutfit('Bag look', [
+      ['tops', top],
+      ['bags', bag],
+    ]);
+    const day = addDays(t.today(), 1);
+    const planned = await t.inject({
+      method: 'POST',
+      url: '/calendar',
+      ...form({ outfitId: String(bagOutfit), date: day, occasion: 'work' }),
+    });
+    expect(planned.statusCode).toBe(302);
+    await t.inject({
+      method: 'POST',
+      url: `/wardrobe/${bag}/away`,
+      ...form({ away: 'lent', awayNote: '' }),
+    });
+    const html = await page('/calendar/month');
+    const cell = new RegExp(`data-month-day="${day}"[\\s\\S]*?</a>`).exec(
+      html,
+    )![0];
+    // The cell draws the top only; the bag's warning is one hidden dot.
+    expect(cell).toContain('aria-hidden="true"');
+    expect(marksIn(cell)).toEqual(['away:lent']);
+  });
+
   it('marks the outfit page, without the wash', async () => {
     // Once on the collage, once on the "Garments in this outfit" strip.
     const lentPage = await page(`/outfits/${lentOutfit}`);
