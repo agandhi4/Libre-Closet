@@ -115,21 +115,6 @@ export function bodyOf<G extends CollagePieceView>(
 }
 
 /**
- * The first blocking mark (archived, away) among the pieces a frame leaves
- * out of its drawing (`all` minus `drawn`), so a narrow frame can still
- * warn about a lent bag. The wash is not blocking: a cell never shows it.
- */
-export function hiddenBlockingMark(
-  all: readonly CollagePieceView[],
-  drawn: readonly CollagePieceView[],
-): GarmentMarkKind | undefined {
-  return all
-    .filter((piece) => !drawn.includes(piece))
-    .flatMap((piece) => piece.marks ?? [])
-    .find((mark) => mark === 'archived' || mark.startsWith('away:'));
-}
-
-/**
  * Each size's box, garment column and piece heights: `card` for a card a
  * phone screen holds whole, `tile` for the Saved grid's two columns (about
  * 170 px wide at 390 px: a 4:5 frame so the grid's rows line up, the

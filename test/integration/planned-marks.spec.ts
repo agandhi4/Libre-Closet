@@ -143,8 +143,9 @@ describe('planned outfits: unavailable pieces', () => {
     const cell = new RegExp(`data-month-day="${t.today()}"[\\s\\S]*?</a>`).exec(
       html,
     )![0];
-    // The cell draws its day's first entry (work before evening).
-    expect(marksIn(cell)).toEqual(['away:lent']);
+    // The cell draws its day's first entry (work before evening) with its
+    // own dot, plus one hidden dot for the evening entry's archived piece.
+    expect(marksIn(cell)).toEqual(['archived', 'away:lent']);
   });
 
   it("marks the month's cell for a lent bag it does not draw", async () => {
@@ -173,6 +174,41 @@ describe('planned outfits: unavailable pieces', () => {
     // The cell draws the top only; the bag's warning is one hidden dot.
     expect(cell).toContain('aria-hidden="true"');
     expect(marksIn(cell)).toEqual(['away:lent']);
+  });
+
+  it("marks the month's cell for a later entry's lent piece", async () => {
+    const first = await createGarment(t, {
+      name: 'First top',
+      category: 'tops',
+    });
+    const second = await createGarment(t, {
+      name: 'Lent coat',
+      category: 'outerwear',
+    });
+    const day = addDays(t.today(), 2);
+    for (const [occasion, g, cat] of [
+      ['work', first, 'tops'],
+      ['evening', second, 'outerwear'],
+    ] as const) {
+      const outfitId = await createOutfit(`Day ${occasion}`, [[cat, g]]);
+      const res = await t.inject({
+        method: 'POST',
+        url: '/calendar',
+        ...form({ outfitId: String(outfitId), date: day, occasion }),
+      });
+      expect(res.statusCode).toBe(302);
+    }
+    await t.inject({
+      method: 'POST',
+      url: `/wardrobe/${second}/away`,
+      ...form({ away: 'lent', awayNote: '' }),
+    });
+    const html = await page('/calendar/month');
+    const cell = new RegExp(`data-month-day="${day}"[\\s\\S]*?</a>`).exec(
+      html,
+    )![0];
+    expect(marksIn(cell)).toEqual(['away:lent']);
+    expect(cell).toContain('aria-hidden="true"');
   });
 
   it('marks the outfit page, without the wash', async () => {
