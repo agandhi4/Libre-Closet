@@ -5,7 +5,8 @@ import {
 } from '../../wardrobe/availability';
 import { perWearCost, totalCost } from '../../wardrobe/insights';
 import { AutosaveForm } from '../autosave';
-import { daysBetween, type IsoDate } from '../../calendar-date';
+import type { IsoDate } from '../../calendar-date';
+import { relativeDay } from '../date-labels';
 import { t } from '../i18n';
 import { StyleThisLink } from '../styling/style-this';
 import { priceLabel } from '../wardrobe/garment';
@@ -134,15 +135,6 @@ function wornLine(
   ].join(' · ');
 }
 
-/** "today", "yesterday", "3 days ago", else the date. */
-export function relativeDay(day: IsoDate, today: IsoDate): string {
-  const days = daysBetween(day, today);
-  if (days === 0) return t('wear.TODAY');
-  if (days === 1) return t('wear.YESTERDAY');
-  if (days > 1 && days < 7) return t('wear.DAYS_AGO', { days });
-  return day;
-}
-
 /** "Needs a wash", or "2 of 3 need a wash" for multiples. */
 function WashState(props: { dirty: number; quantity: number }) {
   return (
@@ -160,7 +152,9 @@ function WashState(props: { dirty: number; quantity: number }) {
 /**
  * Wore today: logs one wear of this garment alone. Once logged, the same
  * day, it offers the undo instead; a worn calendar entry today says so and
- * needs no second wear (they would count once anyway: distinct days).
+ * needs no second wear (they would count once anyway: distinct days). Not
+ * WornControl (worn-control.tsx), which marks a calendar entry: this is a
+ * garment's own record, in the same words ("Wore …", "✓ Worn …", Undo).
  */
 function WoreToday(props: {
   garment: WearGarment;
@@ -169,7 +163,7 @@ function WoreToday(props: {
   if (props.today === 'entry') {
     return (
       <span class="badge badge-success self-center">
-        {t('wear.WORN_TODAY_CALENDAR')}
+        ✓ {t('wear.WORN_TODAY_CALENDAR')}
       </span>
     );
   }

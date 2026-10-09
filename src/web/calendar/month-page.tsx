@@ -14,7 +14,7 @@ import {
 import type { MonthDayView, MonthView } from './calendar-view';
 import { PageMain } from '../layout/page-main';
 import { CalendarTabs } from './calendar-tabs';
-import { DAY_LETTERS, dayLabel, monthLabel } from './labels';
+import { DAY_LETTERS, dayLabel, monthLabel } from '../date-labels';
 import { dayUrl, monthUrl } from './urls';
 
 /**
@@ -158,6 +158,6 @@ function cellLabel(day: MonthDayView): string {
     ...day.entries.map((entry) =>
       outfitLabel(entry.outfit.name || t('UNTITLED_OUTFIT'), entry.pieces),
     ),
-    ...(isWorn(day) ? [t('CALENDAR_WORN')] : []),
+    ...(isWorn(day) ? [t('wear.WORN')] : []),
   ].join(', ');
 }

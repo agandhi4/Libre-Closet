@@ -6,14 +6,16 @@ import {
 import { PostForm } from '../auth/form';
 import { AutosaveForm } from '../autosave';
 import type { IsoDate } from '../../calendar-date';
-import { dayLabel, occasionLabel } from '../calendar/labels';
+import { occasionLabel } from '../date-labels';
 import { imageUrl } from '../files/image-url';
 import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
+import { DayHeading } from '../layout/day-heading';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
 import { HangerIcon, SavedToast, StripFlags } from '../layout/parts';
 import type { ViewContext } from '../view-context';
+import { WornControl } from '../wears/worn-control';
 import { phaseLabel, tripDates } from './labels';
 import { roleGroupLabel } from '../wardrobe/labels';
 import type { PackingGarmentView, TripModel, TripOutfitView } from './model';
@@ -32,7 +34,7 @@ import { TRIP_ITEM_MAX } from './validation';
  * GET /trips/:id/weather, with the search that finds the place on the map),
  * a section per day with its outfits (and "Any day"), each with "+ Add" (a
  * saved outfit) and Ideas (the gallery for that day, with the destination's
- * forecast), "Wearing this today" while the trip is on, the packing list
+ * forecast), "Wore it" (and its Undo) while the trip is on, the packing list
  * (the garments by role with the copies to pack and warnings, checkboxes
  * saved on change) and the extras (checkboxes, add, copy from a previous
  * trip). Network first like every page but the tab roots; offline the
@@ -209,7 +211,6 @@ function DayBlock(props: {
   const { model, day, outfits } = props;
   const tripId = model.trip.id;
   const slot = day ? { day } : {};
-  const isToday = day === model.today;
   return (
     <div
       id={dayAnchor(day)}
@@ -217,14 +218,11 @@ function DayBlock(props: {
       data-trip-day={day ?? 'any'}
     >
       <div class="flex items-baseline justify-between gap-2">
-        <h3 class={`text-sm font-semibold ${isToday ? 'text-primary' : ''}`}>
-          {day ? dayLabel(day) : t('trips.ANY_DAY')}
-          {isToday && (
-            <span class="badge badge-primary badge-sm ml-2">
-              {t('trips.TODAY')}
-            </span>
-          )}
-        </h3>
+        {day ? (
+          <DayHeading as="h3" date={day} isToday={day === model.today} />
+        ) : (
+          <h3 class="text-sm font-semibold">{t('trips.ANY_DAY')}</h3>
+        )}
         <div class="flex gap-1">
           <a href={tripIdeasUrl(tripId, slot)} class="btn btn-ghost btn-xs">
             {t('trips.DAY_IDEAS')}
@@ -259,16 +257,34 @@ function TripOutfitRow(props: {
   const tripId = model.trip.id;
   const name = outfit.name || t('UNTITLED_OUTFIT');
   const wearable = wearableToday(model.trip, outfit.day, model.today);
-  const worn = model.wornToday.has(outfit.outfitId);
+  const wornEntry = model.wornToday.get(outfit.outfitId);
+  const worn =
+    wornEntry !== undefined ? (
+      <WornControl
+        entryId={wornEntry}
+        worn
+        size="pill"
+        returnTo={tripUrl(tripId)}
+      />
+    ) : wearable ? (
+      <WornControl
+        worn={false}
+        createUrl={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
+        size="pill"
+        returnTo={tripUrl(tripId)}
+      />
+    ) : null;
   return (
     <article
       class="card card-side bg-base-200 items-center gap-2 p-2"
       data-trip-outfit={outfit.id}
     >
+      {/* The thumbnails link too, but the name's link is the one assistive tech reads. */}
       <a
         href={`/outfits/${outfit.outfitId}`}
-        class="flex items-center gap-2 min-w-0 flex-1"
-        aria-label={name}
+        class="shrink-0"
+        aria-hidden="true"
+        tabindex={-1}
       >
         <span class="flex gap-1 shrink-0">
           {outfit.garments.slice(0, THUMBS).map((garment) =>
@@ -289,46 +305,37 @@ function TripOutfitRow(props: {
             ),
           )}
         </span>
-        <span class="flex flex-col min-w-0">
-          <span class="text-sm font-medium truncate">{name}</span>
-          {outfit.occasion && (
-            <span class="text-xs text-muted">
-              {occasionLabel(outfit.occasion)}
-            </span>
-          )}
-        </span>
       </a>
-      <div class="flex items-center gap-1 shrink-0">
-        {worn ? (
-          <span class="badge badge-success badge-sm" data-worn="">
-            ✓ {t('trips.WORN_TODAY')}
-          </span>
-        ) : (
-          wearable && (
-            <PostForm
-              action={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
-              needsNetwork
-            >
-              <button type="submit" class="btn btn-primary btn-xs">
-                {t('trips.WEAR_TODAY')}
-              </button>
-            </PostForm>
-          )
-        )}
-        <PostForm
-          action={tripUrl(tripId, `/outfits/${outfit.id}/delete`)}
-          confirm={t('trips.CONFIRM_REMOVE_OUTFIT')}
-          needsNetwork
+      {/* The worn control sits beside the occasion, not at the row's edge: a
+          "✓ Worn Undo" there crowds the name down to a letter at 390 px. It
+          wraps under the occasion where the column is narrow. */}
+      <div class="flex flex-col min-w-0 flex-1">
+        <a
+          href={`/outfits/${outfit.outfitId}`}
+          class="text-sm font-medium truncate"
         >
-          <button
-            type="submit"
-            class="btn btn-ghost btn-xs btn-square"
-            aria-label={t('trips.REMOVE_OUTFIT')}
-          >
-            ×
-          </button>
-        </PostForm>
+          {name}
+        </a>
+        {(outfit.occasion || worn !== null) && (
+          <span class="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+            {outfit.occasion && <span>{occasionLabel(outfit.occasion)}</span>}
+            {worn}
+          </span>
+        )}
       </div>
+      <PostForm
+        action={tripUrl(tripId, `/outfits/${outfit.id}/delete`)}
+        confirm={t('trips.CONFIRM_REMOVE_OUTFIT')}
+        needsNetwork
+      >
+        <button
+          type="submit"
+          class="btn btn-ghost btn-xs btn-square"
+          aria-label={t('trips.REMOVE_OUTFIT')}
+        >
+          ×
+        </button>
+      </PostForm>
     </article>
   );
 }
