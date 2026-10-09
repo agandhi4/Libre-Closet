@@ -1,6 +1,6 @@
 import type { Occasion } from '../../wardrobe/occasions';
 import { t } from '../i18n';
-import { OutfitCollage } from '../outfits/collage';
+import { OutfitCollage, outfitLabel } from '../outfits/collage';
 import { EntrySelfie } from '../selfies/views';
 import { stylingUrl } from '../styling/urls';
 import type { IsoDate } from '../../calendar-date';
@@ -67,7 +67,7 @@ export function OccasionRow(props: {
         <a
           href={editUrl}
           class="flex items-center gap-3 min-w-0 flex-1"
-          aria-label={name}
+          aria-label={outfitLabel(name, entry.pieces)}
         >
           <span class="w-16 shrink-0">
             <OutfitCollage garments={entry.pieces} size="thumb" />

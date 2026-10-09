@@ -15,7 +15,7 @@ import { Dock } from '../layout/dock';
 import { PAIR_GRID } from '../layout/columns';
 import { PageMain } from '../layout/page-main';
 import { Layout } from '../layout/layout';
-import { OutfitCollage } from '../outfits/collage';
+import { OutfitCollage, outfitLabel } from '../outfits/collage';
 import type { NeedsToDecide } from '../wishlist/inbox';
 import { roundReviewPath, roundWhat } from '../wishlist/round-text';
 import type { MuseRound } from '../wishlist/rounds';
@@ -199,14 +199,15 @@ function PlannedCard(props: {
   const { entry, today } = props;
   const name = entry.outfit.name || t('UNTITLED_OUTFIT');
   const worn = `/calendar/${entry.id}/worn`;
+  const pieces = entryPieces(entry, today);
   return (
     <article class="card bg-base-100 shadow-sm" data-entry={entry.id}>
       <div class="card-body p-3 gap-3">
-        <a href={`/outfits/${entry.outfit.id}`} aria-label={name}>
-          <OutfitCollage
-            garments={entryPieces(entry, today)}
-            eager={props.eager}
-          />
+        <a
+          href={`/outfits/${entry.outfit.id}`}
+          aria-label={outfitLabel(name, pieces)}
+        >
+          <OutfitCollage garments={pieces} eager={props.eager} />
         </a>
         <div class="flex items-center gap-2">
           <h3 class="font-semibold text-sm line-clamp-2 flex-1">{name}</h3>

@@ -2,7 +2,7 @@ import { t } from '../i18n';
 import { AppBar } from '../layout/app-bar';
 import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
-import { bodyOf, OutfitCollage } from '../outfits/collage';
+import { bodyOf, OutfitCollage, outfitLabel } from '../outfits/collage';
 import type { ViewContext } from '../view-context';
 import {
   WeatherCellSlot,
@@ -130,7 +130,9 @@ function isWorn(day: MonthDayView): boolean {
 function cellLabel(day: MonthDayView): string {
   return [
     dayLabel(day.date),
-    ...day.entries.map((entry) => entry.outfit.name || t('UNTITLED_OUTFIT')),
+    ...day.entries.map((entry) =>
+      outfitLabel(entry.outfit.name || t('UNTITLED_OUTFIT'), entry.pieces),
+    ),
     ...(isWorn(day) ? [t('CALENDAR_WORN')] : []),
   ].join(', ');
 }

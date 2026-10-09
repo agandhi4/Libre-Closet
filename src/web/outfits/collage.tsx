@@ -7,8 +7,9 @@ import {
 import { categoryRole, type GarmentRole } from '../../wardrobe/properties';
 import { type SignablePhotoRef, imageUrl } from '../files/image-url';
 import { viewerTrigger } from '../files/photo-viewer';
-import { GarmentMark } from '../layout/garment-mark';
+import { GarmentMark, markLabel } from '../layout/garment-mark';
 import { HangerIcon } from '../layout/parts';
+import { t } from '../i18n';
 import { isPieceToBuy } from './references';
 
 /**
@@ -67,6 +68,29 @@ export function collagePieces<G extends MarkedGarment>(
         ? ['to-buy']
         : [],
   }));
+}
+
+/**
+ * A collage link's accessible name: aria-label replaces the link's
+ * descendants for screen readers, so the pieces' sr-only mark words would
+ * never be announced. "Name: Boots (At repair), Duffel (Lent)"; the bare
+ * name when no piece has a mark.
+ */
+export function outfitLabel(
+  name: string,
+  pieces: readonly CollagePieceView[],
+): string {
+  const warnings = pieces
+    .filter((piece) => piece.marks?.length)
+    .map((piece) =>
+      t('mark.PIECE', {
+        name: piece.name || piece.category,
+        marks: piece.marks!.map((mark) => markLabel(mark)).join(', '),
+      }),
+    );
+  return warnings.length === 0
+    ? name
+    : t('mark.OUTFIT_LABEL', { name, warnings: warnings.join(', ') });
 }
 
 export interface CollageGarment extends CollagePieceView {
