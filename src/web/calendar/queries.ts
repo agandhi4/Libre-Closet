@@ -23,7 +23,7 @@ import {
   changeEntryWorn,
   type EntryWornOutcome,
   type LockedEntry,
-  needsWash,
+  dirtyCopiesSql,
 } from '../wears/queries';
 import type { IsoDate } from '../../calendar-date';
 import type { CalendarEntry } from './calendar-view';
@@ -70,7 +70,10 @@ export function entriesSql(
   const washDue =
     washOn === undefined
       ? sql`false`
-      : sql`(${outfitCalendar.day} = ${washOn} and ${outfitCalendar.wornAt} is null and ${needsWash()})`;
+      : // CASE, not AND: Postgres may evaluate AND's operands in any order, and
+        // the wear count must run only for today's unworn entries. No clean
+        // copy left (availableGarment's rule), not "some copy is dirty".
+        sql`(case when ${outfitCalendar.day} = ${washOn} and ${outfitCalendar.wornAt} is null then ${dirtyCopiesSql()} >= ${garment.quantity} else false end)`;
   return sql<CalendarEntry[]>`(
     select coalesce(json_agg(json_build_object(
       'id', ${outfitCalendar.id},

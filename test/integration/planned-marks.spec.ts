@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { addDays } from '../../src/calendar-date';
-import { outfitCalendar } from '../../src/db/schema';
+import { eq } from 'drizzle-orm';
+import { garment, garmentWear, outfitCalendar } from '../../src/db/schema';
 import { dayColumns } from './calendar-page';
 import { createGarment } from './garments';
 import { createTestApp, type TestApp } from './harness';
@@ -147,10 +148,18 @@ describe('planned outfits: unavailable pieces', () => {
   });
 
   it('marks the outfit page, without the wash', async () => {
-    expect(marksIn(await page(`/outfits/${lentOutfit}`))).toEqual([
-      'away:lent',
-    ]);
+    // Once on the collage, once on the "Garments in this outfit" strip.
+    const lentPage = await page(`/outfits/${lentOutfit}`);
+    expect(marksIn(lentPage)).toEqual(['away:lent', 'away:lent']);
+    const strip = lentPage.slice(lentPage.indexOf('outfit-garments-title'));
+    expect(marksIn(strip)).toEqual(['away:lent']);
+    expect(
+      new RegExp(
+        `href="/wardrobe/${jacket}"[\\s\\S]*?data-mark="away:lent"`,
+      ).test(strip),
+    ).toBe(true);
     expect(marksIn(await page(`/outfits/${archivedOutfit}`))).toEqual([
+      'archived',
       'archived',
     ]);
   });
@@ -189,5 +198,70 @@ describe('planned outfits: unavailable pieces', () => {
     expect(outfit.statusCode).toBe(404);
     expect(marksIn(await page('/', cookie))).toEqual([]);
     expect(marksIn(await page('/calendar', cookie))).toEqual([]);
+  });
+});
+
+/**
+ * The wash mark means "no clean copy left", the generator's rule
+ * (availableGarment): one dirty copy of three is still wearable.
+ */
+describe('planned outfits: the wash mark counts copies', () => {
+  let t: TestApp;
+  let tee: number;
+
+  const todayHtml = async () => {
+    const res = await t.inject({ method: 'GET', url: '/' });
+    expect(res.statusCode).toBe(200);
+    return res.body;
+  };
+
+  const wearOn = async (daysAgo: number[]) => {
+    await t.db.insert(garmentWear).values(
+      daysAgo.map((n) => ({
+        garmentId: tee,
+        ownerId: t.owner.id,
+        day: addDays(t.today(), -n),
+      })),
+    );
+  };
+
+  beforeAll(async () => {
+    t = await createTestApp();
+    tee = await createGarment(t, { name: 'Triple tee', category: 'tops' });
+    await t.db.update(garment).set({ quantity: 3 }).where(eq(garment.id, tee));
+    const created = await t.inject({
+      method: 'POST',
+      url: '/outfits',
+      payload: new URLSearchParams([
+        ['name', 'Copies'],
+        ['category', 'tops'],
+        ['garmentId', String(tee)],
+      ]).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const outfitId = Number(
+      /^\/outfits\/(\d+)$/.exec(String(created.headers.location))![1],
+    );
+    const planned = await t.inject({
+      method: 'POST',
+      url: '/calendar',
+      payload: new URLSearchParams({
+        outfitId: String(outfitId),
+        date: t.today(),
+        occasion: 'work',
+      }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    expect(planned.statusCode).toBe(302);
+  });
+
+  afterAll(() => t?.cleanup());
+
+  it('shows no mark while a clean copy is left, one when none is', async () => {
+    // A top is washed after one wear: one wear day, one dirty copy of three.
+    await wearOn([1]);
+    expect(await todayHtml()).not.toContain('data-mark="needs-wash"');
+    await wearOn([2, 3]);
+    expect(await todayHtml()).toContain('data-mark="needs-wash"');
   });
 });
