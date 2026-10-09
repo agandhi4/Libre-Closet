@@ -41,6 +41,7 @@ import {
   type Destination,
   destinationParams,
   garmentUrl,
+  idListValue,
   LINK_IMPORT_PATH,
   wardrobeUrl,
   WISHLIST_PATH,
@@ -53,13 +54,12 @@ import {
   type FormAudience,
   type GarmentField,
   type GarmentFormValues,
-  idListValue,
   NAME_MAX,
   PRICE_INPUT_MAX,
   SIZE_MAX,
   SOURCE_URL_MAX,
   TEXT_MAX,
-} from './validation';
+} from './garment-input';
 
 /**
  * Which form: a new garment (to the closet or the wishlist), an edit (of a
