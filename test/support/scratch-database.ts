@@ -58,7 +58,11 @@ export async function createScratchDatabase(
   try {
     name = await withAdmin(async (client) => {
       const created = scratchDatabaseName(prefix, await serverNowMs(client));
-      await client.query(`create database "${created}"`);
+      // C collation, from template0 (template1 carries the server's): the suite's ordering assertions
+      // were validated on a C server, and a bare create sorts "mauve" before "Teal" on en_US servers.
+      await client.query(
+        `create database "${created}" template template0 lc_collate 'C' lc_ctype 'C' encoding 'UTF8'`,
+      );
       return created;
     });
   } catch (error) {
