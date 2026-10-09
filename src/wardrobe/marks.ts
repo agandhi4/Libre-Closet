@@ -49,12 +49,34 @@ export function garmentMarks(
   garment: MarkedGarment,
   { ownerView }: MarkOptions,
 ): GarmentMarkKind[] {
-  const marks: GarmentMarkKind[] = [];
-  if (garment.status === 'wishlist' && !garment.setAside) marks.push('to-buy');
-  if (garment.status === 'archived') marks.push('archived');
+  const { first, last } = statusMarks(garment);
+  const marks: GarmentMarkKind[] = [...first];
   if (ownerView && garment.away) marks.push(`away:${garment.away}`);
   if (ownerView && garment.needsWash) marks.push('needs-wash');
-  if (garment.status === 'wishlist' && garment.setAside)
-    marks.push('set-aside');
+  marks.push(...last);
   return marks;
+}
+
+/**
+ * What the status says, before and after away and the wash. Exhaustive on
+ * purpose: a new status fails the typecheck here until it decides its mark.
+ */
+function statusMarks(garment: MarkedGarment): {
+  first: GarmentMarkKind[];
+  last: GarmentMarkKind[];
+} {
+  switch (garment.status) {
+    case 'wishlist':
+      return garment.setAside
+        ? { first: [], last: ['set-aside'] }
+        : { first: ['to-buy'], last: [] };
+    case 'archived':
+      return { first: ['archived'], last: [] };
+    case 'closet':
+      return { first: [], last: [] };
+    default: {
+      const unknown: never = garment.status;
+      throw new Error(`No mark for garment status ${String(unknown)}`);
+    }
+  }
 }

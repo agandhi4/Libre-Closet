@@ -242,9 +242,11 @@ function pieceMark(piece: MusePiece) {
 /**
  * One piece, big: its photo on the plinth colour (a tap opens the viewer,
  * which names it; the button's label does too). No name under it: the
- * card is the pieces. A piece to buy wears its price over its foot, the
- * link to its page (where This one and Bought it are, and its need's
- * options), always; and, when it is a number worth reading, what it
+ * card is the pieces. A marked piece wears its mark over its foot, the
+ * link to its page: a piece to buy its price (or "To buy"; its page has
+ * This one, Bought it and its need's options), a set-aside pick "Set
+ * aside", an archived piece "Archived". A piece to buy also shows, when it
+ * is a number worth reading, what it
  * unlocks with the closet, never at the cap ("50+", which a large closet
  * gives most pieces and so tells nothing, the inbox's rule).
  */
