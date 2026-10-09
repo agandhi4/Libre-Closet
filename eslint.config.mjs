@@ -18,9 +18,40 @@ const FAINT_TEXT_CLASS = '/\\btext-base-content\\x2F(?:\\d|[1-6]\\d)\\b/';
 const MUTED_TEXT =
   'Muted text is text-muted (WCAG AA on every base in both themes); a decorative graphic that carries no information is text-faint (views/assets/main.css, #88).';
 
+const HONO_RAW_HTML_PATHS = [
+  {
+    name: 'hono/html',
+    message:
+      'Use dangerouslySetInnerHTML, the one raw-HTML escape hatch (CLAUDE.md, Web layer).',
+  },
+  {
+    name: 'hono/utils/html',
+    message:
+      'Use dangerouslySetInnerHTML, the one raw-HTML escape hatch (CLAUDE.md, Web layer).',
+  },
+];
+
+// Bare spellings of the Node builtins that `node:*` also covers.
+const NODE_BUILTINS = [
+  'fs',
+  'fs/promises',
+  'path',
+  'crypto',
+  'child_process',
+  'os',
+  'http',
+  'https',
+  'net',
+];
+const NO_IO =
+  'The pure layers do no I/O and read no clock, environment or crypto: the caller passes it in (docs/web-layer.md).';
+
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs', './test/support/legacy-migrations/**/*'],
+    ignores: [
+      'eslint.config.mjs',
+      './test/support/legacy-migrations/**/*',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
@@ -114,29 +145,20 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: [
-            {
-              name: 'hono/html',
-              message:
-                'Use dangerouslySetInnerHTML, the one raw-HTML escape hatch (CLAUDE.md, Web layer).',
-            },
-            {
-              name: 'hono/utils/html',
-              message:
-                'Use dangerouslySetInnerHTML, the one raw-HTML escape hatch (CLAUDE.md, Web layer).',
-            },
-          ],
+          paths: HONO_RAW_HTML_PATHS,
         },
       ],
     },
-  }, // The pure layers (docs/web-layer.md, Code no feature owns): rules over
+  },
+
+  // The pure layers (docs/web-layer.md, Code no feature owns): rules over
   // plain values, no HTTP, no database, no I/O, so they run in a unit test
   // without a mock and any feature can import them. They sit below
   // src/web/ and src/db/; a dependency pointing up is a layering bug, so
   // the shared type or helper moves down (src/calendar-date.ts) or the code
   // is made generic over the caller's type (InsightGarment<Photo>). Specs
-  // are exempt: they build fixtures. This block replaces the hono/html
-  // restriction above for these files, which import no markup anyway.
+  // are exempt: they build fixtures. A flat-config rule replaces the earlier
+  // block's, so the hono paths are repeated from the shared const.
   {
     files: ['src/wardrobe/**/*.ts', 'src/weather/**/*.ts', 'src/push/**/*.ts'],
     ignores: ['**/*.spec.ts'],
@@ -145,10 +167,15 @@ export default tseslint.config(
         'error',
         {
           paths: [
+            ...HONO_RAW_HTML_PATHS,
             {
               name: 'drizzle-orm',
               message: 'The pure layers hold no queries (src/db/CLAUDE.md).',
             },
+            ...NODE_BUILTINS.map((name) => ({
+              name,
+              message: NO_IO,
+            })),
           ],
           patterns: [
             {
@@ -161,11 +188,7 @@ export default tseslint.config(
               message:
                 'The pure layers hold no queries: the caller reads rows and passes plain values (docs/web-layer.md).',
             },
-            {
-              group: ['node:*'],
-              message:
-                'The pure layers do no I/O and read no clock, environment or crypto: the caller passes it in (docs/web-layer.md).',
-            },
+            { group: ['node:*'], message: NO_IO },
           ],
         },
       ],

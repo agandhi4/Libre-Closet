@@ -65,8 +65,8 @@ export const PAIR_MIN_DAYS = 2;
 /** The brands listed by name; the rest are summed as others. */
 export const BRANDS_LIMIT = 8;
 
-/** One garment in the closet with its wear counts (insightGarments). */
 /**
+ * One garment in the closet with its wear counts (insightGarments).
  * `Photo` is the caller's photo reference, passed through untouched: this
  * layer never reads it (src/web/insights/queries.ts supplies a
  * SignablePhotoRef), like the outfit generator's garment type.
