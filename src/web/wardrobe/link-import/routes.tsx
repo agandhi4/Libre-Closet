@@ -7,7 +7,7 @@ import type { WebOptions } from '../../plugin';
 import { renderFragment, renderPage } from '../../render';
 import { loggableUrl } from '../../loggable-url';
 import { LINK_IMPORT_LIMIT, tooManyAttempts } from '../../security/rate-limit';
-import { authorizeWardrobe } from '../../sharing/access';
+import { authorizeGarmentWardrobe } from '../garment-access';
 import { viewContext } from '../../view-context';
 import { resolveDestination } from '../destination';
 import { renderGarmentForm } from '../render-form';
@@ -124,12 +124,11 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     LINK_IMPORT_PATH,
     { schema: { querystring: LinkQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await authorizeWardrobe(
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
         db,
         request,
         request.query.ownerId,
         'manage',
-        'Garment not found',
       );
       const { destination } = await resolveDestination(
         db,
@@ -169,12 +168,11 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const retryAfter = await linkImportRetryAfter(request);
       if (retryAfter !== undefined) throw tooManyAttempts(retryAfter);
-      const { access, viewOwner } = await authorizeWardrobe(
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
         db,
         request,
         request.query.ownerId,
         'manage',
-        'Garment not found',
       );
       const { destination } = await resolveDestination(
         db,
@@ -234,12 +232,11 @@ export const linkImportRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       }
       // The pending photo is the fetching user's, not the wardrobe's; the
       // wardrobe is still checked, so only someone who may add to it fetches.
-      const { access } = await authorizeWardrobe(
+      const { access } = await authorizeGarmentWardrobe(
         db,
         request,
         request.query.ownerId,
         'manage',
-        'Garment not found',
       );
       const url = request.body.url?.trim();
       let photo: string | undefined;

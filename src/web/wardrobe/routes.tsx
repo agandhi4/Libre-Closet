@@ -31,18 +31,18 @@ import {
   renderPage,
   wantsFragment,
 } from '../render';
-import {
-  type AuthorizedWardrobe,
-  authorizeWardrobe,
-  type WardrobeAccess,
-  type WardrobeNeed,
-} from '../sharing/access';
+import type { WardrobeAccess } from '../sharing/access';
 import { viewContext } from '../view-context';
 import { type GoesWithCloset, judgeGoesWithCloset } from '../gallery/ideas';
 import { decisionToastOf } from '../wishlist/suggestion-parts';
 import type { GoesWithInputs } from '../gallery/queries';
 import { normalizeCategory, normalizeSize } from './garment';
 import { garmentContext } from './garment-context';
+import {
+  authorizeGarmentWardrobe,
+  garmentNotFound,
+  requireGarment,
+} from './garment-access';
 import { GarmentPage, GarmentPhotoView } from './garment-page';
 import { nextDraft } from './draft-queue';
 import { pendingPhotoView } from './link-import/photo-choice';
@@ -50,8 +50,6 @@ import { PropertiesFragment } from './property-fields';
 import { repairPanel } from './repairs';
 import {
   bulkSetProperty,
-  findGarment,
-  type GarmentDetail,
   type GridFilters,
   gridPage,
   nextToTag,
@@ -139,39 +137,6 @@ import {
   stagePhotoUploads,
   type WardrobeDeps,
 } from './writes';
-
-/**
- * Who may do what (authorizeWardrobe, src/web/sharing/access.ts): a
- * wardrobe the requester cannot see is a 404 like an unknown id, and so is
- * a garment outside the wardrobe the request addresses; one they can see
- * but not change is a 403. Reads need a view, writes a MANAGE share (or
- * ownership), archive and delete ownership, and a clone only a view: it
- * lands in the requester's own wardrobe and only reads the source.
- */
-function resolve(
-  { db }: WebOptions,
-  request: FastifyRequest,
-  ownerId: number | '' | undefined,
-  need: WardrobeNeed,
-): Promise<AuthorizedWardrobe> {
-  return authorizeWardrobe(db, request, ownerId, need, GARMENT_NOT_FOUND);
-}
-
-const GARMENT_NOT_FOUND = 'Garment not found';
-
-function notFound(): HttpError {
-  return new HttpError(404, GARMENT_NOT_FOUND);
-}
-
-async function requireGarment(
-  options: WebOptions,
-  id: number,
-  ownerId: number,
-): Promise<GarmentDetail> {
-  const garment = await findGarment(options.db, id, ownerId);
-  if (!garment) throw notFound();
-  return garment;
-}
 
 /** The filters as the page echoes them. */
 function gridSearch(query: GridQuery, isOwner: boolean): GridSearch {
@@ -384,8 +349,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     { schema: { querystring: GridQuery } },
     async (request, reply) => {
       const userId = sessionUserId(request);
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
@@ -447,8 +412,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/tiles',
     { schema: { querystring: TilesQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
@@ -493,8 +458,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/new',
     { schema: { querystring: NewGarmentQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -543,8 +508,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     PHOTO_ADD_PATH,
     { schema: { querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -576,8 +541,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     DRAFT_DISCARD_PATH,
     { schema: { querystring: OwnerQuery, body: DiscardDraftBody } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -636,8 +601,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe',
     { schema: { querystring: OwnerQuery, body: GarmentBody } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -749,8 +714,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/bulk',
     { schema: { querystring: GridQuery, body: BulkBody } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -784,8 +749,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     TAG_PATH,
     { schema: { querystring: TagQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -816,15 +781,15 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       schema: { params: GarmentParams, querystring: OwnerQuery, body: TagBody },
     },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const { id } = request.params;
       const { next, ...tags } = request.body;
-      const garment = await requireGarment(options, id, access.ownerId);
+      const garment = await requireGarment(db, id, access.ownerId);
       // Only what differs from the stored garment: the card posts its
       // checked chips every time, Next included.
       const changes = readTags(tags, garment);
@@ -832,7 +797,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const changed = Object.keys(changes);
       if (changed.length > 0) {
         if (!(await updateGarmentProperties(db, id, access.ownerId, changes))) {
-          throw notFound();
+          throw garmentNotFound();
         }
         logger.info(
           `Garment ${id} tagged by user ${sessionUserId(request)}: ${changed.join(', ')}`,
@@ -851,7 +816,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         );
       }
       const saved = await taggedGarment(db, id, access.ownerId);
-      if (!saved) throw notFound();
+      if (!saved) throw garmentNotFound();
       return renderFragment(
         reply,
         <TagSaved garment={saved.garment} left={saved.left} />,
@@ -887,15 +852,15 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id',
     { schema: { params: GarmentParams, querystring: GarmentPageQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
       );
       const { id } = request.params;
       const today = todayIn(config.timeZone, new Date());
-      const garment = await requireGarment(options, id, access.ownerId);
+      const garment = await requireGarment(db, id, access.ownerId);
       const context = await garmentContext(db, garment, access, today);
       const { own } = context;
       return renderPage(
@@ -949,8 +914,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       },
     },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -958,7 +923,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const { id } = request.params;
       const fields = readCondition(request.body);
       if (!(await setCondition(db, id, access.ownerId, fields))) {
-        throw notFound();
+        throw garmentNotFound();
       }
       logger.info(
         `Garment ${id} condition ${fields.condition}${fields.conditionNote ? ' (with a note)' : ''} set by user ${sessionUserId(request)}`,
@@ -977,14 +942,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/cutout',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
       );
       const garment = await requireGarment(
-        options,
+        db,
         request.params.id,
         access.ownerId,
       );
@@ -1007,14 +972,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/cutout/retry',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const { id } = request.params;
-      const garment = await requireGarment(options, id, access.ownerId);
+      const garment = await requireGarment(db, id, access.ownerId);
       if (!garment.photo) throw new HttpError(400, 'Garment has no photo');
       const outcome = await recordCutoutEvent(db, garment.photo.fileName, {
         type: 'retry',
@@ -1035,14 +1000,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/edit',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const garment = await requireGarment(
-        options,
+        db,
         request.params.id,
         access.ownerId,
       );
@@ -1078,8 +1043,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       },
     },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
@@ -1091,7 +1056,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         formAudience({ kind: 'edit' }, viewOwner),
       );
       if (!form.ok) {
-        const stored = await requireGarment(options, id, access.ownerId);
+        const stored = await requireGarment(db, id, access.ownerId);
         return refuseForm(reply, {
           mode: {
             kind: 'edit',
@@ -1110,7 +1075,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
         });
       }
       if (!(await updateGarmentFields(db, id, access.ownerId, form.fields))) {
-        throw notFound();
+        throw garmentNotFound();
       }
       logger.info(`Garment ${id} updated by user ${sessionUserId(request)}`);
       return reply.redirect(garmentUrl(id, viewOwner), 302);
@@ -1125,14 +1090,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/clone',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
       );
       const source = await requireGarment(
-        options,
+        db,
         request.params.id,
         access.ownerId,
       );
@@ -1164,14 +1129,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     },
     async (request, reply) => {
       const userId = sessionUserId(request);
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'view',
       );
       const source = await requireGarment(
-        options,
+        db,
         request.params.id,
         access.ownerId,
       );
@@ -1209,14 +1174,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/photo',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const { id } = request.params;
-      await requireGarment(options, id, access.ownerId);
+      await requireGarment(db, id, access.ownerId);
       await replacePhoto(
         deps,
         id,
@@ -1246,14 +1211,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       },
     },
     async (request, reply) => {
-      const { access, viewOwner } = await resolve(
-        options,
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const { id } = request.params;
-      const garment = await requireGarment(options, id, access.ownerId);
+      const garment = await requireGarment(db, id, access.ownerId);
       if (!garment.photo) throw new HttpError(400, 'Garment has no photo');
       await rotateGarmentPhoto(
         deps,
@@ -1278,14 +1243,14 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id/nobg',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access } = await resolve(
-        options,
+      const { access } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'manage',
       );
       const { id } = request.params;
-      const garment = await requireGarment(options, id, access.ownerId);
+      const garment = await requireGarment(db, id, access.ownerId);
       if (!garment.photo) throw new HttpError(400, 'Garment has no photo');
       const part = await request.file();
       if (!part) throw new HttpError(400, 'No file uploaded');
@@ -1318,8 +1283,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     target: { id: number; ownerId: number | '' | undefined },
     event: 'archive' | 'restore',
   ): Promise<FastifyReply> {
-    const { access, viewOwner } = await resolve(
-      options,
+    const { access, viewOwner } = await authorizeGarmentWardrobe(
+      db,
       request,
       target.ownerId,
       'own',
@@ -1327,7 +1292,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     const { id } = target;
     const outcome = await setGarmentStatus(db, id, access.ownerId, { event });
     if (!outcome.ok) {
-      if (outcome.reason === 'not-found') throw notFound();
+      if (outcome.reason === 'not-found') throw garmentNotFound();
       logger.info(`Garment ${id} ${event} refused: it is ${outcome.status}`);
       throw new HttpError(409, STATUS_REFUSED[event]);
     }
@@ -1367,8 +1332,8 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     '/wardrobe/:id',
     { schema: { params: GarmentParams, querystring: OwnerQuery } },
     async (request, reply) => {
-      const { access } = await resolve(
-        options,
+      const { access } = await authorizeGarmentWardrobe(
+        db,
         request,
         request.query.ownerId,
         'own',
@@ -1376,7 +1341,7 @@ export const wardrobeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const { id } = request.params;
       const deleted = await removeGarment(deps, id, access.ownerId);
       if (!deleted.ok) {
-        if (deleted.reason === 'not-found') throw notFound();
+        if (deleted.reason === 'not-found') throw garmentNotFound();
         logger.info(
           `Garment ${id} delete refused for user ${access.ownerId}: a suggestion, set aside, never deleted`,
         );

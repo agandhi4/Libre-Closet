@@ -5,13 +5,11 @@ import { HttpError } from '../errors';
 import { t } from '../i18n';
 import type { WebOptions } from '../plugin';
 import { renderFragment } from '../render';
-import { authorizeWardrobe } from '../sharing/access';
+import { authorizeGarmentWardrobe, garmentNotFound } from './garment-access';
 import { LookalikesContent } from './lookalike-region';
 import { addCopies, closetLookalikes, LookalikesQuery } from './lookalikes';
 import { garmentUrl } from './urls';
 import { GarmentParams, OwnerQuery, readIdList } from './validation';
-
-const GARMENT_NOT_FOUND = 'Garment not found';
 
 /**
  * The garment form's duplicate check (#20; docs/plans/2026-09-26-wardrobe-
@@ -32,12 +30,11 @@ export const lookalikeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     { schema: { querystring: LookalikesQuery } },
     async (request, reply) => {
       const { query } = request;
-      const { access, viewOwner } = await authorizeWardrobe(
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
         db,
         request,
         query.ownerId,
         'manage',
-        GARMENT_NOT_FOUND,
       );
       const dismissed = readIdList(query.lookalikesDismissed);
       const matches = await closetLookalikes(
@@ -73,12 +70,11 @@ export const lookalikeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
     async (request, reply) => {
       const { id } = request.params;
       const userId = sessionUserId(request);
-      const { access, viewOwner } = await authorizeWardrobe(
+      const { access, viewOwner } = await authorizeGarmentWardrobe(
         db,
         request,
         request.query.ownerId,
         'manage',
-        GARMENT_NOT_FOUND,
       );
       const outcome = await addCopies(db, access.ownerId, id, 1);
       if (!outcome.ok) {
@@ -86,7 +82,7 @@ export const lookalikeRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           `Copy of garment ${id} refused for user ${userId} (${outcome.reason})`,
         );
         if (outcome.reason === 'not-found') {
-          throw new HttpError(404, GARMENT_NOT_FOUND);
+          throw garmentNotFound();
         }
         throw new HttpError(
           409,

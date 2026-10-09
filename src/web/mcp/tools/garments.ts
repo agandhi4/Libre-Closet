@@ -70,9 +70,8 @@ import {
   wardrobeFor,
 } from '../tool';
 import { ownerIdInput, rowId } from './common';
+import { GARMENT_NOT_FOUND } from '../../wardrobe/garment-access';
 import { addGarmentFromLink } from './link-import';
-
-const GARMENT_NOT_FOUND = 'Garment not found';
 
 /** A search or capsule hit, as the tools answer it. */
 export function summaryOut(garment: GarmentSummary) {
