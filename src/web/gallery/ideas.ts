@@ -21,7 +21,6 @@ import {
   findCapsule,
 } from '../capsules/queries';
 import { capsuleNotFound } from '../capsules/validation';
-import { HttpError } from '../errors';
 import { ownerTransaction } from '../auth/queries';
 import type { ScheduleOutcome } from '../calendar/queries';
 import {
@@ -66,6 +65,7 @@ import {
   styledGarment,
   type WishlistGarment,
 } from './queries';
+import { garmentNotFound } from '../wardrobe/garment-access';
 
 /**
  * Ideas for a person, a day and an occasion: the generator
@@ -167,7 +167,7 @@ export async function ideasScope(
   ]);
   if (asked.capsuleId !== undefined && !capsule) throw capsuleNotFound();
   if (asked.withId !== undefined && !styled) {
-    throw new HttpError(404, 'Garment not found');
+    throw garmentNotFound();
   }
   return { capsule, styled };
 }

@@ -19,6 +19,7 @@ import {
   type PropertyFormValues,
   storedPropertyValues,
 } from './validation';
+import { garmentNotFound } from './garment-access';
 
 /**
  * The Muse need `needId` a new closet garment is bought for ("Bought a
@@ -144,7 +145,7 @@ export async function resolveDestination(
   const replaced = query.replaces
     ? await findGarment(db, query.replaces, access.ownerId)
     : null;
-  if (replaced === undefined) throw new HttpError(404, 'Garment not found');
+  if (replaced === undefined) throw garmentNotFound();
   return {
     destination: {
       to: 'wishlist',
