@@ -258,15 +258,33 @@ function TripOutfitRow(props: {
   const name = outfit.name || t('UNTITLED_OUTFIT');
   const wearable = wearableToday(model.trip, outfit.day, model.today);
   const wornEntry = model.wornToday.get(outfit.outfitId);
+  const worn =
+    wornEntry !== undefined ? (
+      <WornControl
+        entryId={wornEntry}
+        worn
+        size="pill"
+        returnTo={tripUrl(tripId)}
+      />
+    ) : wearable ? (
+      <WornControl
+        worn={false}
+        createUrl={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
+        size="pill"
+        returnTo={tripUrl(tripId)}
+      />
+    ) : null;
   return (
     <article
       class="card card-side bg-base-200 items-center gap-2 p-2"
       data-trip-outfit={outfit.id}
     >
+      {/* The thumbnails link too, but the name's link is the one assistive tech reads. */}
       <a
         href={`/outfits/${outfit.outfitId}`}
-        class="flex items-center gap-2 min-w-0 flex-1"
-        aria-label={name}
+        class="shrink-0"
+        aria-hidden="true"
+        tabindex={-1}
       >
         <span class="flex gap-1 shrink-0">
           {outfit.garments.slice(0, THUMBS).map((garment) =>
@@ -287,47 +305,37 @@ function TripOutfitRow(props: {
             ),
           )}
         </span>
-        <span class="flex flex-col min-w-0">
-          <span class="text-sm font-medium truncate">{name}</span>
-          {outfit.occasion && (
-            <span class="text-xs text-muted">
-              {occasionLabel(outfit.occasion)}
-            </span>
-          )}
-        </span>
       </a>
-      <div class="flex items-center gap-1 shrink-0">
-        {wornEntry !== undefined ? (
-          <WornControl
-            entryId={wornEntry}
-            worn
-            size="pill"
-            returnTo={tripUrl(tripId)}
-          />
-        ) : (
-          wearable && (
-            <WornControl
-              worn={false}
-              createUrl={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
-              size="pill"
-              returnTo={tripUrl(tripId)}
-            />
-          )
-        )}
-        <PostForm
-          action={tripUrl(tripId, `/outfits/${outfit.id}/delete`)}
-          confirm={t('trips.CONFIRM_REMOVE_OUTFIT')}
-          needsNetwork
+      {/* The worn control sits beside the occasion, not at the row's edge: a
+          "✓ Worn Undo" there crowds the name down to a letter at 390 px. It
+          wraps under the occasion where the column is narrow. */}
+      <div class="flex flex-col min-w-0 flex-1">
+        <a
+          href={`/outfits/${outfit.outfitId}`}
+          class="text-sm font-medium truncate"
         >
-          <button
-            type="submit"
-            class="btn btn-ghost btn-xs btn-square"
-            aria-label={t('trips.REMOVE_OUTFIT')}
-          >
-            ×
-          </button>
-        </PostForm>
+          {name}
+        </a>
+        {(outfit.occasion || worn !== null) && (
+          <span class="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+            {outfit.occasion && <span>{occasionLabel(outfit.occasion)}</span>}
+            {worn}
+          </span>
+        )}
       </div>
+      <PostForm
+        action={tripUrl(tripId, `/outfits/${outfit.id}/delete`)}
+        confirm={t('trips.CONFIRM_REMOVE_OUTFIT')}
+        needsNetwork
+      >
+        <button
+          type="submit"
+          class="btn btn-ghost btn-xs btn-square"
+          aria-label={t('trips.REMOVE_OUTFIT')}
+        >
+          ×
+        </button>
+      </PostForm>
     </article>
   );
 }
