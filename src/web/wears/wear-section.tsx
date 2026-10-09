@@ -11,7 +11,7 @@ import { StyleThisLink } from '../styling/style-this';
 import { priceLabel } from '../wardrobe/garment';
 import type { GarmentDetail } from '../wardrobe/queries';
 import { garmentUrl } from '../wardrobe/urls';
-import { CARE_NOTE_MAX } from '../wardrobe/validation';
+import { CARE_NOTE_MAX } from '../wardrobe/garment-input';
 import { markLabel } from '../layout/garment-mark';
 import type { WearGarment, WearSummary } from './queries';
 
