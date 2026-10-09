@@ -400,6 +400,12 @@ export const calendarRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
           today,
         );
         if (!entry) throw entryNotFound();
+        // The headers, not the posted markup, decide where it lands: a
+        // cached pre-#369 page has a pill targeting itself, which would
+        // nest the row inside the row. Every generation of the row carries
+        // `data-occasion`, and the control sits inside it.
+        reply.header('HX-Retarget', 'closest [data-occasion]');
+        reply.header('HX-Reswap', 'outerHTML');
         return renderFragment(
           reply,
           <OccasionRow

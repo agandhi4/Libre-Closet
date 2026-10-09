@@ -748,6 +748,30 @@ describe('calendar', () => {
       expect(await wornAt(entry)).toBeNull();
     });
 
+    it('retargets htmx to the entry row by header, whatever target the posted pill carried', async () => {
+      const outfit = await createOutfit('Retargeted');
+      const entry = await schedule(outfit, PAST);
+      for (const target of [undefined, 'this']) {
+        const res = await t.inject({
+          method: 'POST',
+          url: `/calendar/${entry}/worn`,
+          ...form({ week: PAST }),
+          headers: {
+            ...form({}).headers,
+            'hx-request': 'true',
+            // A cached pre-redesign pill: the form targeted itself.
+            ...(target && { 'hx-target': target }),
+          },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.headers['hx-retarget']).toBe('closest [data-occasion]');
+        expect(res.headers['hx-reswap']).toBe('outerHTML');
+      }
+      // A plain post sets neither.
+      const plain = await post(entry, { htmx: false, worn: '1' });
+      expect(plain.headers['hx-retarget']).toBeUndefined();
+    });
+
     it("says today's pill as the verb, marks and undoes it in place", async () => {
       const today = t.today();
       const outfit = await createOutfit('Worn today pill');
