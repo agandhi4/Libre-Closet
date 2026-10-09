@@ -109,7 +109,7 @@ function MonthDay({ ctx, day }: { ctx: ViewContext; day: MonthDayView }) {
       {weather && <WeatherCellSlot ctx={ctx} day={day.date} />}
       {first && (
         <span class="w-full">
-          <OutfitCollage garments={bodyOf(first.outfit.garments)} size="cell" />
+          <OutfitCollage garments={bodyOf(first.pieces)} size="cell" />
         </span>
       )}
       {worn && <span class="size-1 rounded-full bg-accent"></span>}

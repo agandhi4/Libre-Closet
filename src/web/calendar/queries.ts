@@ -23,6 +23,7 @@ import {
   changeEntryWorn,
   type EntryWornOutcome,
   type LockedEntry,
+  needsWash,
 } from '../wears/queries';
 import type { IsoDate } from '../../calendar-date';
 import type { CalendarEntry } from './calendar-view';
@@ -52,12 +53,24 @@ export type EntryMiss = 'not-found';
  * (owner_id, day). Every table appears once in each scope, so the columns
  * need no aliases: the selfie's `file` and the garments' are in sibling
  * subqueries.
+ *
+ * Each garment carries what its collage warns about (#358, entryPieces in
+ * calendar-view.ts): its status and away, and on `washOn` (today, where a
+ * page draws today's cards) whether it needs a wash, counted only for that
+ * day's unworn entries, so the month and past days cost no wear count.
+ * Away and the wash are the owner's records: every caller is the owner's
+ * own calendar (outfits and entries are never shared).
  */
 export function entriesSql(
   ownerId: number,
   first: IsoDate,
   last: IsoDate,
+  { washOn }: { washOn?: IsoDate } = {},
 ): SQL<CalendarEntry[]> {
+  const washDue =
+    washOn === undefined
+      ? sql`false`
+      : sql`(${outfitCalendar.day} = ${washOn} and ${outfitCalendar.wornAt} is null and ${needsWash()})`;
   return sql<CalendarEntry[]>`(
     select coalesce(json_agg(json_build_object(
       'id', ${outfitCalendar.id},
@@ -74,7 +87,10 @@ export function entriesSql(
             'id', ${garment.id},
             'name', ${garment.name},
             'category', ${garment.category},
-            'photo', ${photoRefJson}
+            'photo', ${photoRefJson},
+            'status', ${garment.status},
+            'away', ${garment.away},
+            'needsWash', ${washDue}
           ) order by ${outfitSlot.position}), '[]')
           from ${outfitSlot}
           inner join ${garment} on ${garment.id} = ${outfitSlot.garmentId}

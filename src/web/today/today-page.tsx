@@ -3,7 +3,7 @@ import type { Idea } from '../../wardrobe/generator';
 import type { Occasion } from '../../wardrobe/occasions';
 import { PostForm } from '../auth/form';
 import type { IsoDate } from '../../calendar-date';
-import type { CalendarEntry } from '../calendar/calendar-view';
+import { type CalendarEntry, entryPieces } from '../calendar/calendar-view';
 import { dayLabel, occasionLabel } from '../calendar/labels';
 import { ideaName, type IdeasWeather } from '../gallery/ideas';
 import { Reasons } from '../gallery/ideas-page';
@@ -203,7 +203,10 @@ function PlannedCard(props: {
     <article class="card bg-base-100 shadow-sm" data-entry={entry.id}>
       <div class="card-body p-3 gap-3">
         <a href={`/outfits/${entry.outfit.id}`} aria-label={name}>
-          <OutfitCollage garments={entry.outfit.garments} eager={props.eager} />
+          <OutfitCollage
+            garments={entryPieces(entry, today)}
+            eager={props.eager}
+          />
         </a>
         <div class="flex items-center gap-2">
           <h3 class="font-semibold text-sm line-clamp-2 flex-1">{name}</h3>

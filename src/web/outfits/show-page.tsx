@@ -13,7 +13,7 @@ import { EntrySelfie, SelfieView } from '../selfies/views';
 import { ShareLinkButton } from '../share/share-button';
 import { stylingUrl } from '../styling/urls';
 import type { ViewContext } from '../view-context';
-import { OutfitCollage } from './collage';
+import { collagePieces, OutfitCollage } from './collage';
 import type {
   OutfitEntries,
   OutfitPageDetail,
@@ -87,7 +87,14 @@ export function OutfitPage(props: {
         )}
         {outfit.notes && <p class="text-muted text-sm px-1">{outfit.notes}</p>}
         {outfit.garments.length > 0 ? (
-          <OutfitCollage garments={outfit.garments} eager />
+          <OutfitCollage
+            // The owner's own outfit (outfitDetailSql), so their records show.
+            garments={collagePieces(outfit.garments, {
+              warn: true,
+              ownerView: true,
+            })}
+            eager
+          />
         ) : (
           <p class="text-muted text-sm italic">{t('OUTFIT_NO_GARMENTS')}</p>
         )}

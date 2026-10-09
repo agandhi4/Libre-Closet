@@ -170,7 +170,7 @@ export const calendarRoutes: FastifyPluginCallbackTypebox<WebOptions> = (
       const { entries, looks, template, banner } = await weekContext(
         db,
         ownerId,
-        shown,
+        { ...shown, today },
         planned === undefined
           ? undefined
           : { planned, today, hour: hourIn(config.timeZone, new Date()) },

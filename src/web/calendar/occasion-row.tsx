@@ -4,7 +4,7 @@ import { OutfitCollage } from '../outfits/collage';
 import { EntrySelfie } from '../selfies/views';
 import { stylingUrl } from '../styling/urls';
 import type { IsoDate } from '../../calendar-date';
-import type { CalendarEntry } from './calendar-view';
+import type { CalendarEntry, EntryView } from './calendar-view';
 import { occasionLabel } from './labels';
 import { OPEN_PLAN_SHEET, planSheetChoice } from './plan-sheet';
 import { dayUrl, planPageUrl } from './urls';
@@ -22,7 +22,7 @@ import { WornButton } from './worn-button';
  * `data-occasion` is what the specs read the order from.
  */
 export function OccasionRow(props: {
-  entry: CalendarEntry;
+  entry: EntryView;
   /** The day is after today: no worn pill (setEntryWorn refuses it). */
   future: boolean;
 }) {
@@ -70,7 +70,7 @@ export function OccasionRow(props: {
           aria-label={name}
         >
           <span class="w-16 shrink-0">
-            <OutfitCollage garments={entry.outfit.garments} size="thumb" />
+            <OutfitCollage garments={entry.pieces} size="thumb" />
           </span>
           <span class="text-sm font-medium line-clamp-2">{name}</span>
         </a>
