@@ -58,10 +58,11 @@ export async function createScratchDatabase(
   try {
     name = await withAdmin(async (client) => {
       const created = scratchDatabaseName(prefix, await serverNowMs(client));
-      // C collation, from template0 (template1 carries the server's): the suite's ordering assertions
-      // were validated on a C server, and a bare create sorts "mauve" before "Teal" on en_US servers.
+      // C collation, from template0 (template1 carries the server's): the ordering assertions were
+      // validated on linux-box's pgvault-dev (C), while CI's stock postgres image is en_US.utf8 and
+      // sorts "mauve" before "Teal". The pin makes every server agree.
       await client.query(
-        `create database "${created}" template template0 lc_collate 'C' lc_ctype 'C' encoding 'UTF8'`,
+        `create database "${created}" template template0 locale_provider libc lc_collate 'C' lc_ctype 'C' encoding 'UTF8'`,
       );
       return created;
     });
