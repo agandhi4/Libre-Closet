@@ -10,6 +10,7 @@ import { viewerTrigger } from '../files/photo-viewer';
 import { GarmentMark, markLabel } from '../layout/garment-mark';
 import { HangerIcon } from '../layout/parts';
 import { t } from '../i18n';
+import { categoryLabel } from '../wardrobe/garment';
 import { isPieceToBuy } from './references';
 
 /**
@@ -84,7 +85,7 @@ export function outfitLabel(
     .filter((piece) => piece.marks?.length)
     .map((piece) =>
       t('mark.PIECE', {
-        name: piece.name || piece.category,
+        name: piece.name || categoryLabel(piece.category),
         marks: piece.marks!.map((mark) => markLabel(mark)).join(', '),
       }),
     );

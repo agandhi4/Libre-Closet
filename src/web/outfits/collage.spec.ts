@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collagePieces, type PieceMarking } from './collage';
+import { collagePieces, outfitLabel, type PieceMarking } from './collage';
 
 /**
  * How a collage marks an outfit's pieces (#358): to-buy everywhere; the
@@ -48,5 +48,21 @@ describe('collagePieces', () => {
       [],
       [],
     ]);
+  });
+});
+
+describe('outfitLabel', () => {
+  const piece = { photo: null, category: 'outerwear' };
+
+  it('keeps the bare name when no piece has a mark', () => {
+    expect(outfitLabel('Look', [{ ...piece, name: 'Coat', marks: [] }])).toBe(
+      'Look',
+    );
+  });
+
+  it('names an unnamed marked piece by its translated category', () => {
+    expect(
+      outfitLabel('Look', [{ ...piece, name: null, marks: ['away:lent'] }]),
+    ).toBe('Look: Outerwear (Lent)');
   });
 });
