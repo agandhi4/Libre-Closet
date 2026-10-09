@@ -3,10 +3,9 @@ import { seededRandom } from '../../random';
 import {
   generateIdeas,
   type Idea,
-  OUTFIT_ORDER,
+  inOutfitOrderByCategory,
 } from '../../wardrobe/generator';
 import { OCCASION_HINTS, type Occasion } from '../../wardrobe/occasions';
-import { categoryRole } from '../../wardrobe/properties';
 import { FORECAST_DAYS, forecastDay } from '../../weather/forecast';
 import type { Location } from '../../weather/location';
 import { type WeatherNeeds, weatherNeeds } from '../../weather/match';
@@ -394,14 +393,6 @@ export function browseIdea(input: {
   return idea;
 }
 
-/** Garments as an outfit's slots and name list them: top to toe (OUTFIT_ORDER), the given order among equals. */
-export function topToToe<G extends { category: string }>(
-  garments: readonly G[],
-): G[] {
-  const rank = (g: G) => OUTFIT_ORDER.indexOf(categoryRole(g.category));
-  return [...garments].sort((a, b) => rank(a) - rank(b));
-}
-
 /**
  * The name a picked idea is saved with, changeable later: its garments top
  * to toe, by name or else their category ("Olive chore coat, White tee,
@@ -410,7 +401,7 @@ export function topToToe<G extends { category: string }>(
 export function ideaName(
   garments: readonly { name: string | null; category: string }[],
 ): string {
-  const name = topToToe(garments)
+  const name = inOutfitOrderByCategory(garments)
     .map((g) => g.name ?? categoryLabel(g.category))
     .join(', ');
   return name.length <= OUTFIT_NAME_MAX

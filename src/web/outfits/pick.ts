@@ -4,7 +4,8 @@ import type { Occasion } from '../../wardrobe/occasions';
 import type { PlannedBy } from '../../wardrobe/week';
 import { ownerTransaction } from '../auth/queries';
 import type { ScheduleOutcome } from '../calendar/queries';
-import { ideaName, topToToe } from '../gallery/ideas';
+import { inOutfitOrderByCategory } from '../../wardrobe/generator';
+import { ideaName } from '../gallery/ideas';
 import { pickedGarments } from '../gallery/queries';
 import { type CreateResult, createOutfit, reuseOutfit } from './queries';
 
@@ -69,7 +70,7 @@ export function pickIdea(
     if (existing)
       return pickResult(await reuseOutfit(tx, ownerId, existing, input.plan));
     const byId = new Map(found.map((g) => [g.id, g]));
-    const garments = topToToe(wanted.map((id) => byId.get(id)!));
+    const garments = inOutfitOrderByCategory(wanted.map((id) => byId.get(id)!));
     const name = input.name ?? ideaName(garments);
     // createOutfit asks again in its insert (a no-op here, under the lock).
     const saved = await createOutfit(tx, ownerId, {
