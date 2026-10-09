@@ -38,24 +38,7 @@ import {
   renderGarmentForm,
 } from './render-form';
 import { setGarmentStatus, type StatusChange } from './status';
-import { garmentUrl, wardrobeUrl, WISHLIST_PATH } from './urls';
-import {
-  ConditionBody,
-  formValues,
-  GarmentBody,
-  type GarmentField,
-  GarmentPageQuery,
-  GarmentParams,
-  NewGarmentQuery,
-  OwnerQuery,
-  PropertiesFragmentQuery,
-  propertyFormValues,
-  readCondition,
-  readGarmentForm,
-  readIdList,
-  storedFormValues,
-  withPresets,
-} from './validation';
+import { garmentUrl, wardrobeUrl, WISHLIST_PATH, readIdList } from './urls';
 import {
   cloneGarment,
   createGarment,
@@ -63,6 +46,23 @@ import {
   removeGarment,
   type WardrobeDeps,
 } from './writes';
+import {
+  ConditionBody,
+  GarmentPageQuery,
+  NewGarmentQuery,
+  PropertiesFragmentQuery,
+} from './garment-schemas';
+import {
+  formValues,
+  GarmentBody,
+  type GarmentField,
+  propertyFormValues,
+  readCondition,
+  readGarmentForm,
+  storedFormValues,
+  withPresets,
+} from './garment-input';
+import { GarmentParams, OwnerQuery } from '../schemas';
 
 /** Archive and Restore's 409 when the garment's status does not take the event. */
 const STATUS_REFUSED: Record<Exclude<StatusChange['event'], 'buy'>, string> = {

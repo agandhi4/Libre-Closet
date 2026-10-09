@@ -21,14 +21,8 @@ import {
   garmentUrl,
   PHOTO_ADD_PATH,
   wardrobeUrl,
-} from './urls';
-import {
-  DiscardDraftBody,
-  GarmentParams,
-  OwnerQuery,
   readIdList,
-  RotateBody,
-} from './validation';
+} from './urls';
 import {
   discardPendingPhoto,
   replacePhoto,
@@ -36,6 +30,8 @@ import {
   stagePhotoUploads,
   type WardrobeDeps,
 } from './writes';
+import { DiscardDraftBody, RotateBody } from './garment-schemas';
+import { GarmentParams, OwnerQuery } from '../schemas';
 
 /**
  * A garment's photo: the add sheet's upload and a draft's Discard, the

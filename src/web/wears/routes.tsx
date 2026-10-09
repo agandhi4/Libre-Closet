@@ -8,7 +8,7 @@ import { todayIn } from '../../calendar-date';
 import { HttpError } from '../errors';
 import type { WebOptions } from '../plugin';
 import { renderFragment, renderPage } from '../render';
-import { RowId } from '../schemas';
+import { GarmentParams, OwnerQuery, RowId } from '../schemas';
 import { sharedWardrobesOf } from '../sharing/access';
 import { viewContext } from '../view-context';
 import {
@@ -17,11 +17,7 @@ import {
 } from '../wardrobe/garment-access';
 import { findGarment } from '../wardrobe/queries';
 import { garmentUrl, LAUNDRY_PATH } from '../wardrobe/urls';
-import {
-  CARE_NOTE_MAX,
-  GarmentParams,
-  OwnerQuery,
-} from '../wardrobe/validation';
+import { CARE_NOTE_MAX } from '../wardrobe/garment-input';
 import { LaundryPage } from './laundry-page';
 import {
   laundryList,

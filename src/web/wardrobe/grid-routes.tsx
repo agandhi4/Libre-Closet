@@ -38,20 +38,7 @@ import {
   TagPage,
   TagSaved,
 } from './tag-page';
-import { TAG_PATH, wardrobeUrl } from './urls';
-import {
-  BulkBody,
-  GarmentParams,
-  GridQuery,
-  OwnerQuery,
-  pick,
-  readBulkChange,
-  readIdList,
-  readTags,
-  TagBody,
-  TagQuery,
-  TilesQuery,
-} from './validation';
+import { TAG_PATH, wardrobeUrl, readIdList } from './urls';
 import {
   GarmentTiles,
   type GridSearch,
@@ -59,6 +46,16 @@ import {
   WardrobeFragment,
   WardrobePage,
 } from './wardrobe-page';
+import {
+  BulkBody,
+  GridQuery,
+  readBulkChange,
+  readTags,
+  TagBody,
+  TagQuery,
+  TilesQuery,
+} from './grid-schemas';
+import { GarmentParams, OwnerQuery, pick } from '../schemas';
 
 /** The filters as the page echoes them. */
 function gridSearch(query: GridQuery, isOwner: boolean): GridSearch {

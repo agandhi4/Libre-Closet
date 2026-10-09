@@ -5,11 +5,11 @@ import { HttpError } from '../errors';
 import { t } from '../i18n';
 import type { WebOptions } from '../plugin';
 import { renderFragment } from '../render';
+import { GarmentParams, OwnerQuery } from '../schemas';
 import { authorizeGarmentWardrobe, garmentNotFound } from './garment-access';
 import { LookalikesContent } from './lookalike-region';
 import { addCopies, closetLookalikes, LookalikesQuery } from './lookalikes';
-import { garmentUrl } from './urls';
-import { GarmentParams, OwnerQuery, readIdList } from './validation';
+import { garmentUrl, readIdList } from './urls';
 
 /**
  * The garment form's duplicate check (#20; docs/plans/2026-09-26-wardrobe-

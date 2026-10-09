@@ -36,7 +36,7 @@ import {
   lockGarment,
   replacePhotoRow,
 } from './queries';
-import type { GarmentFields } from './validation';
+import type { GarmentFields } from './garment-input';
 import { garmentNotFound } from './garment-access';
 
 /**
