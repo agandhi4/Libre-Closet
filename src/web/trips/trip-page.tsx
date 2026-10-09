@@ -15,6 +15,7 @@ import { Dock } from '../layout/dock';
 import { Layout } from '../layout/layout';
 import { HangerIcon, SavedToast, StripFlags } from '../layout/parts';
 import type { ViewContext } from '../view-context';
+import { WornControl } from '../wears/worn-control';
 import { phaseLabel, tripDates } from './labels';
 import { roleGroupLabel } from '../wardrobe/labels';
 import type { PackingGarmentView, TripModel, TripOutfitView } from './model';
@@ -33,7 +34,7 @@ import { TRIP_ITEM_MAX } from './validation';
  * GET /trips/:id/weather, with the search that finds the place on the map),
  * a section per day with its outfits (and "Any day"), each with "+ Add" (a
  * saved outfit) and Ideas (the gallery for that day, with the destination's
- * forecast), "Wearing this today" while the trip is on, the packing list
+ * forecast), "Wore it" (and its Undo) while the trip is on, the packing list
  * (the garments by role with the copies to pack and warnings, checkboxes
  * saved on change) and the extras (checkboxes, add, copy from a previous
  * trip). Network first like every page but the tab roots; offline the
@@ -256,7 +257,7 @@ function TripOutfitRow(props: {
   const tripId = model.trip.id;
   const name = outfit.name || t('UNTITLED_OUTFIT');
   const wearable = wearableToday(model.trip, outfit.day, model.today);
-  const worn = model.wornToday.has(outfit.outfitId);
+  const wornEntry = model.wornToday.get(outfit.outfitId);
   return (
     <article
       class="card card-side bg-base-200 items-center gap-2 p-2"
@@ -296,20 +297,21 @@ function TripOutfitRow(props: {
         </span>
       </a>
       <div class="flex items-center gap-1 shrink-0">
-        {worn ? (
-          <span class="badge badge-success badge-sm" data-worn="">
-            ✓ {t('trips.WORN_TODAY')}
-          </span>
+        {wornEntry !== undefined ? (
+          <WornControl
+            entryId={wornEntry}
+            worn
+            size="pill"
+            returnTo={tripUrl(tripId)}
+          />
         ) : (
           wearable && (
-            <PostForm
-              action={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
-              needsNetwork
-            >
-              <button type="submit" class="btn btn-primary btn-xs">
-                {t('trips.WEAR_TODAY')}
-              </button>
-            </PostForm>
+            <WornControl
+              worn={false}
+              createUrl={tripUrl(tripId, `/outfits/${outfit.id}/wear`)}
+              size="pill"
+              returnTo={tripUrl(tripId)}
+            />
           )
         )}
         <PostForm
