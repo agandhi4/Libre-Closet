@@ -263,6 +263,72 @@ describe('planned outfits: unavailable pieces', () => {
     expect(marksIn(await page('/', cookie))).toEqual([]);
     expect(marksIn(await page('/calendar', cookie))).toEqual([]);
   });
+
+  it('redraws the whole row when the pill is tapped: no mark and no Change once worn, both back on undo', async () => {
+    const cape = await createGarment(t, {
+      name: 'Lent cape',
+      category: 'outerwear',
+    });
+    const dress = await createGarment(t, { name: 'Dress', category: 'tops' });
+    const outfitId = await createOutfit('Row look', [
+      ['outerwear', cape],
+      ['tops', dress],
+    ]);
+    await plan(outfitId, 'daytime');
+    const lent = await t.inject({
+      method: 'POST',
+      url: `/wardrobe/${cape}/away`,
+      ...form({ away: 'lent', awayNote: '' }),
+    });
+    expect(lent.statusCode).toBe(303);
+    const [entry] = await t.db
+      .select({ id: outfitCalendar.id })
+      .from(outfitCalendar)
+      .where(eq(outfitCalendar.outfitId, outfitId));
+    const row = (html: string) => {
+      // Up to the next row, or the end of the day's column.
+      const open = '<div class="flex flex-col gap-1 py-2" data-occasion=';
+      const start = html.indexOf(`${open}"daytime"`);
+      const next = html.indexOf(open, start + 1);
+      return html.slice(start, next === -1 ? undefined : next);
+    };
+    const toggle = async (worn: '1' | '0') => {
+      const res = await t.inject({
+        method: 'POST',
+        url: `/calendar/${entry.id}/worn`,
+        ...form({ worn, returnTo: '/' }),
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'hx-request': 'true',
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).not.toContain('<html');
+      return res.body;
+    };
+    const change = `data-change-entry="${entry.id}"`;
+    const warned = 'aria-label="Row look: ';
+
+    const planned = row(dayColumns(await page('/calendar')).get(t.today())!);
+    expect(marksIn(planned)).toEqual(['away:lent']);
+    expect(planned).toContain(change);
+
+    const worn = await toggle('1');
+    expect(worn.startsWith('<div')).toBe(true);
+    expect(worn).toContain('data-occasion="daytime"');
+    expect(marksIn(worn)).toEqual([]);
+    expect(worn).not.toContain(change);
+    expect(worn).not.toContain(warned);
+    expect(worn).toContain('aria-label="Row look"');
+    expect(worn).toContain('data-worn=""');
+
+    const undone = await toggle('0');
+    expect(marksIn(undone)).toEqual(['away:lent']);
+    expect(undone).toContain(change);
+    expect(undone).toContain(warned);
+    // The same markup a full page load draws for the entry.
+    expect(undone).toBe(planned);
+  });
 });
 
 /**

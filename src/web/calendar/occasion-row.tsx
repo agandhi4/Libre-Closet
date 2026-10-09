@@ -19,7 +19,8 @@ import { dayUrl, planPageUrl } from './urls';
  * pill. The one way a day's entries are drawn: the week agenda stacks them
  * in occasion order, and Today (#15) draws the same entries larger through
  * the same worn route (docs/plans/2026-09-26-redesign.md, section 5).
- * `data-occasion` is what the specs read the order from.
+ * `data-occasion` is what the specs read the order from, and what the worn
+ * control swaps: POST /calendar/:id/worn answers with this row whole.
  */
 export function OccasionRow(props: {
   entry: EntryView;

@@ -114,6 +114,11 @@ export function weekOf(anchor: IsoDate): { start: IsoDate; end: IsoDate } {
 /** An entry as a page draws it: with its collage's pieces, marked. */
 export type EntryView = CalendarEntry & { pieces: CollageGarment[] };
 
+/** An entry as a row draws it: with its pieces as of `today` (entryPieces). */
+export function entryView(entry: CalendarEntry, today: IsoDate): EntryView {
+  return { ...entry, pieces: entryPieces(entry, today) };
+}
+
 /**
  * A day's entries in occasion order (the stable sort keeps them as read
  * after that), each with its pieces as of `today` (entryPieces).
@@ -126,7 +131,7 @@ function entriesOn(
   return entries
     .filter((entry) => entry.day === date)
     .sort((a, b) => compareOccasions(a.occasion, b.occasion))
-    .map((entry) => ({ ...entry, pieces: entryPieces(entry, today) }));
+    .map((entry) => entryView(entry, today));
 }
 
 export function buildCalendarView(input: {

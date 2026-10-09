@@ -121,6 +121,23 @@ export async function findEntries(
   return entries;
 }
 
+/**
+ * One of the owner's entries as the week reads it (entriesSql over its day,
+ * `washOn` today as the week page passes it), so a row redrawn alone
+ * (POST /calendar/:id/worn) carries the marks the page would. One statement.
+ */
+export async function findEntry(
+  db: Queryable,
+  ownerId: number,
+  entry: { id: number; day: IsoDate },
+  today: IsoDate,
+): Promise<CalendarEntry | undefined> {
+  const { entries } = await selectScalars(db, {
+    entries: entriesSql(ownerId, entry.day, entry.day, { washOn: today }),
+  });
+  return entries.find((candidate) => candidate.id === entry.id);
+}
+
 /** An entry of a day as a picker reads it (entriesOfDaySql). */
 export interface DayEntry {
   id: number;
